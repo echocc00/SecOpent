@@ -38,3 +38,30 @@ def test_readme_mentions_m1_complete() -> None:
     assert "M1" in readme
     assert "knowledge-layer.md" in readme
     assert "docs/adapters/README.md" in readme
+
+
+def test_verification_doc_exists() -> None:
+    path = Path("docs/architecture/verification.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    # N/N oracle, canary, and the LLM boundary must be documented.
+    assert "N/N" in content
+    assert "Canary" in content or "canary" in content
+    assert "VerificationMethodRegistry" in content
+
+
+def test_yaml_dsl_doc_exists() -> None:
+    path = Path("docs/cases/yaml-dsl.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    # Nuclei-compatible base, no-eval AST, and the risk gate must be documented.
+    assert "Nuclei" in content
+    assert "eval" in content
+    assert "RiskAnalyzer" in content
+
+
+def test_readme_mentions_m2() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "M2" in readme
+    assert "verification.md" in readme
+    assert "docs/cases/yaml-dsl.md" in readme

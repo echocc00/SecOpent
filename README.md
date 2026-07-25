@@ -2,15 +2,15 @@
 
 Catalog-driven Agent-native authorized pentest workbench.
 
-> Status: **M1 complete** (knowledge layer + four-domain adapter pack). M0 foundation + deterministic spine ✅; M1 TestCatalog / CoverageMatrix / Intel / Adapter contracts / four-domain Adapter Pack (17 adapters) / UpdateManager / HealthMonitor / CoverageService ✅. Next: M2 (verification + case engine).
+> Status: **M2 complete** (verification + case engine). M0 foundation + deterministic spine ✅; M1 knowledge layer + four-domain adapter pack ✅; M2 oracle N/N (pentest-ai) + canary + self-hosted Interactsh + YAML case DSL (no-eval AST) + risk gate + case lifecycle + fixture runner + Python sandbox (seccomp) + evidence three-layer/redaction ✅. Next: M3 (model-driven logic testing).
 > Design: see `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
 
 ## Milestones
 
 - **M0** — foundation + deterministic spine (projects/scope/assessment/audit, PolicyEngine, SQLite WAL, Repository contract)
 - **M1** — knowledge layer + adapter pack (TestCatalog, CoverageMatrix, Intel + provenance, signed update bundles, health monitor, 17 adapters across asset/web/network/cloud, coverage gate)
-- **M2** — verification + case engine (oracle N/N, YAML case DSL, Python sandbox, risk gate) *(next)*
-- **M3** — model-driven logic testing
+- **M2** — verification + case engine (oracle N/N via pentest-ai, VerificationMethodRegistry, canary tokens, self-hosted Interactsh OOB, ground-truth range regression, YAML case DSL with no-eval AST interpreter, static risk gate, case lifecycle, fixture runner, seccomp Python sandbox, three-layer evidence + redaction)
+- **M3** — model-driven logic testing *(next)*
 - **M4** — agent interface + orchestration + report + web
 - **M5** — security hardening + Beta
 
@@ -19,6 +19,8 @@ Catalog-driven Agent-native authorized pentest workbench.
 - [Core boundaries (M0)](docs/architecture/core-boundaries.md)
 - [Knowledge layer](docs/architecture/knowledge-layer.md)
 - [Adapter pack (four domains)](docs/adapters/README.md)
+- [Verification / oracle](docs/architecture/verification.md)
+- [YAML case DSL](docs/cases/yaml-dsl.md)
 
 ## Quickstart
 
