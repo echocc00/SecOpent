@@ -7,7 +7,13 @@ from urllib.parse import urlsplit
 
 from ..common.canonical import canonical_digest, utc_now
 from ..common.errors import DomainValidationError
-from .normalize import normalize_domain, normalize_ip_or_network, normalize_port, normalize_url
+from .normalize import (
+    normalize_cloud_account,
+    normalize_domain,
+    normalize_ip_or_network,
+    normalize_port,
+    normalize_url,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +38,7 @@ class ScopeSnapshot:
     approved_by: str
     approved_at: datetime
     digest: str
+    cloud_accounts: tuple[str, ...] = ()
 
     def _domain_matches(self, rule: str, domain: str) -> bool:
         if rule.startswith("*."):
@@ -86,6 +93,28 @@ class ScopeSnapshot:
     def includes_port(self, value: int) -> bool:
         return normalize_port(value) in self.ports
 
+    def _cloud_account_excluded(self, normalized: str) -> bool:
+        for rule in self.exclude:
+            try:
+                if normalize_cloud_account(rule) == normalized:
+                    return True
+            except DomainValidationError:
+                # Rule is a network target (URL/IP/domain), not a cloud account.
+                continue
+        return False
+
+    def includes_cloud_account(self, value: str) -> bool:
+        """Return whether a cloud-account target (``provider:account_id``) is in scope.
+
+        Deny优先: an account listed in ``exclude`` is denied even if it also
+        appears in ``cloud_accounts``. The query value is normalized (provider
+        lower-cased, whitespace stripped) before comparison.
+        """
+        normalized = normalize_cloud_account(value)
+        if self._cloud_account_excluded(normalized):
+            return False
+        return normalized in self.cloud_accounts
+
 
 @dataclass(frozen=True, slots=True)
 class ScopeDraft:
@@ -94,6 +123,7 @@ class ScopeDraft:
     exclude: tuple[str, ...] = ()
     ports: tuple[int, ...] = (80, 443)
     limits: ScopeLimits = ScopeLimits(5.0, 3, 50_000)
+    cloud_accounts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.project_id.strip() or not self.include:
@@ -114,6 +144,9 @@ class ScopeDraft:
         include = tuple(sorted({self._normalize_target(item) for item in self.include}))
         exclude = tuple(sorted({self._normalize_target(item) for item in self.exclude}))
         ports = tuple(sorted({normalize_port(port) for port in self.ports}))
+        cloud_accounts = tuple(
+            sorted({normalize_cloud_account(item) for item in self.cloud_accounts})
+        )
         payload = {
             "id": snapshot_id,
             "project_id": self.project_id,
@@ -121,10 +154,12 @@ class ScopeDraft:
             "exclude": exclude,
             "ports": ports,
             "limits": asdict(self.limits),
+            "cloud_accounts": cloud_accounts,
             "approved_by": approved_by,
             "approved_at": approved_at,
         }
         return ScopeSnapshot(
             snapshot_id, self.project_id, include, exclude, ports,
             self.limits, approved_by, approved_at, canonical_digest(payload),
+            cloud_accounts,
         )

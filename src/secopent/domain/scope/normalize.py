@@ -50,3 +50,29 @@ def normalize_port(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
         raise DomainValidationError("port must be between 1 and 65535")
     return value
+
+
+def normalize_cloud_account(value: str) -> str:
+    """Normalize a cloud-account target of the form ``provider:account_id``.
+
+    Cloud adapters (prowler/trivy/kube-bench/checkov/scoutsuite) target cloud
+    accounts/images rather than network hosts, so they cannot be expressed as a
+    URL/IP/domain. The canonical form lowercases the provider and preserves the
+    account id verbatim (account ids are provider-specific: AWS 12-digit ids,
+    Azure UUIDs, GCP project slugs) e.g. ``AWS:123456789012`` -> ``aws:123456789012``.
+
+    Raises:
+        DomainValidationError: if the value is not ``provider:account_id`` with
+            a non-empty alphanumeric provider and non-empty account id.
+    """
+    raw = value.strip()
+    provider, sep, account = raw.partition(":")
+    if not sep:
+        raise DomainValidationError("cloud account must be provider:account_id")
+    provider = provider.strip().lower()
+    account = account.strip()
+    if not provider or not account:
+        raise DomainValidationError("cloud account provider and id must be non-empty")
+    if not provider.replace("-", "").replace("_", "").isalnum():
+        raise DomainValidationError("invalid cloud provider")
+    return f"{provider}:{account}"
