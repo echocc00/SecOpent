@@ -1,0 +1,1 @@
+INF] [dalfox] timed out after 60s while scanning https://example.com/

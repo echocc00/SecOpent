@@ -1,0 +1,2 @@
+{"type": "find-vulnerability", "message": "Reflected XSS detected", "data": "<script>alert(1)</script>", "param": "q", "url": "https://example.com/search?q=test", "severity": "high", "poc": "https://example.com/search?q=%3Cscript%3Ealert(1)%3C/script%3E"}
+{"type": "find-vulnerability", "message": "DOM XSS detected", "data": "document.write", "param": "name", "url": "https://example.com/page", "severity": "medium"}

@@ -1,0 +1,1 @@
+INF] [schemathesis] timed out after 60s while testing POST /api/users
