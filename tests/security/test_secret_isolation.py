@@ -1,7 +1,7 @@
 """TDD tests for SecretStore isolation (M5 Task 3, §12)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dc_field, fields
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 
 import pytest
@@ -18,7 +18,7 @@ _PLAINTEXT = "super-secret-api-key-123"
 
 @dataclass
 class _MemoryAuditRepo:
-    events: list[AuditEvent] = dc_field(default_factory=list)
+    events: list[AuditEvent] = field(default_factory=list)
 
     def add(self, e: AuditEvent) -> None:
         self.events.append(e)
