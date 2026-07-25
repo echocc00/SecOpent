@@ -1,0 +1,3 @@
+{"ip": "10.0.0.1", "port": 22, "host": "ssh.example.com"}
+{"ip": "10.0.0.1", "port": 80, "host": "www.example.com"}
+{"ip": "10.0.0.1", "port": 443, "host": "www.example.com"}

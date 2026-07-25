@@ -1,0 +1,3 @@
+{"host": "www.example.com", "source": "crtsh"}
+{"host": "api.example.com", "source": "virustotal"}
+{"host": "dev.example.com", "source": "alienvault"}

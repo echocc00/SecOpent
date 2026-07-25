@@ -1,0 +1,1 @@
+INF] [naabu] scan timed out after 60s on 10.0.0.1

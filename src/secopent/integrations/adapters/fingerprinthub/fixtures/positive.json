@@ -1,0 +1,3 @@
+{"url": "https://example.com", "fingerprints": ["Nginx", "WordPress"]}
+{"url": "https://admin.example.com", "fingerprints": ["phpMyAdmin"]}
+{"url": "https://ci.example.com", "fingerprints": ["Jenkins"]}

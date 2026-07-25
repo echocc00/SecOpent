@@ -1,0 +1,3 @@
+{"request":{"endpoint":"https://example.com/","method":"GET"},"depth":1}
+{"request":{"endpoint":"https://example.com/about","method":"GET"},"depth":2}
+{"request":{"endpoint":"https://example.com/admin","method":"GET"},"depth":2}

@@ -1,0 +1,2 @@
+{"url": "https://example.com", "status_code": 200, "title": "Example Domain", "webserver": "nginx", "tech": ["Nginx", "WordPress"]}
+{"url": "https://api.example.com", "status_code": 200, "title": "API", "webserver": "cloudflare", "tech": ["Cloudflare"]}
