@@ -1,0 +1,1 @@
+FATAL] [kube-bench] timed out after 600s while running CIS 1.1.x against node master-1

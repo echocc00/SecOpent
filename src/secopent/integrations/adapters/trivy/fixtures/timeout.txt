@@ -1,0 +1,1 @@
+FATAL] [trivy] scan timed out after 600s while scanning image alpine:3.18 (registry rate limit)

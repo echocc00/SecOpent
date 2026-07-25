@@ -1,0 +1,1 @@
+INF] [prowler] AWS scan timed out after 600s while evaluating check iam_user_mfa against account 123456789012

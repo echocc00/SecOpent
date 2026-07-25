@@ -1,0 +1,41 @@
+[
+  {
+    "CheckId": "iam_user_mfa",
+    "CheckTitle": "Ensure hardware MFA is enabled for the root account",
+    "Severity": "high",
+    "Status": "FAIL",
+    "Region": "us-east-1",
+    "AccountId": "123456789012",
+    "ResourceArn": "arn:aws:iam::123456789012:root",
+    "Description": "Root account without hardware MFA is at risk of credential compromise.",
+    "CheckType": ["IAM"],
+    "ServiceName": "iam",
+    "SubServiceName": "root"
+  },
+  {
+    "CheckId": "s3_bucket_public_read",
+    "CheckTitle": "Ensure S3 buckets do not allow public READ ACL",
+    "Severity": "critical",
+    "Status": "FAIL",
+    "Region": "us-west-2",
+    "AccountId": "123456789012",
+    "ResourceArn": "arn:aws:s3:::public-leaky-bucket",
+    "Description": "S3 bucket with public READ ACL exposes data to the internet.",
+    "CheckType": ["S3"],
+    "ServiceName": "s3",
+    "SubServiceName": "bucket"
+  },
+  {
+    "CheckId": "cloudtrail_multiregion_enabled",
+    "CheckTitle": "Ensure CloudTrail is enabled in all regions",
+    "Severity": "medium",
+    "Status": "PASS",
+    "Region": "global",
+    "AccountId": "123456789012",
+    "ResourceArn": "arn:aws:cloudtrail::123456789012:trail/multi",
+    "Description": "CloudTrail multi-region is enabled.",
+    "CheckType": ["CloudTrail"],
+    "ServiceName": "cloudtrail",
+    "SubServiceName": "trail"
+  }
+]

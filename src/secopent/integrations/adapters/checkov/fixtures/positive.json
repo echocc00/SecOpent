@@ -1,0 +1,55 @@
+{
+  "results": {
+    "failed_checks": [
+      {
+        "check_id": "CKV_AWS_20",
+        "check_name": "S3 Bucket has an ACL defined which allows public access",
+        "check_type": "terraform",
+        "file_path": "/iac/main.tf",
+        "file_abs_path": "/workspace/iac/main.tf",
+        "repo_file_path": "/iac/main.tf",
+        "resource": "aws_s3_bucket.public_leaky",
+        "guideline": "https://docs.bridgecrew.io/docs/cko-aws-20-s3-bucket-has-an-acl-defined-which-allows-public-access",
+        "check_class": "storage"
+      },
+      {
+        "check_id": "CKV_AWS_18",
+        "check_name": "Ensure the S3 bucket has access logging enabled",
+        "check_type": "terraform",
+        "file_path": "/iac/main.tf",
+        "file_abs_path": "/workspace/iac/main.tf",
+        "repo_file_path": "/iac/main.tf",
+        "resource": "aws_s3_bucket.no_logs",
+        "guideline": "https://docs.bridgecrew.io/docs/cko-aws-18-ensure-the-s3-bucket-has-access-logging-enabled",
+        "check_class": "logging"
+      },
+      {
+        "check_id": "CKV_AWS_23",
+        "check_name": "Ensure every security groups rule has a description",
+        "check_type": "terraform",
+        "file_path": "/iac/sg.tf",
+        "file_abs_path": "/workspace/iac/sg.tf",
+        "repo_file_path": "/iac/sg.tf",
+        "resource": "aws_security_group.open_ssh",
+        "check_class": "networking"
+      }
+    ],
+    "passed_checks": [
+      {
+        "check_id": "CKV_AWS_19",
+        "check_name": "Ensure all data stored in the S3 bucket is securely encrypted at rest",
+        "check_type": "terraform",
+        "file_path": "/iac/main.tf",
+        "resource": "aws_s3_bucket.encrypted"
+      }
+    ],
+    "skipped_checks": [],
+    "parsing_errors": []
+  },
+  "summary": {
+    "passed": 1,
+    "failed": 3,
+    "skipped": 0,
+    "parsing_errors": 0
+  }
+}
