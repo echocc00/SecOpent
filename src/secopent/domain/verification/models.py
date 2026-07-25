@@ -60,6 +60,18 @@ class VerificationStatus(StrEnum):
     INCONCLUSIVE = "inconclusive"
 
 
+class ReproductionStatus(StrEnum):
+    """Outcome of a single independent reproduction by the oracle backend.
+
+    ``SERVER_ERROR`` marks a 5xx / flaky-target attempt: it is counted as
+    inconclusive, never as a refutation.
+    """
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    SERVER_ERROR = "server_error"
+
+
 @dataclass(frozen=True, slots=True)
 class VerificationMethod:
     """Curated verification recipe for one vulnerability type.
