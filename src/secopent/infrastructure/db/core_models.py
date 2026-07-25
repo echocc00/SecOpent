@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from datetime import datetime
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
+
+from sqlalchemy import JSON, DateTime, ForeignKey, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -33,7 +35,9 @@ class CoreAssessment(CoreBase):
     __tablename__ = "core_assessments"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     project_id: Mapped[str] = mapped_column(ForeignKey("core_projects.id"), nullable=False)
-    scope_snapshot_id: Mapped[str] = mapped_column(ForeignKey("core_scope_snapshots.id"), nullable=False)
+    scope_snapshot_id: Mapped[str] = mapped_column(
+        ForeignKey("core_scope_snapshots.id"), nullable=False
+    )
     mode: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     active_plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

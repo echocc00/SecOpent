@@ -1,8 +1,9 @@
-# src/secopent/domain/audit/models.py
 from __future__ import annotations
+
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
+
 from ..common.canonical import canonical_json, utc_now
 from ..common.errors import DomainValidationError
 
@@ -49,7 +50,10 @@ class AuditEvent:
     def verify_chain(events: list[AuditEvent]) -> bool:
         previous = GENESIS_HASH
         for event in events:
-            expected_prev = previous.removeprefix("sha256:") if previous.startswith("sha256:") else previous
+            if previous.startswith("sha256:"):
+                expected_prev = previous.removeprefix("sha256:")
+            else:
+                expected_prev = previous
             if event.previous_hash != expected_prev:
                 return False
             body = {

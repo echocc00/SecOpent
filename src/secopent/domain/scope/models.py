@@ -1,9 +1,10 @@
-# src/secopent/domain/scope/models.py
 from __future__ import annotations
+
 import ipaddress
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from urllib.parse import urlsplit
+
 from ..common.canonical import canonical_digest, utc_now
 from ..common.errors import DomainValidationError
 from .normalize import normalize_domain, normalize_ip_or_network, normalize_port, normalize_url
@@ -40,7 +41,10 @@ class ScopeSnapshot:
 
     def _target_matches(self, rule: str, value: str) -> bool:
         if rule.startswith(("http://", "https://")):
-            return value.startswith(("http://", "https://")) and normalize_url(value).startswith(rule)
+            return (
+                value.startswith(("http://", "https://"))
+                and normalize_url(value).startswith(rule)
+            )
         try:
             network = ipaddress.ip_network(rule, strict=False)
         except ValueError:

@@ -1,15 +1,25 @@
-# tests/domain/test_assessments.py
 from __future__ import annotations
+
 import pytest
+
 from secopent.domain.assessments.models import (
-    Assessment, AssessmentStatus, Approval, ExecutionPlan, PlanStep,
+    Approval,
+    Assessment,
+    AssessmentStatus,
+    ExecutionPlan,
+    PlanStep,
 )
 from secopent.domain.common.errors import DomainValidationError
 from secopent.domain.policy.models import ExecutionMode, RiskClass
 
 
 def _step(key: str, **kwargs) -> PlanStep:
-    defaults = {"runner": "builtin:dns", "risk": RiskClass.LOW, "parameters": {}, "dependencies": ()}
+    defaults = {
+        "runner": "builtin:dns",
+        "risk": RiskClass.LOW,
+        "parameters": {},
+        "dependencies": (),
+    }
     defaults.update(kwargs)
     return PlanStep(key=key, **defaults)
 

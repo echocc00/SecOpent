@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from secopent.application.assessments import AssessmentService
 from secopent.domain.policy.models import ExecutionMode
 

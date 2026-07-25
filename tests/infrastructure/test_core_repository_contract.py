@@ -1,14 +1,17 @@
 from __future__ import annotations
-from datetime import datetime
+
 import pytest
 from sqlalchemy.orm import Session
+
 from secopent.domain.assessments.models import Assessment
 from secopent.domain.policy.models import ExecutionMode
 from secopent.domain.scope.models import ScopeDraft
 from secopent.infrastructure.db.core_models import CoreBase
 from secopent.infrastructure.db.sqlite import create_sqlite_engine
 from secopent.infrastructure.repositories.sqlalchemy_core import (
-    SqlAlchemyAuditRepository, SqlAlchemyScopeRepository, SqlAlchemyAssessmentRepository,
+    SqlAlchemyAssessmentRepository,
+    SqlAlchemyAuditRepository,
+    SqlAlchemyScopeRepository,
 )
 
 
@@ -21,7 +24,7 @@ def sqlite_session(tmp_path):
     # are satisfied for scope_snapshot.project_id='p' and
     # assessment.{project_id='p', scope_snapshot_id='s'} references.
     from secopent.domain.common.canonical import utc_now
-    from secopent.domain.projects.models import Project, ProjectStatus
+    from secopent.domain.projects.models import Project
     from secopent.infrastructure.db.core_models import CoreProject, CoreScopeSnapshot
     project = Project.create(project_id="p", name="Lab")
     session.add(CoreProject(

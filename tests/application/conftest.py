@@ -1,8 +1,11 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, field
+
 import pytest
-from secopent.domain.assessments.models import Assessment, ExecutionPlan, Approval
-from secopent.domain.audit.models import AuditEvent, GENESIS_HASH
+
+from secopent.domain.assessments.models import Approval, Assessment, ExecutionPlan
+from secopent.domain.audit.models import GENESIS_HASH, AuditEvent
 from secopent.domain.projects.models import Project
 from secopent.domain.scope.models import ScopeSnapshot
 

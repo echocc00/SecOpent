@@ -1,10 +1,12 @@
 from __future__ import annotations
-from secopent.application.scopes import ScopeService
+
 from secopent.application.audit import AuditService
+from secopent.application.scopes import ScopeService
 
 
 def test_freeze_scope_persists_snapshot_and_audits(memory_repositories):
-    snapshot = ScopeService(memory_repositories.scopes, AuditService(memory_repositories.audit)).freeze(
+    service = ScopeService(memory_repositories.scopes, AuditService(memory_repositories.audit))
+    snapshot = service.freeze(
         project_id="p", include=("https://example.test",), exclude=(),
         ports=(443,), approved_by="u",
     )

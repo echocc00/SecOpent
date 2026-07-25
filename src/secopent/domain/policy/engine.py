@@ -1,5 +1,5 @@
-# src/secopent/domain/policy/engine.py
 from __future__ import annotations
+
 from ..scope.models import ScopeSnapshot
 from .models import ActionRequest, ExecutionMode, PolicyDecision, RiskClass
 
@@ -18,6 +18,8 @@ def evaluate(
         return PolicyDecision(False, "SCOPE_DENIED")
     if request.risk not in approved_risks:
         return PolicyDecision(False, "RISK_NOT_APPROVED")
-    if request.risk in {RiskClass.ACTIVE, RiskClass.INTRUSIVE} and request.capability not in approved_capabilities:
+    if request.risk in {RiskClass.ACTIVE, RiskClass.INTRUSIVE} and (
+        request.capability not in approved_capabilities
+    ):
         return PolicyDecision(False, "CAPABILITY_NOT_APPROVED")
     return PolicyDecision(True, "ALLOWED")

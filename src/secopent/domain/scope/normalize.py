@@ -1,8 +1,10 @@
 # src/secopent/domain/scope/normalize.py
 from __future__ import annotations
+
 import ipaddress
 import posixpath
 from urllib.parse import SplitResult, urlsplit, urlunsplit
+
 from ..common.errors import DomainValidationError
 
 

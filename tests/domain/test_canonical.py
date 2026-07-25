@@ -1,7 +1,10 @@
 # tests/domain/test_canonical.py
 from __future__ import annotations
+
 from datetime import datetime
+
 import pytest
+
 from secopent.domain.common.canonical import canonical_digest, canonical_json, utc_now
 from secopent.domain.common.errors import DomainValidationError
 

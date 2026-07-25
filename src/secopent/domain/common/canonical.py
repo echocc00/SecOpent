@@ -1,10 +1,11 @@
-# src/secopent/domain/common/canonical.py
 from __future__ import annotations
+
 import hashlib
 import json
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from enum import Enum
+
 from .errors import DomainValidationError
 
 
@@ -13,7 +14,7 @@ def utc_now() -> datetime:
 
 
 def _default(value: object) -> object:
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     if isinstance(value, Enum):
         return value.value
@@ -21,9 +22,9 @@ def _default(value: object) -> object:
         if value.tzinfo is None:
             raise DomainValidationError("datetime must be timezone-aware")
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-    if isinstance(value, (tuple, list)):
+    if isinstance(value, tuple | list):
         return list(value)
-    if isinstance(value, (set, frozenset)):
+    if isinstance(value, set | frozenset):
         return sorted(value)
     raise DomainValidationError(f"unsupported canonical value: {type(value).__name__}")
 

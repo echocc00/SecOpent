@@ -1,5 +1,6 @@
 # tests/test_architecture_boundaries.py
 from __future__ import annotations
+
 import ast
 from pathlib import Path
 

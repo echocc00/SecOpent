@@ -1,6 +1,7 @@
-# tests/domain/test_scope.py
 from __future__ import annotations
+
 import pytest
+
 from secopent.domain.common.errors import DomainValidationError
 from secopent.domain.scope.models import ScopeDraft, ScopeLimits
 
@@ -41,5 +42,5 @@ def test_scope_limits_must_be_positive() -> None:
 def test_scope_snapshot_immutable() -> None:
     draft = ScopeDraft(project_id="p", include=("https://example.test",))
     snapshot = draft.freeze(snapshot_id="s", approved_by="u")
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         snapshot.include = ("other",)  # type: ignore[misc]

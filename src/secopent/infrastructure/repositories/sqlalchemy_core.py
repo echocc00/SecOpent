@@ -1,13 +1,20 @@
 from __future__ import annotations
-from datetime import UTC, datetime
+
+from datetime import UTC
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from ...domain.assessments.models import Assessment, AssessmentStatus, ExecutionPlan, Approval
-from ...domain.audit.models import AuditEvent, GENESIS_HASH
+
+from ...domain.assessments.models import Approval, Assessment, AssessmentStatus, ExecutionPlan
+from ...domain.audit.models import GENESIS_HASH, AuditEvent
 from ...domain.policy.models import ExecutionMode, RiskClass
 from ...domain.scope.models import ScopeLimits, ScopeSnapshot
 from ..db.core_models import (
-    CoreApproval, CoreAssessment, CoreAuditEvent, CoreExecutionPlan, CoreScopeSnapshot,
+    CoreApproval,
+    CoreAssessment,
+    CoreAuditEvent,
+    CoreExecutionPlan,
+    CoreScopeSnapshot,
 )
 
 

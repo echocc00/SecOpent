@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 import pytest
+
 from secopent.application.audit import AuditService
+from secopent.domain.common.errors import DomainValidationError
 
 
 def test_audit_service_chains_events(memory_repositories):
@@ -14,6 +17,6 @@ def test_audit_service_chains_events(memory_repositories):
 
 def test_audit_service_rejects_secret(memory_repositories):
     service = AuditService(memory_repositories.audit)
-    with pytest.raises(Exception):
+    with pytest.raises(DomainValidationError, match="secret"):
         service.record(actor="u", action="a", resource_type="r", resource_id="r1",
                        payload={"password": "x"})

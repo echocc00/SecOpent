@@ -1,6 +1,8 @@
 # tests/domain/test_normalize.py
 from __future__ import annotations
+
 import pytest
+
 from secopent.domain.common.errors import DomainValidationError
 from secopent.domain.scope.normalize import (
     normalize_domain,

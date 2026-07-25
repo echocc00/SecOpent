@@ -1,6 +1,8 @@
 # tests/domain/test_audit.py
 from __future__ import annotations
+
 import pytest
+
 from secopent.domain.audit.models import AuditEvent
 from secopent.domain.common.errors import DomainValidationError
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import uuid
+
 from ..domain.projects.models import Project
 from .ports.repositories import ProjectRepository
 

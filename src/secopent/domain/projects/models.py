@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+
 from ..common.canonical import utc_now
 from ..common.errors import DomainValidationError
 

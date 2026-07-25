@@ -1,5 +1,6 @@
 from __future__ import annotations
-from ..domain.audit.models import AuditEvent, GENESIS_HASH
+
+from ..domain.audit.models import GENESIS_HASH, AuditEvent
 from .ports.repositories import AuditRepository
 
 

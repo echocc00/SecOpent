@@ -1,7 +1,9 @@
 # src/secopent/domain/assessments/models.py
 from __future__ import annotations
+
 from dataclasses import dataclass, replace
 from enum import StrEnum
+
 from ..common.canonical import canonical_digest
 from ..common.errors import DomainValidationError
 from ..policy.models import ExecutionMode, RiskClass

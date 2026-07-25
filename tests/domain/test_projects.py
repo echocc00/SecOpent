@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import pytest
+
 from secopent.domain.common.errors import DomainValidationError
 from secopent.domain.projects.models import Project, ProjectStatus
 

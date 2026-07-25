@@ -1,5 +1,6 @@
 # src/secopent/domain/policy/models.py
 from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import StrEnum
 

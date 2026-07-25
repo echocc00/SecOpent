@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 import uuid
 from dataclasses import replace
+
 from ..domain.assessments.models import Assessment, AssessmentStatus, ExecutionPlan, PlanStep
 from ..domain.policy.models import ExecutionMode
 from .ports.repositories import AssessmentRepository
@@ -28,6 +30,10 @@ class AssessmentService:
             assessment_id=assessment_id, version=1, steps=steps,
         )
         self._repo.save_plan(plan)
-        updated = replace(assessment, status=AssessmentStatus.AWAITING_APPROVAL, active_plan_id=plan.id)
+        updated = replace(
+            assessment,
+            status=AssessmentStatus.AWAITING_APPROVAL,
+            active_plan_id=plan.id,
+        )
         self._repo.add(updated)
         return updated

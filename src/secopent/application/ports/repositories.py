@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from typing import Protocol
-from ...domain.assessments.models import Assessment, ExecutionPlan, Approval
+
+from ...domain.assessments.models import Approval, Assessment, ExecutionPlan
 from ...domain.audit.models import AuditEvent
 from ...domain.projects.models import Project
 from ...domain.scope.models import ScopeSnapshot
