@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<!-- malformed: unclosed <host> element -->
+<nmaprun scanner="nmap" version="7.94">
+  <host>
+    <address addr="10.0.0.1" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="443">
+        <state state="open"/>
+        <script id="ssl-heartbleed" output="VULNERABLE

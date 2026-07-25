@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- nmap scan with no open ports. -->
+<nmaprun scanner="nmap" args="nmap -sV -sC -oX - 10.0.0.2" start="1700000000" version="7.94">
+  <host starttime="1700000000" endtime="1700000010">
+    <status state="up" reason="syn-ack" reason_ttl="64"/>
+    <address addr="10.0.0.2" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="22">
+        <state state="closed" reason="conn-refused" reason_ttl="64"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="filtered" reason="no-response" reason_ttl="0"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>

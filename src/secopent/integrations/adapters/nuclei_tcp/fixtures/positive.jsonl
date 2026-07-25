@@ -1,0 +1,3 @@
+{"template-id": "ssl/heartbleed", "info": {"name": "SSL Heartbleed", "tags": ["ssl", "heartbleed"], "severity": "high"}, "matched-at": "10.0.0.1:443", "host": "10.0.0.1", "type": "ssl", "reference": ["https://nvd.nist.gov/vuln/detail/CVE-2014-0160"]}
+{"template-id": "dns/zone-transfer", "info": {"name": "DNS Zone Transfer", "tags": ["dns", "zone-transfer", "exposure"], "severity": "medium"}, "matched-at": "10.0.0.2:53", "host": "10.0.0.2", "type": "dns"}
+{"template-id": "CVE-2018-9995", "info": {"name": "DVR Credentials Exposure", "tags": ["rce", "exposure"], "severity": "critical"}, "matched-at": "10.0.0.3:8080", "host": "10.0.0.3", "type": "tcp", "reference": ["https://nvd.nist.gov/vuln/detail/CVE-2018-9995"]}

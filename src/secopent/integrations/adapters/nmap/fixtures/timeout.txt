@@ -1,0 +1,1 @@
+INF] [nmap] scan timed out after 60s while scanning 10.0.0.0/24

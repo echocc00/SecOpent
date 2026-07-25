@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- nmap -sV -sC -oX sample output: one up host with 3 open ports, one
+     NSE vuln script (ssl-heartbleed) referencing CVE-2014-0160. -->
+<nmaprun scanner="nmap" args="nmap -sV -sC -oX - 10.0.0.1" start="1700000000" version="7.94">
+  <host starttime="1700000000" endtime="1700000010">
+    <status state="up" reason="syn-ack" reason_ttl="64"/>
+    <address addr="10.0.0.1" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="www.example.com" type="user"/>
+    </hostnames>
+    <ports>
+      <port protocol="tcp" portid="22">
+        <state state="open" reason="syn-ack" reason_ttl="64"/>
+        <service name="ssh" product="OpenSSH" version="8.9p1" extrainfo="Ubuntu 3ubuntu0.1"/>
+        <script id="ssh-hostkey" output="2048 sha1:... (RSA)"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open" reason="syn-ack" reason_ttl="64"/>
+        <service name="http" product="nginx" version="1.18.0"/>
+      </port>
+      <port protocol="tcp" portid="443">
+        <state state="open" reason="syn-ack" reason_ttl="64"/>
+        <service name="http" product="nginx" version="1.18.0" tunnel="ssl"/>
+        <script id="ssl-heartbleed" output="VULNERABLE: CVE-2014-0160 - The heartbleed bug allows reading memory"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>
