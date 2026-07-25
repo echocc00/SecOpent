@@ -15,8 +15,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 
-from ..domain.cases.models import CaseDefinition, CaseStatus
+from ..domain.cases.models import CaseDefinition, CaseOrigin, CaseStatus
 from ..domain.common.errors import DomainError
+from ..domain.policy.models import RiskClass
 from .risk_analyzer import RiskAnalyzer
 
 # Signer signs a case's canonical payload bytes and returns a signature string.
@@ -44,6 +45,10 @@ class CasePermissionError(DomainError):
 
 class CaseTransitionError(DomainError):
     """Raised on an out-of-order lifecycle transition."""
+
+
+class CaseNotModelGeneratedError(DomainError):
+    """Raised when the model-generated fast path is applied to a non-model case."""
 
 
 def _signing_payload(case: CaseDefinition) -> bytes:
@@ -98,6 +103,27 @@ class CaseService:
         """Human-only: SIGNED -> PUBLISHED."""
         self._require_human(actor_role)
         return self._transition(self.get(case_id), CaseStatus.PUBLISHED)
+
+    def fast_track_model_generated(self, case_id: str) -> CaseDefinition:
+        """Deterministic fast path for cases generated from a SIGNED AppModel (§11.8).
+
+        A model-generated case inherits trust from the human-signed model, so it
+        auto-passes the risk gate and (for Passive/Low risk) auto-advances to
+        REVIEWED without a separate human review. Intrusive/Active cases still
+        stop at VALIDATED and require human review. This is a deterministic
+        policy (trust transfer), not an LLM judgment - signing/publishing remain
+        human-only via ``sign``/``publish``.
+        """
+        case = self.get(case_id)
+        if case.origin is not CaseOrigin.MODEL_GENERATED:
+            raise CaseNotModelGeneratedError(
+                f"case {case_id} is not model-generated (origin={case.origin.value})"
+            )
+        self._risk.enforce_publish(case)  # raises RiskPublishDenied / RiskUndeclared
+        validated = self._transition(case, CaseStatus.VALIDATED)
+        if case.risk in (RiskClass.PASSIVE, RiskClass.LOW):
+            return self._transition(validated, CaseStatus.REVIEWED)
+        return validated
 
     def _transition(self, case: CaseDefinition, to_status: CaseStatus) -> CaseDefinition:
         self._check_transition(case, to_status)

@@ -124,3 +124,62 @@ def test_cannot_sign_before_review(service: CaseService) -> None:
 def test_get_unknown_raises(service: CaseService) -> None:
     with pytest.raises(CaseNotFoundError):
         service.get("missing")
+
+
+# ---------------------------------------------------------------------------
+# model-generated fast path (M3 Task 11, §11.8)
+# ---------------------------------------------------------------------------
+
+
+def _model_generated_case(
+    *steps: CaseStep, risk: RiskClass = RiskClass.LOW
+) -> CaseDefinition:
+    from secopent.domain.cases.models import CaseOrigin
+
+    return CaseDefinition(
+        id="mg-1",
+        version="1.0.0",
+        author="logic-gen",
+        risk=risk,
+        target_type="http",
+        schema="s",
+        steps=tuple(steps),
+        origin=CaseOrigin.MODEL_GENERATED,
+    )
+
+
+def test_fast_track_low_risk_auto_reviews(service: CaseService) -> None:
+    # GET computes Low; from a signed model it auto-advances to REVIEWED.
+    service.create_draft(
+        _model_generated_case(CaseStep(id="s", action="http.request", spec={"method": "GET"}))
+    )
+    result = service.fast_track_model_generated("mg-1")
+    assert result.status is CaseStatus.REVIEWED
+
+
+def test_fast_track_intrusive_stops_at_validated(service: CaseService) -> None:
+    # oast computes Intrusive -> still needs human review (stops at VALIDATED).
+    service.create_draft(
+        _model_generated_case(
+            CaseStep(id="s", action="oast.wait", spec={"window": 30}),
+            risk=RiskClass.INTRUSIVE,
+        )
+    )
+    result = service.fast_track_model_generated("mg-1")
+    assert result.status is CaseStatus.VALIDATED
+
+
+def test_fast_track_rejects_non_model_generated(service: CaseService) -> None:
+    from secopent.application.cases import CaseNotModelGeneratedError
+
+    service.create_draft(_case())  # manual origin
+    with pytest.raises(CaseNotModelGeneratedError):
+        service.fast_track_model_generated("c1")
+
+
+def test_fast_track_enforces_risk_gate(service: CaseService) -> None:
+    service.create_draft(
+        _model_generated_case(CaseStep(id="s", action="shell.exec", spec={"cmd": "id"}))
+    )
+    with pytest.raises(RiskPublishDenied):
+        service.fast_track_model_generated("mg-1")
