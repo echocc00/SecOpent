@@ -91,3 +91,35 @@ def test_readme_mentions_m3() -> None:
     assert "M3" in readme
     assert "model-driven-logic.md" in readme
     assert "docs/appmodel/schema.md" in readme
+
+
+def test_interfaces_doc_exists() -> None:
+    path = Path("docs/architecture/interfaces.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    # MCP trust levels, forbidden tools, and the shared-service spine.
+    assert "McpToolRegistry" in content or "MCP" in content
+    assert "trust" in content
+    assert "execute_python" in content
+
+
+def test_case_studio_doc_exists() -> None:
+    path = Path("docs/web/case-studio.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    assert "CaseStudio" in content
+    assert "ModelBuilder" in content
+
+
+def test_openapi_doc_exists() -> None:
+    path = Path("docs/api/openapi.yaml")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    assert "openapi:" in content
+    assert "/findings" in content
+
+
+def test_readme_mentions_m4() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "M4" in readme
+    assert "interfaces.md" in readme

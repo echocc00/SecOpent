@@ -1,0 +1,105 @@
+openapi: 3.0.3
+info:
+  title: SecOpent API
+  version: 0.1.0
+  description: >
+    Command/query surface over the SecOpent Application Services. POST mutates
+    (idempotent via Idempotency-Key), GET reads. Long tasks stream status via SSE.
+    This documents the M4 baseline endpoints; the full router set wraps the same
+    services.
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+  /findings:
+    get:
+      summary: List findings (query)
+      responses:
+        "200":
+          description: A list of findings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Finding" }
+    post:
+      summary: Create a finding (command, idempotent)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FindingIn" }
+      responses:
+        "201":
+          description: Created (or idempotent replay)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Finding" }
+        "422":
+          description: Invalid payload
+  /findings/{finding_id}:
+    get:
+      summary: Get a finding
+      parameters:
+        - name: finding_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The finding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Finding" }
+        "404":
+          description: Not found
+  /assessments/{assessment_id}/events:
+    get:
+      summary: Stream assessment status (SSE long task)
+      parameters:
+        - name: assessment_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Server-sent events stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+components:
+  schemas:
+    FindingIn:
+      type: object
+      required: [title, asset]
+      properties:
+        title: { type: string }
+        asset: { type: string }
+        severity: { type: string, default: medium }
+        cwe:
+          type: array
+          items: { type: string }
+    Finding:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        asset: { type: string }
+        severity: { type: string }
+        cwe:
+          type: array
+          items: { type: string }
