@@ -341,9 +341,13 @@ def test_detection_mapping_rejects_empty_detection_type() -> None:
 def _sample_vulnerability(
     cvss: dict[str, tuple[float, Provenance]] | None = None,
 ) -> Vulnerability:
+    # Fixed timestamp so digest is deterministic across calls (avoids flaky
+    # test_vulnerability_digest_stable_for_same_inputs when utc_now() straddles
+    # a microsecond boundary).
+    fixed_now = datetime(2024, 6, 1, tzinfo=UTC)
     if cvss is None:
         cvss = {
-            "nvd": (7.5, _provenance(source="nvd")),
+            "nvd": (7.5, _provenance(source="nvd", fetched_at=fixed_now)),
         }
     return Vulnerability(
         canonical_id="CVE-2024-1234",
@@ -362,7 +366,7 @@ def _sample_vulnerability(
             active_exploitation=False,
         ),
         detection_mappings=(),
-        provenance=_provenance(source="nvd"),
+        provenance=_provenance(source="nvd", fetched_at=fixed_now),
     )
 
 
