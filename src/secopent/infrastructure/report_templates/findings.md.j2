@@ -1,0 +1,15 @@
+{% for f in findings %}
+### {{ f.title }}
+
+- **Severity**: {{ f.severity }}
+- **Asset**: {{ f.asset }}
+- **CWE**: {{ f.cwe | join(', ') }}
+- **CVE**: {{ f.cve | join(', ') }}
+- **Remediation**: {{ f.remediation }}
+- **Evidence**: {{ f.evidence }}
+- **Status**: {{ f.status }}
+
+{% endfor %}
+{% if not findings %}
+_No findings._
+{% endif %}

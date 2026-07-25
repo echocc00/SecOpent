@@ -1,0 +1,10 @@
+Coverage rate: {{ '%.0f' | format(coverage_rate * 100) }}%
+
+{% if uncovered_classes %}
+Uncovered required classes:
+{% for c in uncovered_classes %}
+- {{ c }}
+{% endfor %}
+{% else %}
+All required test classes covered.
+{% endif %}

@@ -1,0 +1,7 @@
+# {{ title }}
+
+Assessment: {{ assessment_id }}
+
+- Findings: {{ finding_count }}
+- Coverage: {{ '%.0f' | format(coverage_rate * 100) }}%
+- Completeness gate: {{ 'PASS' if completeness_ok else 'FAIL' }}
