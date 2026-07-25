@@ -11,3 +11,30 @@ def test_readme_points_to_catalog_driven_design() -> None:
 
 def test_core_boundaries_doc_exists() -> None:
     assert Path("docs/architecture/core-boundaries.md").is_file()
+
+
+def test_knowledge_layer_doc_exists() -> None:
+    path = Path("docs/architecture/knowledge-layer.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    # The four-sublayer structure and the regression gate must be documented.
+    assert "TestCatalog" in content
+    assert "CoverageMatrix" in content
+    assert "退化门禁" in content
+
+
+def test_adapters_doc_exists() -> None:
+    path = Path("docs/adapters/README.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    # The four coverage domains and the manifest contract must be documented.
+    for domain in ("asset", "web", "network", "cloud"):
+        assert domain in content
+    assert "AdapterManifest" in content
+
+
+def test_readme_mentions_m1_complete() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "M1" in readme
+    assert "knowledge-layer.md" in readme
+    assert "docs/adapters/README.md" in readme
