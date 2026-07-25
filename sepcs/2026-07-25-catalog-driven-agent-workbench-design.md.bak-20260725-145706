@@ -1,0 +1,995 @@
+# 目录驱动 Agent 渗透工作台设计规范
+
+- **状态**：已批准（V1 全架构 A）
+- **日期**：2026-07-25
+- **取代**：`2026-07-24-security-assessment-operations-platform-design.md`、`2026-07-25-agent-native-pentest-workbench-design.md`
+- **V1 范围**：全覆盖（Web/API + 网络主机 + 云容器 + 资产测绘）+ 模型驱动逻辑测试 + 全架构（分布式 Worker / 完整 Scoped Egress / Update Bundle / Case Studio 可视化）
+- **单人工期估算**：3-5 月
+- **用途约束**：仅用于合法授权渗透测试与防御性安全用途
+
+---
+
+## 1. 背景与推倒重来决策
+
+### 1.1 推倒重来的原因
+
+本项目已有两份设计：
+- 07-24《开源安全评估与安全运营协同平台设计》：MSSP 多租户评估运营平台（Provider/Customer/Workspace、RBAC+ABAC、客户门户、Wazuh/MISP/OpenCTI 连接器、长期 SOC 方向）。已落地 14 ORM 模型 + 115 测试，但多租户机制对单兵场景是悬重资产。
+- 07-25《Agent-native 渗透工作台设计》：单用户 Agent-native 方向（MCP-first、SQLite、DB Job Lease、冻结多租户）。方向正确但未吸收早期 curl 实测调研结论（MCP 生态采纳优先、OSV 主源、pentest-ai oracle 验证范式）。
+
+两份设计共存导致文档碎片化、概念债务累积、无单一权威设计。本轮**推倒重来**：搁置 07-24 多租户遗产和 07-25 的 M0-M5 骨架，从当前需求出发做一份干净的系统设计，复用已有调研结论但不受旧代码约束。
+
+### 1.2 核心决策清单（本轮确立）
+
+| # | 决策 | 选项 |
+|---|---|---|
+| 1 | 产品定位 | Agent-native、单用户、全覆盖渗透工作台 |
+| 2 | V1 覆盖 | 全覆盖（Web/API + 网络主机 + 云容器 + 资产测绘） |
+| 3 | 架构脊柱 | 混合：框架铺路 + agent 驾驶 + Policy 刹车 + 人审批 |
+| 4 | 覆盖责任方 | TestCatalog（产品 IP），agent 只加不减 |
+| 5 | 验证责任方 | oracle N/N（确定性），LLM 永不裁决 |
+| 6 | 质量责任方 | 确定性 Quality Gates，LLM 无关 |
+| 7 | 业务逻辑覆盖 | 三层拆分，第二/三层模型驱动自动执行（V1 含） |
+| 8 | 建模治理 | LLM proposes, human disposes, product executes；人签名 |
+| 9 | MCP 策略 | 采纳优先（cve-mcp-server / mcp-security-hub）+ 自写编排 tool |
+| 10 | 漏洞情报源 | OSV 主源（NVD 国内 503）+ KEV + EPSS |
+| 11 | 知识层开源分层 | 聚合层 MIT 开源，策展层产品 IP（V1 轻策展） |
+| 12 | 覆盖率退化门禁 | 选项 D：0 容忍 + override-with-reason |
+| 13 | POC 格式 | Nuclei YAML 基础 + 验证扩展（采纳不重造） |
+| 14 | V1 交付范围 | A 全架构 |
+
+---
+
+## 2. 产品定位与边界
+
+### 2.1 定位
+
+面向授权渗透测试的、Agent-native、单用户、全覆盖渗透工作台。Agent 经 MCP 端到端编排侦察->扫描->验证->报告，确定性 Policy Engine 约束，人审批高风险。
+
+- **目标用户**：个人渗透测试者 / 红队单兵
+- **技术路线**：集成编排现有开源引擎（不自研扫描内核）；MCP 层采纳优先
+- **部署**：Lite（2C2G 控制节点 + 远程 Worker）/ Standalone（4C8G 推荐同机全栈）
+
+### 2.2 V1 覆盖边界（全覆盖）
+
+| 域 | V1 覆盖 | V1 不做 |
+|---|---|---|
+| Web/API | 外网/Web 应用/API 安全测试、指纹、爬取、注入、认证、配置错误 | 无线/移动二进制 |
+| 网络与主机 | 端口/服务/OS、漏洞脚本、弱 TLS、管理界面 | 自动提权/横向/持久化 |
+| 云与容器 | AWS/阿里云配置审计、容器/IaC 扫描、K8s 基线 | 云 IAM 全链路、AD 全链路 |
+| 资产测绘 | 子域、IP/CIDR、TLS、HTTP 可达、技术栈、关系图 | 大规模互联网测绘 |
+| 横切 | 漏洞情报实时同步、自定义 POC、无害化验证、复测、报告 | 多租户 SaaS、插件市场、K8s 调度、AI 自动改目标 |
+
+未来扩展只能作为独立 Capability Pack，仍受 Scope/Policy 约束。
+
+---
+
+## 3. 架构脊柱：三方分工
+
+### 3.1 混合模型（非纯 agent，非纯框架）
+
+| 谁 | 拥有 | 不拥有 |
+|---|---|---|
+| **框架（产品）** | 阶段序列（侦察->枚举->扫描->验证->报告）、覆盖契约、门禁、安全护栏 | 具体调哪个工具/参数/何时算"够" |
+| **Agent** | 阶段内决策：选工具/参数/目标迭代、追查线索、提议新 Plan Version、写 POC 草稿、判误报 | 改 scope、绕门禁、执行未批准高风险、发布 POC、签发 Finding |
+| **人** | 审批 scope、plan、Active/Intrusive 动作、超 autopilot 包络的 Plan Version、签 POC、终审 Finding | -- |
+| **Policy Engine** | 每个动作前强制校验：scope/DNS/risk/capability/budget/time；Deny 优先；Destructive 永拒 | -- |
+
+### 3.2 覆盖契约（保证全覆盖不靠 agent 自觉）
+
+Phase 5 Report 的前置条件（框架硬卡，agent 无法绕过）：
+- 资产测绘：每个 in-scope 域名有 IP/端口/服务/URL/技术栈节点
+- Web/API：每个 Web 资产跑过 ≥1 指纹 + ≥1 漏扫
+- 网络主机：每个 IP/端口跑过 ≥1 服务识别 + NSE
+- 云/容器：若发现云/容器资产，跑过配置审计
+- 验证：0 个未验证 Candidate（每个 Confirmed 都过 oracle N/N）
+- 证据：每个 Confirmed Finding 有不可变 Evidence + 版本快照
+
+### 3.3 不选极端的理由
+
+- 纯 agent-driven（pentest-ai/PentestGPT 式）：覆盖靠 agent 自觉，全覆盖不可保证
+- 纯框架驱动（reNgine/Faraday 式）：agent 退化为参数填写器，失去 agent-native 价值
+- **混合框架脊柱**：框架保证覆盖+安全+可复现，agent 贡献推理和自适应
+
+---
+
+## 4. 目录驱动覆盖（核心差异化）
+
+### 4.1 问题与修正
+
+混合模型若覆盖契约只检查"每个资产跑过 ≥1 次扫描"（广度），不检查"已知漏洞类是否都覆盖"（深度），则深度覆盖依赖 LLM 知不知道某测试类--结果不稳定、不可控、无竞争力。
+
+修正：**把"测什么"的知识从 LLM 移到产品内的版本化 TestCatalog**。
+
+### 4.2 TestCatalog
+
+产品自有的、版本化的"该测什么"知识库，独立于 LLM：
+```
+Web 应用资产 -必修-> OWASP Top 10 + CWE 映射的 Nuclei tag 集 + 配置错误 + 技术栈专属
+API 资产    -必修-> REST/GraphQL/OpenAPI fuzz + 认证 + 参数污染 + 批量赋值
+IP/端口资产  -必修-> 服务识别 + NSE 漏洞类 + 弱 TLS + 默认凭证
+云账户资产   -必修-> CIS 基线（Prowler/ScoutSuite 检查项全集）
+容器/K8s 资产-必修-> 镜像扫描（Trivy）+ kube-bench + IaC（checkov）
+自定义 POC registry（签名、版本化）
+```
+
+来源：nuclei-templates（git pull）+ nmap NSE + Prowler/ScoutSuite + Trivy/kube-bench/checkov + 用户/社区自定义 POC，全部版本化，每次 Assessment 固定快照。
+
+### 4.3 修正后的分工
+
+| 谁 | 拥有 | 关键约束 |
+|---|---|---|
+| TestCatalog（产品） | "必测什么"的知识，版本化、LLM 无关 | 产品护城河，不是 LLM 职责 |
+| 框架 | 按 catalog 对每个资产强制排课必修测试类 | 覆盖契约硬卡"0 个未执行必修类才能结题" |
+| Agent | 只能 ADD：参数化、优先级、追查、提议自定义 POC、判误报、写报告叙述 | **不能 SUBTRACT 必修类** |
+| Policy/人 | 同前 | -- |
+
+### 4.4 覆盖率评估方法（不靠 LLM，靠权威框架映射）
+
+把 TestCatalog 映射到权威参考框架，算覆盖率，每版 catalog 附带覆盖率报告：
+
+| 域 | 参考框架 | 计量 |
+|---|---|---|
+| Web | OWASP WSTG v4.2（94 用例）+ OWASP Top 10 (2021) | 映射用例数/总数 |
+| API | OWASP API Top 10 (2023) | 10 类全覆盖 |
+| 网络/主机 | PTES + NIST SP 800-115 | 阶段/控制项覆盖 |
+| 云 | CIS Benchmarks（per provider） | 检查项覆盖 |
+| 容器/K8s | CIS Docker/Kubernetes Benchmark | 检查项覆盖 |
+| 横切 | CWE 分类 | 类别映射 |
+
+每个参考条目要求 catalog 有 ≥1 测试类映射，否则记为 known gap。覆盖率是 LLM 无关的、可审计的数字。
+
+### 4.5 集成项目能力矩阵（诚实评估）
+
+| 测试类 | 集成项目 | 覆盖度 | 能否满足 |
+|---|---|---|---|
+| 已知 CVE/漏洞 | nuclei-templates（~1 万模板） | 高 | ✅ |
+| 配置错误/暴露面板 | nuclei + Prowler/ScoutSuite | 高 | ✅ |
+| 云基线 | Prowler/ScoutSuite（CIS 全集） | 高 | ✅ |
+| 容器/IaC/K8s | Trivy/kube-bench/checkov | 高 | ✅ |
+| 服务/网络漏洞 | nmap NSE | 中高 | ✅ |
+| Web 技术测试 | nuclei tags + 自定义 POC | 中（~70-85% WSTG） | ⚠️ 需自定义 POC 补 |
+| 业务逻辑/认证链/上下文相关 | 模型驱动（见 §4.6） | 可确定覆盖 | ✅ 三层拆分 |
+| 0-day/未知 | -- | 无产品能覆盖 | ❌ 超出范围 |
+
+### 4.6 业务逻辑三层拆分
+
+OWASP WSTG-BUSL 给方法论不给模板（端点和顺序是 this-app-specific）。
+
+| 层 | 子类 | catalog 覆盖 | 执行方式 | 裁决 |
+|---|---|---|---|---|
+| 第一层 通用模式 | IDOR、参数篡改提权、MFA 跳过、弱凭证、功能级越权 | ✅ 必修类 | 框架自动执行模板 | oracle |
+| 第二层 应用工作流 | 状态机跳步、金额/数量操纵、竞态、业务规则绕过、信任边界 | ✅ 方法论门禁 + **模型驱动自动执行** | 模型生成 7 类测试，框架自动跑 | oracle |
+| 第三层 上下文相关 | 业务语境相关（转账在银行 vs 游戏语义不同） | ✅ 方法论门禁 + 模型驱动 | 同上 | oracle |
+
+**第二/三层用模型驱动自动执行**（见 §11），不靠人 ad hoc。
+
+### 4.7 诚实的边界保证
+
+- **保证**：所有映射到参考框架的确定性测试类都被执行，0 漏跑；覆盖率可审计
+- **不保证**：0-day/未知
+- 产品承诺是"不漏已知测试类"，不是"找出所有漏洞"
+
+### 4.8 全流程确定性质量门禁（LLM 无关）
+
+| 阶段 | 确定性门禁 | LLM 角色（仅提议） |
+|---|---|---|
+| 侦察 | 资产图完整性清单 + DNS/HTTP 交叉验证 + 规范化去重 | 选 wordlist、判定"够不够"（清单硬卡） |
+| 枚举 | per-asset 枚举清单 | -- |
+| 扫描 | catalog 覆盖矩阵：0 个未执行必修类 | 参数化、优先级 |
+| 验证 | oracle N/N 复现 + 不可变证据（SHA256） | 提议验证手法（oracle 裁决） |
+| 聚合 | 确定性指纹去重 + CVSS 计算定级 | 可建议调 severity，人审 |
+| 报告 | 固定模板 + 结构化记录自动生成 + 每声明->evidence_id + 每数字->查询 + 覆盖矩阵全绿 | 仅可选执行摘要润色，人审 |
+
+### 4.9 LLM 禁区
+
+- ❌ 标记 Finding Confirmed（只有 oracle 能）
+- ❌ 定 severity（CVSS 计算）
+- ❌ 报告数字（自动从 DB 算）
+- ❌ 判定覆盖完成（覆盖矩阵算）
+- ❌ 证据完整性（SHA256 校验）
+- ❌ 改 scope / 绕门禁
+
+---
+
+## 5. 领域模型核心
+
+### 5.1 核心实体
+
+```
+Project -> ScopeDraft -> ScopeSnapshot (immutable, sha256 digest)
+   |
+   +-> Assessment -> ExecutionPlan -> PlanStep -> Approval
+              |                              |
+              +-> Job -> ExecutionPermit (签名短时, 绑 Worker/Scope/Plan/Capability/预算)
+                    |
+                    +-> ToolRun / CaseRun -> AssetGraph + Observation + Evidence
+                                                  |
+                                                  +-> CandidateFinding -> Validation(oracle N/N) -> ConfirmedFinding -> Report
+```
+
+### 5.2 关键实体
+
+- **ScopeSnapshot**：不可变 + digest；Deny 优先于 Allow；DNS 解析后二次校验防 rebinding
+- **Assessment 固定全版本快照**：scope/plan/policy/intel/case_registry/tool_registry/catalog/app_model/engine 版本，历史任务不漂移
+- **ToolDefinition / CaseDefinition**：版本化 registry，镜像 digest 固定，Agent 只能填 Schema 参数不能注入任意 CLI
+- **AssetNode / AssetEdge**：关系表表达（Domain->IP->Port->Service->URL->Endpoint->Technology），不引入图数据库
+- **Finding 流水线**：Tool Result -> Observation -> Candidate -> Validation(oracle N/N) -> Confirmed；版本匹配不直接确认
+- **Evidence**：内容寻址 CAS（`sha256/<prefix>/<digest>`），RAW/REDACTED/SUMMARY 三层，脱敏生成新对象不覆盖
+- **TestCatalog + CoverageMatrix**：版本化，per-Assessment 快照
+- **AppModel**：版本化、签名、per-Assessment 快照
+- **VerificationMethodRegistry**：漏洞类型 -> 验证方法，策展版本化
+- **Vulnerability / AffectedProduct / ExploitationSignal / DetectionMapping**：情报实体，每字段保留 provenance
+- **AuditEvent**：previous_event_hash / event_hash 链（篡改可检测）
+- **SecretMetadata**：任务只用 `secret_ref`，明文不入库/Prompt/日志/Evidence/报告
+
+### 5.3 与 07-25 的关键差异
+
+- 砍掉 Provider/Customer/Workspace 多租户层级
+- 四覆盖域作为一等 Adapter Pack（非"后续 Capability Pack"）
+- 验证层显式采纳 pentest-ai oracle N/N 复证范式
+- 新增 TestCatalog / CoverageMatrix / AppModel / VerificationMethodRegistry
+- MCP 层采纳优先（非自写门面）
+
+---
+
+## 6. 架构分层
+
+### 6.1 五层架构
+
+```
++------------------------------------------------------------------+
+| 接口层  MCP(自写编排tool + 采纳cve-mcp-server/mcp-security-hub)   |
+|         CLI | Web(Case Studio/审批中心/Findings/报告) | OpenAPI   |
++------------------------------------------------------------------+
+| 控制平面                                                          |
+|  +- 编排子层 ---------------------------------------------------+ |
+|  | Planner(确定性DAG) | Orchestrator(调度/Lease/重试/预算/幂等) | |
+|  | Policy Engine(确定性:scope/DNS/risk/capability/budget/time; | |
+|  |   Deny优先; Destructive永拒) | Approval/Autopilot(双模式)   | |
+|  | * Quality Gates(确定性LLM无关:覆盖矩阵/oracle/去重/可追溯)  | |
+|  +-------------------------------------------------------------+ |
+|  +- 应用服务子层 -----------------------------------------------+ |
+|  | Project|Scope|Assessment|Plan|Approval|AssetGraph|Finding   | |
+|  | Evidence|Report|Retest|Audit                                 | |
+|  +-------------------------------------------------------------+ |
++------------------------------------------------------------------+
+| * 知识层（产品护城河，LLM 无关）                                  |
+|   TestCatalog | CoverageMatrix(OWASP/CIS映射) | AppModel |       |
+|   ModelRegistry | LogicTestGenerator(模型->7类测试) |            |
+|   DriftDetector | Case Registry | Tool Registry |                |
+|   VerificationMethodRegistry | Intel Store(OSV主源+KEV+EPSS)     |
++------------------------------------------------------------------+
+| 执行平面                                                          |
+|   Worker Agent(注册/心跳/Lease) | Executors(Container/Builtin)   |
+|   Case Engine(YAML AST + Python Sandbox) | Tool Containers       |
+|   Scoped Egress(HTTP proxy / TCP netns+nftables) | Permit(签名)  |
++------------------------------------------------------------------+
+| 基础设施                                                          |
+|   DB(SQLite WAL/PostgreSQL) | CAS(Local/S3,内容寻址证据) |       |
+|   Secret Store(keyring/加密文件/KMS; secret_ref only) |          |
+|   Signing(Ed25519) | Update Bundles(tar.zst+签名,intel/case/tool/| 
+|   model/curation同构) | Audit(hash chain) | Telemetry            |
++------------------------------------------------------------------+
+   * = 确定性脊柱，LLM 无关，结果质量的责任方
+```
+
+### 6.2 确定性脊柱（LLM 无关，质量责任方）
+
+`Planner + Policy Engine + Quality Gates + TestCatalog + CoverageMatrix + AppModel + LogicTestGenerator + VerificationMethodRegistry + OracleEngine`
+
+这九个模块是结果质量的责任方，全部确定性、可审计、可复现。LLM 关掉仍能跑出完整基线报告。
+
+### 6.3 各层职责
+
+| 层 | 职责 | 关键模块 |
+|---|---|---|
+| 接口层 | agent/人/脚本统一入口；MCP 采纳优先 | MCP Server、CLI、Web Case Studio、OpenAPI |
+| 控制平面-编排 | 确定性脊柱：规划、调度、策略、门禁 | Planner、Orchestrator、Policy Engine、Approval/Autopilot、Quality Gates |
+| 控制平面-应用服务 | 领域用例协调 | Project/Scope/Assessment/Asset/Finding/Evidence/Report/Retest/Audit |
+| 知识层 | 产品护城河：测什么+怎么测+验什么 | TestCatalog、CoverageMatrix、AppModel、ModelRegistry、LogicTestGenerator、DriftDetector、Case/Tool Registry、VerificationMethodRegistry、Intel Store |
+| 执行平面 | 隔离执行工具/用例 | Worker Agent、Executors、Case Engine、Tool Containers、Scoped Egress、Permit |
+| 基础设施 | 持久化、证据、密钥、签名、更新、审计 | DB、CAS、Secret Store、Signing、Update Bundles、Audit、Telemetry |
+
+### 6.4 关键流：一次 Assessment 穿过各层
+
+1. MCP: agent 调 `assessment_start`
+2. 控制平面-编排: Planner 从 TestCatalog（资产类型->必修类）+ AppModel（逻辑测试）生成确定性 DAG
+3. 控制平面-编排: Policy Engine 校验 scope/risk；Active/Intrusive -> 人审批
+4. 执行平面: Orchestrator 把 Job 租给 Worker；Worker 持 Permit 在容器+scoped egress 内跑工具/用例
+5. 执行平面: Worker 返回 Observation + Evidence（写 CAS）
+6. 知识层: CoverageMatrix 更新；Finding Correlation 确定性指纹去重
+7. 控制平面-编排: Quality Gate -- oracle N/N 复证 Candidate；覆盖矩阵校验
+8. 控制平面-编排: 覆盖矩阵全绿 + 0 未验证 -> 允许出报告
+9. 控制平面-应用服务: Report 从结构化记录+证据渲染；LLM 仅可选润色摘要
+10. 基础设施: Audit 全程 hash chain
+
+### 6.5 依赖方向（clean architecture）
+
+```
+interfaces -> application -> domain(含知识层领域概念)
+infrastructure / execution / integrations 通过 ports/contracts 接入
+domain 不反向依赖基础设施（不导入 FastAPI/SQLAlchemy/Docker/MCP/httpx）
+```
+
+### 6.6 MCP 采纳策略
+
+| MCP tool 来源 | 采纳方式 |
+|---|---|
+| 编排专有（recon/scan/get_result/make_poc/verify/assessment_*/approval_*） | 自写 |
+| 漏洞情报（CVE 分诊/EPSS/KEV/补丁） | 采纳 cve-mcp-server |
+| 底层扫描（nuclei/nmap，需直暴露给 agent 时） | 采纳 mcp-security-hub 的 Docker MCP 容器 |
+| pentest-ai oracle 验证范式 | 参考实现，集成进 Quality Gates |
+
+---
+
+## 7. 知识层深设计
+
+### 7.1 内部结构（四子层）
+
+```
+知识层
++-- 外部聚合子层（Aggregation）--自动同步，产品不著述只搬运
+|   +- 引擎模板镜象：nuclei-templates / nmap NSE / Prowler / ScoutSuite / Trivy-DB / kube-bench / checkov
+|   +- 情报 feeds：OSV / CISA KEV / EPSS / NVD(代理) / CWE / GitHub Advisory
++-- 策展子层（Curation）--产品 IP，人工+半自动维护
+|   +- TestCatalog（资产类型 -> 必修测试类映射）
+|   +- CoverageMatrix（OWASP WSTG/Top10/CIS/PTES 条目 -> 测试类映射 + 覆盖率报告）
+|   +- Tool Registry（工具 manifest/schema/parser）
+|   +- LogicTestGenerator 策略库（7 类测试生成算法）
+|   +- VerificationMethodRegistry（漏洞类型 -> 验证方法）
++-- 社区/用户子层（Community）
+|   +- Custom POC Registry（签名、审核、版本化）
+|   +- AppModel Registry（per-app，用户签名）
++-- 参考框架子层（Reference）--缓慢更新
+    +- OWASP WSTG/Top10、CIS Benchmarks、PTES、NIST 800-115、CWE
+```
+
+### 7.2 来源全景
+
+| Registry | 来源 | 获取 | 频率 | 许可证 | 谁著述 |
+|---|---|---|---|---|---|
+| nuclei-templates | projectdiscovery/nuclei-templates | git pull | 每日 | MIT | 上游 PD |
+| nmap NSE | nmap 发行版 | bundled | 跟版本 | GPL（独立进程） | 上游 |
+| Prowler | prowler-cloud/prowler | git pull | 每周 | Apache-2.0 | 上游 |
+| ScoutSuite | nccgroup/ScoutSuite | git pull | 每周 | GPL-2（独立进程） | 上游 |
+| Trivy-DB | aquasecurity/trivy-db | git/OCI | 每日 | Apache-2.0 | 上游 |
+| kube-bench / checkov | aquasec / bridgecrewio | git pull | 每月/每周 | Apache/MIT | 上游 |
+| OSV | api.osv.dev | REST 增量 | 6h | CC-BY-4.0 | 上游 |
+| CISA KEV | cisa.gov JSON | 下载 | 6h | 公共 | CISA |
+| EPSS | first.org | CSV | 每日 | CC-BY-SA-4.0 | FIRST |
+| NVD | nvd.nist.gov（国内代理） | REST 增量 | 6-12h | 公共 | NIST |
+| CWE / GHSA | mitre / github | 下载/git | 每月/每日 | 公共/CC-BY | 上游 |
+| TestCatalog 映射 | 产品策展 | 内部 | 月评审 | 产品 IP | 产品+社区 |
+| CoverageMatrix 映射 | 产品策展 | 内部 | 月评审 | 产品 IP | 产品+社区 |
+| Tool Registry | 产品策展 | 内部 | 跟工具版本 | 产品 IP | 产品 |
+| LogicTestGenerator 策略 | 产品策展 | 内部 | 季评审 | 产品 IP | 产品 |
+| VerificationMethodRegistry | 产品策展 | 内部 | 季评审 | 产品 IP | 产品 |
+| Custom POC | 用户/社区 | 提交+审核+签名 | 持续 | 各异 | 社区 |
+| AppModel | 用户 | 建模+签名 | per-app | 用户 | 用户 |
+| OWASP/CIS/PTES 参考 | 权威组织 | 下载 | 年度 | 公共 | 上游组织 |
+
+**关键洞察**：产品不著述模板（上游 nuclei/Prowler 团队的活），产品做聚合 + 映射 + 覆盖量化。单兵策展负担从"著述一万条规则"降到"维护映射表"。
+
+### 7.3 维护更新机制
+
+**自动同步（外部聚合子层）**：Update Manager 按各源频率增量拉取；git pull 记 commit SHA，REST 用 last_modified 游标；入 Staging DB -> 签名校验 -> schema/兼容检查 -> 变更预览 -> 原子激活 -> 保留旧快照可回滚。
+
+**策展维护（策展子层）**：TestCatalog 评估新 nuclei tag 是否纳入必修；CoverageMatrix 在 OWASP WSTG 新版时重映射；Tool Registry 跟工具版本。策展变更走签名 bundle 发布，社区可 PR。
+
+**质量保障**：每个 TestCatalog 映射条目要求 ≥1 fixture；CoverageMatrix 覆盖率作为发布门禁；策展变更需通过契约测试；社区贡献需审核+签名。
+
+**知识层健康监控（KnowledgeHealthMonitor）**：
+
+| 检测 | 告警条件 |
+|---|---|
+| 源停更 | nuclei-templates 超 7 天无新 commit |
+| 策展滞后 | nuclei 新增 100 tag 但 TestCatalog 未映射 |
+| 覆盖率退化 | 新版覆盖率 < 旧版 |
+| 源失效 | OSV API 不可达 -> 降级缓存 + 告警 |
+| 签名失效 | bundle 签名校验失败 |
+
+### 7.4 保证最新 + 有竞争力
+
+**保证最新**：自动增量同步 + 漂移检测告警 + 在线/离线签名 bundle 分发 + per-Assessment 版本快照。
+
+**保证竞争力**：
+
+| 维度 | 机制 |
+|---|---|
+| 聚合广度 | 7 引擎 + 6 情报源 + 4 参考框架 |
+| 策展深度 | CoverageMatrix 把"聚合"变"可量化覆盖" |
+| 逻辑测试独有 | AppModel + LogicTestGenerator，市面无确定性逻辑覆盖 |
+| 社区飞轮 | Custom POC + AppModel 越用越丰富 |
+| 可审计 | 覆盖率报告比黑盒"AI 渗透"有说服力 |
+| 更新频率 | 自动同步不滞后上游 |
+
+**诚实限制**：策展滞后窗口 1-4 周；竞争力依赖策展投入；单兵 vs 商业平台靠上游借力+自动化+社区弥补。
+
+### 7.5 覆盖率退化门禁（选项 D）
+
+作用于策展子层新版本发布。新版覆盖率 < 旧版 -> 阻止发布（或带理由 override）。
+
+**触发场景**：上游模板移除、上游许可证变更、工具停更（Pocsuite3 已发生）、映射错误、误报清洗、OWASP 框架升级、产品主动收窄。
+
+**影响**：发布决策、发布速度、用户信任、审计留痕、历史评估不受影响（钉旧快照）、竞争力定位、V1 特殊价值（上游变动告警器）。
+
+**规则**：0 容忍为默认（覆盖率单调非降），但留 override 逃生口应对合理回退（上游许可证变更、工具停更、FP 清洗），每次 override 必须文档化理由 + 补救路线图 + 审计留痕。
+
+### 7.6 开源分层决策
+
+- **聚合层 MIT 开源**：V1 主要用上游开源内容和 POC
+- **策展层产品 IP**：V1 轻策展（只做最小映射让覆盖矩阵能算），深度策展后置
+- **社区可 PR 策展映射**：变相开源，聚社区飞轮
+
+---
+
+## 8. 四域 Adapter Pack
+
+### 8.1 统一契约（四域共用）
+
+每个 Tool Adapter = `manifest.yaml + Dockerfile(digest固定,non-root,cap-drop ALL,no-new-privs) + parser + run.sh + fixtures + 契约测试`。
+
+```yaml
+id: projectdiscovery.nuclei
+version: 1.0.0
+adapter_api_version: v1
+license: MIT
+upstream: {name: nuclei, version: 3.11.0, digest: sha256:...}
+risk_class: active_scan
+coverage_domain: [web, api]
+input_schema: schemas/input.json
+output_schema: schemas/output.json   # 强制归一化为 Observation
+network_policy: scoped_http
+parser: src/parser.py
+fixtures: [positive, negative, timeout, scope_deny, malformed]
+permissions: [read_scope, write_artifact, emit_observation]
+```
+
+### 8.2 四域引擎矩阵
+
+| 域 | 引擎 | 许可证 | 风险类 | V1 状态 |
+|---|---|---|---|---|
+| 资产测绘 | subfinder/naabu/httpx/katana/FingerprintHub/FingerprintX | MIT/开源 | Passive/Low | ✅ |
+| | amass | Apache-2.0 | Passive | ⚠️ Standalone 可选 |
+| Web/API | nuclei（核心）/katana/gauplus + 自定义 POC | MIT | Active | ✅ |
+| | dalfox | MIT | Active | ✅ |
+| | ZAP | Apache-2.0 | Active | ⚠️ Standalone-only（重） |
+| 网络主机 | nmap+NSE | GPL | Low/Active | ✅ 独立进程 |
+| | nuclei TCP/dns/ssl | MIT | Active | ✅ |
+| | masscan | MIT | Low | ⚠️ 条件性（大范围） |
+| 云容器 | Prowler/Trivy/kube-bench/checkov | Apache/MIT | Passive | ✅ |
+| | ScoutSuite | GPL-2 | Passive | ✅ 独立进程 |
+
+GPL 工具（nmap/NSE/ScoutSuite）独立进程容器调用，不库嵌，主程序协议保持干净。
+
+### 8.3 输出归一化（Faraday 式统一 Observation）
+
+```python
+Observation {
+  external_id, asset_identity,
+  source: {name, version, template_version},
+  rule_id, rule_version,
+  coverage_domain: enum,    # asset/web/network/cloud
+  title, severity, confidence,
+  cwe: [str], cve: [str], owasp: [str],   # 喂 CoverageMatrix
+  evidence_artifact_ids: [str],
+  raw: dict                 # 原始工具输出保留
+}
+```
+
+Finding Correlation 按确定性指纹（资产+CWE/CVE+路径+参数）跨工具去重。版本匹配类结果只能成为 Observation/Candidate，不直接确认。
+
+### 8.4 Scoped Egress 矩阵
+
+| 域 | Egress 策略 | 阻断 |
+|---|---|---|
+| 资产测绘 | DNS（受控 resolver）+ HTTP/HTTPS 代理到 in-scope | 控制面/DB/Docker host/云 metadata/Scope 外 |
+| Web/API | HTTP/HTTPS 代理 + 限速 + OOB（Interactsh） | 同上 + 超速率拒绝 |
+| 网络/主机 | TCP/UDP 经 netns + nftables，仅 in-scope IP/端口 | 同上 + Scope 外端口 |
+| 云/容器 | 云 API 只读（凭证 scoped-down）+ 镜像仓库 pull | 云 metadata IP（169.254.169.254）必阻 + 计算资源写入 |
+
+所有域通用阻断：控制平面、数据库、Docker host、云 metadata、Scope 外目标、DNS rebinding（解析后二次校验）。
+
+### 8.5 与 TestCatalog 映射
+
+```
+TestCatalog（知识层，"测什么"）
+  +-- 资产类型 -> 必修测试类
+       +-- 测试类 -> >=1 Tool Adapter（执行层，"怎么测"）
+            +-- Adapter 输出 -> Observation -> CoverageMatrix 计数
+```
+
+Planner 按 TestCatalog 对每个资产强制排课 Adapter，agent 不能删减必修类。
+
+### 8.6 V1 Adapter Pack 交付清单
+
+| 域 | V1 必交 | 条件/Standalone | 后置 |
+|---|---|---|---|
+| 资产测绘 | subfinder/naabu/httpx/katana/FingerprintHub | masscan（大范围） | amass |
+| Web/API | nuclei/katana/gauplus/dalfox + 自定义 POC | ZAP（Standalone-only） | -- |
+| 网络主机 | nmap+NSE/nuclei-TCP | -- | -- |
+| 云容器 | Prowler/Trivy/kube-bench/checkov/ScoutSuite | -- | -- |
+
+dalfox 进 V1（低成本填 DOM/盲 XSS 缺口抬覆盖率）；ZAP Standalone-only（保 Lite 部署）；amass 后置（不抬覆盖率）；masscan 条件性（按 Scope 自动选）。
+
+---
+
+## 9. 验证子系统
+
+### 9.1 验证流水线
+
+```
+Observation（工具产出，低信任）
+  -> Candidate（疑似发现，待验证）
+    -> Validation（oracle 尝试 N 次独立复现）
+      -> Confirmed（N/N）| REFUTED（误报）| INCONCLUSIVE（部分，人审）
+```
+
+版本匹配类结果只能停 Candidate，必须 oracle 复现才确认。
+
+### 9.2 oracle N/N 复证（核心，pentest-ai 范式）
+
+oracle 是确定性复现器，不是 LLM。对每个 Candidate：
+1. 从 VerificationMethodRegistry 读该漏洞类型的验证方法（确定性，策展）
+2. 生成 N 个全新 canary token（高熵随机，一次性）
+3. 执行 N 次独立验证探针（经 Worker + scoped egress）
+4. 每次检查 canary token 是否被回显（响应正文 / OOB 回调）
+5. N/N 通过 -> Confirmed；任一失败 -> REFUTED；部分 -> INCONCLUSIVE
+
+N 默认 3，可配置。**LLM 永远不能标记 Confirmed**--只有 oracle 能。
+
+### 9.3 Canary Token 管理
+
+每次验证尝试发唯一 token（高熵随机，一次性不重用）。token 嵌入探针（RCE 用 `echo <token>`，OOB 用 `<token>.oast.example.com`）。确认要求观察到 token 回显。防止静态/缓存响应误报。token 管理器独立模块，全审计。
+
+### 9.4 OOB（Interactsh）
+
+Interactsh（ProjectDiscovery，MIT）客户端，Nuclei 原生集成。每次检查分配唯一回调域，DNS/HTTP/SMTP 回调。个人用可公共 `interact.sh`；重隐私自建（公网 VPS + 域名 NS 委托，Docker 部署）。适用：SSRF、盲 SQLi、盲 XSS、盲 RCE、反序列化。
+
+### 9.5 无害化验证方法矩阵（策展，确定性）
+
+| 漏洞类型 | 验证方法 | 无害化理由 |
+|---|---|---|
+| SQLi | 延时盲注、布尔盲注、DNS 外带 | 不改数据 |
+| RCE/命令注入 | echo canary、sleep N、OOB nslookup | 非破坏命令 |
+| SSRF | 回连自有 OOB 服务器 | 不触达内部 |
+| XXE | OOB 回调 | 不外带文件 |
+| XSS | headless 浏览器检 canary in DOM/alert | 仅检测 |
+| 反序列化 | URLDNS/JRMP OOB 回调 | 不利用 |
+| 文件读/遍历 | 只读 /etc/passwd、win.ini | 不读敏感数据 |
+| 认证绕过 | 验证访问标记资源 | 不提权 |
+| 路径穿越 | 读非敏感文件 | 不修改 |
+
+### 9.6 三层 Evidence（内容寻址，不可变）
+
+```
+Evidence {
+  id, finding_id, run_id, kind,
+  storage_uri, sha256, content_type, size_bytes,
+  captured_at, captured_by, redaction_status,
+  layer: RAW | REDACTED | SUMMARY
+}
+kinds: raw_tool_output | screenshot | request_response | command_output |
+       reproduction_steps | remediation_proof | retest_result | manual_note
+```
+
+- RAW：原始请求响应/工具输出（敏感，受限访问）
+- REDACTED：脱敏（密钥/PII/内网 IP，自动+人审）
+- SUMMARY：结构化摘要（喂报告）
+- 脱敏生成新对象，不覆盖 RAW；三层独立、内容寻址（SHA-256）
+- 每个 Confirmed Finding 必须有 ≥1 不可变 Evidence + 版本快照引用
+
+### 9.7 验证安全护栏
+
+- RCE 验证命令白名单（echo/sleep/nslookup/whoami 等非破坏）
+- 每次验证超时 + 限速
+- 默认只验证不利用；exploit 能力显式开启 + 人审批
+- 验证探针同样过 scope 强制
+
+### 9.8 LLM 边界
+
+| LLM 禁止 | 谁裁决 |
+|---|---|
+| 标记 Confirmed | oracle（确定性） |
+| 选验证方法 | VerificationMethodRegistry（策展） |
+| 判定 N/N 通过 | oracle |
+| LLM 可以 | INCONCLUSIVE 时建议人审方向；为新型漏洞起草验证方法（人审入库） |
+
+---
+
+## 10. 漏洞情报与更新
+
+### 10.1 情报实体（4 类，每字段保留 provenance）
+
+```
+Vulnerability      canonical_id, alias[], 描述, CVSS, CWE[], 引用[], 时间
+AffectedProduct    vendor/product/CPE/package/version_range/fixed_versions
+ExploitationSignal KEV标志, EPSS分数, 公开利用, 勒索关联, 活跃利用
+DetectionMapping   漏洞 -> Case Version, 检测类型, 风险, 可信度
+```
+
+情报负责"什么漏洞存在"，Case 负责"如何安全检测"--分离，更新 CVE 不等于自动安装执行能力。
+
+### 10.2 数据源 + 频率 + 可达性（curl 实测）
+
+| 来源 | 频率 | 国内可达 | 用途 | 备注 |
+|---|---|---|---|---|
+| OSV.dev | 6h | ✅ | 主源，聚合 NVD/GHSA/各生态 | 免费无 key |
+| CISA KEV | 6h | ✅ | 在野利用 -> 优先级 | 当前 1653 条 |
+| FIRST EPSS | 每日 | ✅ | 利用概率评分 | 优先级排序 |
+| NVD API 2.0 | 6-12h | ❌ 503 | 补 CVSS 细节 | 走代理备用 |
+| CWE | 月度 | ✅ | 弱点分类 | -- |
+| GitHub Advisory | 每日 | ✅ | 生态映射 | -- |
+| 厂商公告 | 6-24h | 按需 | 补 0-day/未入库 | 按需爬取或手工 |
+
+OSV 主源是网络现实决定（NVD 国内被墙实测 503）。
+
+### 10.3 同步架构
+
+```
+Update Manager 定时调度
+  -> 每源按频率增量拉取（git pull 记 commit SHA / REST 用 last_modified 游标）
+  -> 入 Staging DB
+  -> 签名校验 + schema/兼容检查
+  -> 变更预览（diff 旧版）
+  -> 原子激活（切换指针，不原地改）
+  -> 保留旧快照（可回滚）
+```
+
+与知识层策展 bundle、Case/Tool/Model bundle 同构，复用同一 Update Bundle 流水线。
+
+### 10.4 Update Bundle（在线/离线同构）
+
+```
+bundle.tar.zst
+  +- manifest.yaml（版本、来源、checksums、生成时间）
+  +- signature.ed25519（产品签名密钥）
+  +- intel.ndjson
+  +- cases/
+  +- tools/
+  +- models/
+  +- curation/（TestCatalog/CoverageMatrix 映射）
+```
+
+在线：Update Manager 拉取。离线：人工导入（客户内网无公网）。同一 bundle 同一流程：下载/导入 -> 签名/Hash 校验 -> Staging -> Schema/兼容/Case 检查 -> 预览 -> 原子激活 -> 旧快照保留 -> 可回滚。
+
+### 10.5 激活策略（按内容类型）
+
+| 内容 | 激活策略 |
+|---|---|
+| 纯情报（CVE/KEV/EPSS） | 自动应用 |
+| Passive/Low Case | 安装后自动启用 |
+| Active Case | 安装后等待启用 |
+| Intrusive Case | 必须人审 |
+| Python Plugin | 永不自动启用，人审+签名 |
+| Tool digest 切换 | smoke test 前置 |
+| 策展映射 | 走覆盖率退化门禁 |
+
+### 10.6 版本快照（per-Assessment，可复现）
+
+每个 Assessment 固定全版本快照：scope/plan/policy/intel/case_registry/tool_registry/catalog/app_model/engine 版本。历史任务不跟 latest 漂移。同快照 = 同结果。
+
+### 10.7 Provenance（来源保留）
+
+每个字段保留来源 + 拉取时间 + 源版本。内部优先级不能覆盖原始记录。CVSS 来自 NVD vs 厂商都保留，显示来源。LLM 不能改情报内容、不能绕过 provenance。
+
+### 10.8 查询
+
+Intel Store 支持 by CPE / CVE / keyword / CWE 查询。SQLite FTS5 或 PostgreSQL 全文索引，不引入 Elasticsearch。MCP 查询：自写 `intel_search` + 采纳 cve-mcp-server（28 工具 × 24 数据源）。
+
+### 10.9 LLM 边界
+
+| LLM 禁止 | 谁裁决 |
+|---|---|
+| 改情报内容 | 上游源 + Update Manager（确定性同步） |
+| 绕过 provenance | 字段必带来源（schema 强制） |
+| 标记利用优先级 | KEV/EPSS 计算（确定性） |
+| LLM 可以 | 调查询接口；为新型漏洞起草 DetectionMapping（人审入库） |
+
+---
+
+## 11. 自定义 POC + 模型驱动逻辑测试
+
+### 11.1 双层用例
+
+| 类型 | 覆盖 | 特点 |
+|---|---|---|
+| YAML Case | ~90% 用例 | 声明式、AI 可生成、静态可分析、安全 |
+| Python Plugin | ~10% 复杂场景 | 多步状态/加密/协议交互，沙箱隔离 |
+| Composite | 组合 | 串联多个 Case |
+
+### 11.2 YAML Case = Nuclei YAML 基础 + 验证扩展
+
+以 Nuclei YAML 为基础格式（事实标准、10k+ 现成模板立即可用、AI 生态成熟），扩展三类验证钩子：`canary_token` 占位、`verification` 块（关联 VerificationMethodRegistry + 复现次数）、`classification` 喂覆盖率。基础语法兼容 Nuclei，现成模板零成本复用。
+
+### 11.3 YAML DSL actions + 约束
+
+支持：`dns.resolve, tcp.connect, tls.inspect, http.request, http.compare, oast.allocate, oast.wait, extract.regex/jsonpath/xpath, transform.base64/urlencode/hash, compare.text/numeric/timing, condition, foreach, retry, wait`。
+
+约束：`foreach/retry/wait` 必须有硬上限；禁止递归/无限循环/Shell/动态 import/任意文件路径/动态创建 Scope 外目标；断言用内部 AST（不用 Python eval）。
+
+### 11.4 Python Plugin Sandbox
+
+只能通过 CaseContext SDK 获取声明式 Capability：`scoped_http, scoped_tcp, credential_ref, temp_fs, oast, emit_observation`。禁止 subprocess/os.system/Docker Socket/宿主文件系统/任意 Socket/数据库连接/动态 import。容器：`read-only, non-root, cap-drop ALL, no-new-privileges, 资源/超时限制, 无 Host Network, 无 Docker Socket`。
+
+### 11.5 Case Registry 生命周期
+
+```
+YAML Case:
+  DRAFT -> VALIDATED -> REVIEWED -> SIGNED -> PUBLISHED
+        -> DISABLED / DEPRECATED
+
+Python Plugin:
+  DRAFT -> STATIC_CHECKED -> SANDBOX_TESTED -> REVIEWED -> SIGNED -> PUBLISHED
+```
+
+每个版本记录：作者、风险、目标类型、Schema、前置条件、步骤、断言、Evidence 要求、CWE/CVE/OWASP 映射、签名、最低引擎版本。
+
+### 11.6 风险静态分析
+
+| 模式 | 计算风险 |
+|---|---|
+| GET/HEAD | Low |
+| 全面扫描/爬虫 | Active |
+| 凭据/上传/时间差/OAST | Intrusive |
+| Shell/无限循环/Scope 外目标 | 拒绝发布 |
+
+声明风险不得低于计算风险。RiskAnalyzer 静态扫描，不达标阻止发布。
+
+### 11.7 Fixture 要求
+
+每个 Case 必备：Positive、Negative、Timeout、异常响应、重定向、Scope Deny、脱敏。Intrusive Case 还须：靶场、前后状态、清理步骤、最大影响说明。
+
+### 11.8 Agent 与 Case 的关系
+
+| Agent 可以 | Agent 禁止 |
+|---|---|
+| 生成 YAML Draft | 审核 Case |
+| 跑 validate | 签名 Case |
+| 跑 Dry Run（靶场） | 发布 Case |
+| 为新漏洞起草 Case | 提高 Capability |
+| 建议 fixture | 绕过风险静态分析 |
+
+人审 + 签名是不可绕过的发布门禁。
+
+### 11.9 模型驱动逻辑测试（第二/三层业务逻辑）
+
+**模型**：版本化、签名的形式描述，含状态机 + 不变量 + 字段信任边界 + 角色能力 + 幂等性。
+
+**建模动作（6 步，LLM 仅第 1 步辅助起草，人校验，执行全程 LLM 无关）**：
+
+| 步 | 动作 | 谁做 | 产出 |
+|---|---|---|---|
+| 1 自动发现 | 爬取端点（katana）+ 解析 OpenAPI/Postman + 被动代理观察流量 -> LLM 起草 | 工具 + LLM 起草 | 模型草稿 |
+| 2 人校验精修 | 在 Case Studio 审草稿、补不变量、标 trusted_source、定角色能力、Ed25519 签名 | 人 | 签名模型 |
+| 3 模型快照 | 版本化 + per-Assessment 快照（digest） | 框架 | app_model_snapshot |
+| 4 测试生成（确定性） | 框架从模型纯函数式生成 7 类测试 Case | 框架，无 LLM | N 个测试 Case |
+| 5 执行 + oracle 验证 | 走同一执行平面，oracle N/N 复证，证据留痕 | 框架 | Candidate/Confirmed |
+| 6 回归（持续验证） | 模型随应用版本化在 git；应用改了更新模型重跑；diff 模型版本；CI 集成 | 框架 + 人维护 | 持续回归报告 |
+
+**模型来源**：支持从 OpenAPI/Postman collection 半自动导入 + LLM 起草 + 人校验。**Case Studio V1 完整可视化建模**（A 全架构）。
+
+**7 类测试生成**：跳步、乱序、重放、竞态、越界、不变量违反、角色越权。一个电商结账模型自动生成 ~40-60 个确定性逻辑测试。
+
+**模型治理**：LLM proposes, human disposes, product executes。LLM 全程不裁决、不签名。模型一旦签名，后续生成/执行/验证全程 LLM 无关。
+
+**模型同步/发布/更新**：
+- 生命周期：DRAFT -> LLM_PROPOSED -> HUMAN_VALIDATED -> SIGNED -> PUBLISHED -> SUPERSEDED（旧版不删）
+- 发布：人签名 -> 进 ModelRegistry -> 版本+digest -> per-Assessment 快照
+- 更新：漂移检测（重新导入 OpenAPI/Postman/爬取 diff）-> 新 DRAFT -> 人校验签 -> 发布新版本 -> 旧版 SUPERSEDED -> 触发回归测试
+- 同步分发：本地 ModelRegistry；跨评估复用（同应用模型导入新 Assessment）；跨实例/团队签名 bundle（走与情报/用例/工具相同的 Update Bundle 流水线）
+- DriftDetector：定期/CI 触发的漂移检测
+
+### 11.10 模型生成 Case 的特殊处理
+
+LogicTestGenerator 从签名 AppModel 生成的 Case（`origin: model_generated`）：生成是纯函数，模型已签名 -> 可自动通过 STATIC_CHECKED + VALIDATED；Intrusive 类仍需人审；Passive/Low 类可自动发布（模型签名传递信任）；复用同一 Case Registry。
+
+### 11.11 与 TestCatalog / VerificationMethodRegistry 关系
+
+```
+TestCatalog（测试类）
+  +-- 测试类 -> >=1 Case（Case Registry）
+       +-- Case 的 verification.method -> VerificationMethodRegistry
+            +-- OracleEngine 用该方法 N/N 复证
+Case 的 classification.{cwe,cve,owasp} -> 喂 CoverageMatrix 计数
+```
+
+---
+
+## 12. 数据模型 + 部署 + 安全
+
+### 12.1 数据模型（核心表，按域分组）
+
+```
+项目/授权: projects, scope_drafts, scope_snapshots
+评估/编排: assessments, execution_plans, plan_steps, approvals, jobs, execution_permits
+知识层: test_catalog, coverage_matrix, case_definitions, case_versions, tool_definitions,
+        app_models, app_model_versions, verification_method_registry
+情报: intel_snapshots, vulnerabilities, vulnerability_aliases, affected_products,
+      exploitation_signals, detection_mappings
+资产/发现: asset_nodes, asset_edges, observations, candidates, findings
+验证/证据: verification_attempts, canary_tokens, evidence_objects, finding_evidence
+更新: update_bundles, bundle_activations
+安全/审计: secret_metadata, audit_events
+报告/复测: reports, report_versions, retests
+```
+
+### 12.2 存储策略
+
+| 数据 | 存储 | 备注 |
+|---|---|---|
+| 业务数据 | SQLite WAL（Lite）/ PostgreSQL（Standalone） | Repository Contract 同时跑两者，业务代码不依赖 SQLite 专有逻辑 |
+| 证据大文件 | CAS（Local/S3/MinIO），内容寻址 | 不存 DB BLOB |
+| 全文检索 | SQLite FTS5 / PG full-text | 不引入 Elasticsearch |
+| 模板/指纹 | git 仓库 + commit SHA 版本化 | 文件系统 |
+| 情报 | SQLite/PG + FTS | 增量同步 |
+
+### 12.3 部署模型（A 全架构）
+
+```
+Lite（2C2G 控制节点 + 远程 Worker）
+  +- 控制平面 + MCP + CLI + Web Case Studio
+  +- SQLite WAL + Local CAS / 外部 S3
+  +- 情报索引 + Update Manager
+  +- 远程 Worker 调度（分布式 Worker 平台）
+  不跑: ZAP、大规模并发、Python Plugin 镜像构建
+  目标内存: 0.8-1.4GB
+
+Standalone（4C8G，推荐 8C16G）
+  +- Lite 全部 +
+  +- 本地工具容器 + 完整 Scoped Egress（netns+nftables+HTTP 代理+TCP）
+  +- ZAP 可启用
+  +- 完整 Adapter Pack 并发
+  存储: 100GB SSD
+```
+
+- Redis 非 V1 必需（DB Job Lease，规模大再引入）
+- Docker Compose 多服务（api/worker/scheduler/db/cas/proxy）
+- 离线部署：离线镜像仓库 + 离线 Update Bundle 导入 + 本地报告渲染
+
+### 12.4 Scope 强制执行链（每次动作前）
+
+```
+Target Normalize -> Explicit Deny -> Include Match -> DNS Resolve
+-> Resolved IP Recheck（防 rebinding）-> Port/URL -> Time Window
+-> Risk -> Approval -> Budget -> Execution Permit
+```
+
+Deny 始终优先；DNS 解析后二次校验；API + 执行层双重校验；Scope 外地址在执行层网络层被拒。
+
+### 12.5 Secret Store
+
+任务只用 `secret_ref`，明文不入库。后端：OS Keyring / 本机加密文件 / 外部 KMS（Vault）。不进入 Prompt/Case/日志/Evidence/报告。执行时短时文件描述符/内存管道/Secret Mount 注入。任务完成撤销。凭证访问写审计。
+
+### 12.6 Audit Hash Chain
+
+```
+AuditEvent { previous_event_hash, event_hash, ... }
+```
+
+链式哈希，篡改可检测（不宣称不可篡改存储）。记录 scope/plan/审批/secret 使用/工具用例/Policy Deny/Evidence 导出/用例发布/更新/远程模型/Finding/报告。日志结构化 JSON，带 trace_id/correlation_id/tenant/run_id。禁止记录 Secret/Token/Cookie/完整 Authorization/未脱敏 PII。
+
+### 12.7 Emergency Stop
+
+停止签发新 Permit；撤销未使用 Permit；终止活动容器；保留已产生 Evidence；写高优先级 Audit。
+
+### 12.8 远程模型数据分级
+
+```
+数据分级: Public | Internal | Sensitive | Restricted | Secret
+远程模型调用统一经: Data Classification -> Redaction -> Policy -> User Consent -> Audit
+```
+
+Secret 永不发送；Restricted 默认禁止；Sensitive 默认脱敏。本地模式不依赖 LLM 也能执行扫描。
+
+### 12.9 Prompt Injection 防御
+
+目标页面/Banner/工具输出/漏洞描述标记 `untrusted_target_output`。Agent 输出必须转结构化 Action，经 Schema/Scope/Policy/Approval/Registry。目标内容不能改策略/Scope/用例状态/Secret/审批。每个动作经 Policy Engine（确定性，不靠 LLM 自律）。
+
+### 12.10 LLM 边界汇总（全设计收敛）
+
+| LLM 可以（提议，人审） | LLM 禁止（裁决，确定性层） |
+|---|---|
+| 工具参数化（Schema 内） | Policy 决策 / Quality Gate 裁决 |
+| 提议新 Plan Version | Finding 确认（只有 oracle） |
+| 起草 AppModel | severity 定级（CVSS 计算） |
+| 起草自定义 POC | 报告数字（DB 计算） |
+| 起草验证方法 | 覆盖率判定（CoverageMatrix） |
+| 报告摘要润色（人签） | 证据完整性（SHA256） |
+| INCONCLUSIVE 建议人审方向 | scope 改动 / 用例发布 / Capability 提升 |
+
+---
+
+## 13. 分阶段交付（M0-M5，A 全架构）
+
+| 里程碑 | 工作量 | 交付 | DoD |
+|---|---|---|---|
+| M0 地基+确定性脊柱骨架 | 3-5 天 | Domain 边界；Project/Scope/Assessment/Plan/Approval；PolicyEngine；SQLite WAL Repository；依赖守卫 | scope 硬拒绝；plan 可持久化；approval 跑空计划；Deny 优先；Domain 无框架依赖 |
+| M1 知识层+情报+四域 Adapter | 8-12 天 | TestCatalog；CoverageMatrix；IntelStore；UpdateManager；KnowledgeHealthMonitor；四域 Adapter Pack（含 dalfox、ZAP Standalone-only） | 4 域工具可执行；输出归一化 Observation；覆盖矩阵可算；情报可查 |
+| M2 验证+用例引擎 | 6-9 天 | OracleEngine；VerificationMethodRegistry；CanaryTokenManager；InteractshClient；CaseEngine；PythonPluginSandbox；CaseRegistry；RiskAnalyzer；FixtureRunner | oracle N/N 生效；YAML Case 可执行可校验；Python 沙箱隔离；风险分析门禁 |
+| M3 模型驱动逻辑测试 | 5-8 天 | AppModel schema；ModelBuilder（OpenAPI/Postman 导入+LLM 起草+人校验+完整 Case Studio 可视化）；LogicTestGenerator（7 类）；ModelRegistry；DriftDetector | 模型可建可签；7 类测试自动生成；漂移可检测 |
+| M4 Agent 接口+编排+报告 | 6-9 天 | MCP Server（自写+采纳）；CLI；Web Case Studio；Planner；Orchestrator（分布式 Worker）；FindingCorrelation；ReportRenderer；AssetGraph | agent 可端到端编排；覆盖矩阵门禁生效；报告数据驱动 |
+| M5 安全加固+Beta | 6-10 天 | ScopeEnforcer；SecretStore；AuditChain；EmergencyStop；RemoteModelGateway；PromptInjectionGuard；完整 Scoped Egress；E2E；CI | 全安全条件通过；E2E 绿；Lite 2C2G 可跑 |
+
+**总计**：34-53 工程日 + 集成/调试/返工缓冲 = **3-5 月**单人全职。
+
+---
+
+## 14. 风险与取舍
+
+| 风险 | 原因 | 缓解 |
+|---|---|---|
+| 范围过大 | 全覆盖 V1 + 模型驱动 + 全架构 | 分阶段交付；M0-M5 严格 DoD；不缩小测试范围提前 Beta |
+| 策展负担（单人） | 知识层需持续维护 | 上游借力 + 自动同步 + 社区 PR + 聚合层开源 |
+| 模型质量上限 | AppModel 错则测试全废 | 人审签名 + DriftDetector + 诚实声明复杂业务规则不覆盖 |
+| oracle 误判 | N/N 仍可能误报/漏报 | N 可调 + INCONCLUSIVE 人审 + Evidence 可追溯 |
+| LLM 依赖回潮 | 边界模糊处 LLM 偷偷裁决 | LLM 边界明文 + 确定性脊柱 + 禁区审计 |
+| 部署重 | 全架构多服务 + 分布式 Worker | Lite 2C2G 控制节点 + 远程 Worker 按需 |
+| 知识层滞后 | 策展窗口 1-4 周 | 自动同步 + KnowledgeHealthMonitor 告警 |
+| 单人工期 | 3-5 月 | 分阶段交付 + 严格 DoD + 不提前 Beta |
+| 安全边界未通过 | Scope/Permit/沙箱有漏洞 | M5 安全条件全过才 Beta；STRIDE 威胁建模 |
+
+---
+
+## 15. V1 完成定义（DoD）
+
+- [ ] Agent 可通过 MCP 创建/规划/审批/执行 Assessment
+- [ ] 框架铺路 + agent 驾驶 + Policy 刹车 + 人审批 四方分工生效
+- [ ] TestCatalog 驱动覆盖，agent 只加不减
+- [ ] CoverageMatrix 门禁：0 未执行必修类才能结题
+- [ ] oracle N/N 验证：0 未验证 Candidate 才能出报告
+- [ ] 四域 Adapter Pack 交付（必交 + dalfox + ZAP Standalone-only）
+- [ ] AppModel 模型驱动逻辑测试（7 类测试生成 + Case Studio 可视化建模）
+- [ ] 漏洞情报 OSV 主源 + KEV + EPSS，签名 Bundle
+- [ ] 自定义 POC：Nuclei YAML + Python 沙箱，人审签名
+- [ ] Scope 强制（10 步执行链 + DNS 二次校验 + 双校验）
+- [ ] Secret 不入库/Prompt/日志/Evidence/报告
+- [ ] Audit hash chain 篡改可检测
+- [ ] Emergency Stop 撤销 Permit + 终止容器
+- [ ] 远程模型调用分级 + 脱敏 + 授权 + 审计
+- [ ] LLM 边界全部生效（禁区明文）
+- [ ] 分布式 Worker + 完整 Scoped Egress + Update Bundle
+- [ ] Lite 2C2G 可跑，Standalone 4C8G 可跑
+- [ ] 报告模板数据驱动 + 每声明->evidence + 每数字->查询
+- [ ] E2E（Juice Shop/crAPI/httpbin）全绿
+- [ ] CI（ruff/mypy/pytest/compose smoke）全绿
+
+---
+
+## 16. 关键取舍记录
+
+1. **推倒重来而非渐进**：清理 07-24 多租户遗产和文档碎片，从需求出发干净设计
+2. **混合框架脊柱而非纯 agent**：框架保证覆盖+安全+可复现，agent 贡献推理
+3. **目录驱动覆盖而非 LLM 驱动**：TestCatalog 是护城河，agent 只加不减
+4. **oracle N/N 验证而非 LLM 判定**：确定性复证，LLM 永不裁决
+5. **模型驱动逻辑测试而非方法论门禁**：第二/三层业务逻辑确定性自动覆盖
+6. **Nuclei YAML 基础+扩展而非自研 DSL**：采纳事实标准，10k+ 模板复用
+7. **MCP 采纳优先而非全自写**：cve-mcp-server/mcp-security-hub 现成可用
+8. **OSV 主源而非 NVD**：国内网络现实（NVD 503）
+9. **聚合层开源 + 策展层产品 IP**：V1 轻策展，深度策展后置
+10. **覆盖率退化门禁选项 D**：0 容忍 + override-with-reason
+11. **A 全架构**：分布式 Worker + 完整 Scoped Egress + Update Bundle + Case Studio 可视化
+12. **确定性脊柱九模块**：Planner/PolicyEngine/QualityGates/TestCatalog/CoverageMatrix/AppModel/LogicTestGenerator/VerificationMethodRegistry/OracleEngine，LLM 无关
+
+---
+
+## 17. 与旧设计的关系
+
+| 旧文档 | 处置 |
+|---|---|
+| 2026-07-24-security-assessment-operations-platform-design.md | **取代**。多租户 MSSP 方向搁置，单用户 Agent-native 方向接管 |
+| 2026-07-24-mvp-implementation-plan.md | 已退出（旧文档自带 Status） |
+| 2026-07-24-m1-documentation-roadmap.md | 历史，不延续 |
+| 2026-07-24-next-development-roadmap.md | 历史，Phase 0-4 代码遗产可参考但不直接复用（推倒重来） |
+| 2026-07-25-agent-native-pentest-workbench-design.md | **取代**。方向对但未吸收调研结论，本轮重新设计 |
+| 2026-07-25-agent-native-pentest-roadmap.md | **取代**。M0-M5 重新规划 |
+| 2026-07-25-m0-domain-policy-baseline.md | **取代**。M0 重新定义 |
+
+旧代码（14 ORM 模型 + 115 测试）不作为约束，但 nmap/nuclei 等 Adapter 解析器、MISP/Jira/Wazuh Connector 可作参考实现。
+
+---
+
+## 18. 后续
+
+本设计经用户审阅确认后，进入 `writing-plans` 技能产出 M0 详细实现计划。M0 通过代码审查后，根据实际落地的 Repository/Policy/Digest/Error Model 编写 M1 详细计划，禁止跳到 MCP UI 或大规模工具接入。
