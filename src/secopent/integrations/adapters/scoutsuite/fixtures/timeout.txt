@@ -1,0 +1,1 @@
+[ScoutSuite] Timed out after 600s while auditing account 123456789012 (provider aws). Partial results not written.

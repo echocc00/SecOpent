@@ -1,0 +1,53 @@
+{
+  "account_id": "123456789012",
+  "environment": "default",
+  "provider_code": "aws",
+  "provider_name": "Amazon Web Services",
+  "result_format": "json",
+  "services": {
+    "iam": {
+      "findings": {
+        "iam-root-no-hardware-mfa": {
+          "checked_items": 1,
+          "flagged_items": 1,
+          "description": "Root account has no hardware MFA enabled",
+          "level": "danger",
+          "id_suffix": "mfa",
+          "path": "iam.credential_reports.id",
+          "items": ["iam.credential_reports.id.root"]
+        },
+        "iam-password-policy-reuse": {
+          "checked_items": 1,
+          "flagged_items": 0,
+          "description": "Password policy allows credential reuse (clean - not flagged)",
+          "level": "warning",
+          "items": []
+        }
+      }
+    },
+    "s3": {
+      "findings": {
+        "s3-bucket-world-acl": {
+          "checked_items": 12,
+          "flagged_items": 2,
+          "description": "S3 bucket grants access to everyone via ACL",
+          "level": "danger",
+          "id_suffix": "acl",
+          "path": "s3.buckets.id",
+          "items": ["s3.buckets.id.public-leaky-bucket", "s3.buckets.id.open-logs"]
+        }
+      }
+    },
+    "cloudtrail": {
+      "findings": {
+        "cloudtrail-no-logging": {
+          "checked_items": 3,
+          "flagged_items": 1,
+          "description": "CloudTrail logging is disabled in a region",
+          "level": "warning",
+          "items": ["cloudtrail.regions.ap-southeast-2"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "results": {
+    "failed_checks": [],
+    "passed_checks": [
+      {
+        "check_id": "CKV_AWS_19",
+        "check_name": "Ensure all data stored in the S3 bucket is securely encrypted at rest",
+        "check_type": "terraform",
+        "file_path": "/iac/main.tf",
+        "resource": "aws_s3_bucket.encrypted"
+      }
+    ],
+    "skipped_checks": [],
+    "parsing_errors": []
+  },
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "parsing_errors": 0
+  }
+}

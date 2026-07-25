@@ -1,0 +1,1 @@
+[checkov] Timed out after 600s while scanning /iac (terraform). No results emitted.
