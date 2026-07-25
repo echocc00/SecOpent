@@ -13,6 +13,15 @@ _SECRET_KEYS = {"password", "secret", "token", "authorization", "api_key", "cook
 
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
+    """Immutable audit event linked into a tamper-evident hash chain.
+
+    ``previous_hash`` stores the bare 64-hex hash (no ``sha256:`` prefix) of the
+    prior event, or ``GENESIS_HASH`` for the first event. ``event_hash`` stores the
+    same digest with the ``sha256:`` prefix. ``verify_chain`` tolerates both forms
+    when comparing, but new events should follow the bare-hex convention for
+    ``previous_hash`` (matches ``AuditRepository.last_hash``).
+    """
+
     id: str
     actor: str
     action: str
