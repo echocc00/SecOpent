@@ -65,3 +65,29 @@ def test_readme_mentions_m2() -> None:
     assert "M2" in readme
     assert "verification.md" in readme
     assert "docs/cases/yaml-dsl.md" in readme
+
+
+def test_model_driven_logic_doc_exists() -> None:
+    path = Path("docs/architecture/model-driven-logic.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    # AppModel, the five test classes, and signature idempotency must appear.
+    assert "AppModel" in content
+    assert "signature" in content
+    assert "LogicTestGenerator" in content
+
+
+def test_appmodel_schema_doc_exists() -> None:
+    path = Path("docs/appmodel/schema.md")
+    assert path.is_file()
+    content = path.read_text(encoding="utf-8")
+    assert "Transition" in content
+    assert "Invariant" in content
+    assert "HUMAN_VALIDATED" in content
+
+
+def test_readme_mentions_m3() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "M3" in readme
+    assert "model-driven-logic.md" in readme
+    assert "docs/appmodel/schema.md" in readme
