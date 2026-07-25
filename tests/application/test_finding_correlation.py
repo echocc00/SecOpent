@@ -16,6 +16,7 @@ def _obs(
     *,
     asset: str = "https://x.test/login",
     cwe: tuple[str, ...] = ("CWE-89",),
+    owasp: tuple[str, ...] = (),
     source_name: str = "nuclei",
     severity: Severity = Severity.HIGH,
 ) -> Observation:
@@ -30,6 +31,7 @@ def _obs(
         severity=severity,
         confidence=0.9,
         cwe=cwe,
+        owasp=owasp,
     )
 
 
@@ -52,13 +54,17 @@ def test_distinct_vulns_stay_separate() -> None:
     assert len(findings) == 2
 
 
-def test_finding_merges_cwe_union() -> None:
+def test_finding_merges_owasp_union_for_same_fingerprint() -> None:
+    # Same asset + CWE -> same fingerprint -> merge; OWASP (not in the
+    # fingerprint) is unioned across the correlated observations.
     observations = [
-        _obs("obs-1", cwe=("CWE-89",)),
-        _obs("obs-2", source_name="zap", cwe=("CWE-89", "CWE-200")),
+        _obs("obs-1", cwe=("CWE-89",), owasp=("A03:2021",)),
+        _obs("obs-2", source_name="zap", cwe=("CWE-89",), owasp=("A03:2021", "A01:2021")),
     ]
     findings = FindingCorrelation().correlate(observations)
-    assert set(findings[0].cwe) == {"CWE-89", "CWE-200"}
+    assert len(findings) == 1
+    assert set(findings[0].cwe) == {"CWE-89"}
+    assert set(findings[0].owasp) == {"A03:2021", "A01:2021"}
 
 
 def test_finding_severity_is_max_of_group() -> None:
