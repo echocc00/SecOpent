@@ -38,10 +38,11 @@ from secopent.domain.adapters.contracts import (
     AdapterOutput,
     AdapterSource,
     Artifact,
+    CoverageDomain,
     Observation,
     OutputStatus,
 )
-from secopent.domain.common.errors import DomainError
+from secopent.domain.common.errors import DomainError, DomainValidationError
 from secopent.domain.policy.models import (
     ActionRequest,
     ExecutionMode,
@@ -49,6 +50,7 @@ from secopent.domain.policy.models import (
     RiskClass,
 )
 from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
+from secopent.domain.scope.normalize import normalize_cloud_account
 
 
 class ScopeDeniedError(DomainError):
@@ -354,6 +356,8 @@ def _rebuild_scope_snapshot(serialized: Mapping[str, object]) -> ScopeSnapshot:
     assert isinstance(include_raw, Sequence), "scope_snapshot.include must be a sequence"
     exclude_raw = serialized.get("exclude", ())
     assert isinstance(exclude_raw, Sequence), "scope_snapshot.exclude must be a sequence"
+    cloud_raw = serialized.get("cloud_accounts", ())
+    assert isinstance(cloud_raw, Sequence), "scope_snapshot.cloud_accounts must be a sequence"
     return ScopeSnapshot(
         id=str(serialized["id"]),
         project_id=str(serialized["project_id"]),
@@ -364,6 +368,7 @@ def _rebuild_scope_snapshot(serialized: Mapping[str, object]) -> ScopeSnapshot:
         approved_by=str(serialized["approved_by"]),
         approved_at=_parse_iso(approved_at_raw),
         digest=str(serialized["digest"]),
+        cloud_accounts=tuple(str(c) for c in cloud_raw),
     )
 
 
@@ -383,6 +388,16 @@ def _enforce_scope(
 ) -> None:
     """Run the M0 PolicyEngine against every target; raise on any denial.
 
+    Targets are routed by domain (§4.1.1 方案 B):
+
+    - **Cloud targets** (manifest covers ``cloud`` AND the target is a
+      ``provider:account_id`` string) are checked against the scope's
+      ``cloud_accounts`` set - they are NOT URLs/ports, so they bypass the
+      PolicyEngine's URL/port gate but keep the same Destructive -> scope ->
+      risk -> capability decision order.
+    - **Network targets** (URL/IP/domain) go through the injected
+      PolicyEngine.evaluate as before.
+
     The capability is the manifest's first declared permission (the action
     the adapter is authorized to take, e.g. `network.connect`). Port is
     derived from the input options if present, else 0 (port-less passive
@@ -397,6 +412,16 @@ def _enforce_scope(
     approved_capabilities = frozenset(manifest.permissions)
 
     for target in adapter_input.targets:
+        if _is_cloud_target(target, manifest):
+            _enforce_cloud_target(
+                target=target,
+                risk=risk,
+                capability=capability,
+                scope=scope,
+                approved_risks=approved_risks,
+                approved_capabilities=approved_capabilities,
+            )
+            continue
         port = ports[0] if ports else 0
         request = ActionRequest(
             target=target, port=port, risk=risk, capability=capability
@@ -412,6 +437,51 @@ def _enforce_scope(
             raise ScopeDeniedError(
                 f"scope denied for target={target} reason={decision.reason}"
             )
+
+
+def _is_cloud_target(target: str, manifest: AdapterManifest) -> bool:
+    """A target is cloud-scoped when the manifest covers the cloud domain AND
+    the target parses as a ``provider:account_id`` cloud account."""
+    if CoverageDomain.CLOUD not in manifest.coverage_domain:
+        return False
+    try:
+        normalize_cloud_account(target)
+    except DomainValidationError:
+        return False
+    return True
+
+
+def _enforce_cloud_target(
+    *,
+    target: str,
+    risk: RiskClass,
+    capability: str,
+    scope: ScopeSnapshot,
+    approved_risks: frozenset[RiskClass],
+    approved_capabilities: frozenset[str],
+) -> None:
+    """Scope gate for cloud-account targets.
+
+    Mirrors the PolicyEngine decision order (Destructive -> scope -> risk ->
+    capability -> ALLOWED) but substitutes the cloud-account membership check
+    for the URL/port check, since cloud accounts are not network endpoints.
+    """
+    if risk is RiskClass.DESTRUCTIVE:
+        raise ScopeDeniedError(
+            f"scope denied for target={target} reason=DESTRUCTIVE_ACTION_DENIED"
+        )
+    if not scope.includes_cloud_account(target):
+        raise ScopeDeniedError(f"scope denied for target={target} reason=SCOPE_DENIED")
+    if risk not in approved_risks:
+        raise ScopeDeniedError(
+            f"scope denied for target={target} reason=RISK_NOT_APPROVED"
+        )
+    if risk in {RiskClass.ACTIVE, RiskClass.INTRUSIVE} and (
+        capability not in approved_capabilities
+    ):
+        raise ScopeDeniedError(
+            f"scope denied for target={target} reason=CAPABILITY_NOT_APPROVED"
+        )
 
 
 def _extract_ports(adapter_input: AdapterInput) -> tuple[int, ...]:

@@ -155,6 +155,7 @@ def _scope_dict(scope_snapshot: ScopeSnapshot) -> dict[str, object]:
         "approved_by": scope_snapshot.approved_by,
         "approved_at": scope_snapshot.approved_at.isoformat(),
         "digest": scope_snapshot.digest,
+        "cloud_accounts": scope_snapshot.cloud_accounts,
     }
 
 
@@ -482,3 +483,154 @@ def test_scope_denied_error_is_domain_error() -> None:
     """ScopeDeniedError must subclass DomainError so the error layer can
     classify it consistently with the rest of the domain."""
     assert issubclass(ScopeDeniedError, DomainError)
+
+
+# ---------------------------------------------------------------------------
+# Cloud-target scope routing (M1 Task 12, §4.1.1 方案 B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cloud_scope_snapshot() -> ScopeSnapshot:
+    return ScopeSnapshot(
+        id="snap-cloud",
+        project_id="proj-1",
+        include=("example.com", "10.0.0.0/24"),
+        exclude=(),
+        ports=(443,),
+        limits=ScopeLimits(requests_per_second=5.0, concurrency=3, max_requests=50_000),
+        approved_by="analyst",
+        approved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        digest="sha256:" + "0" * 64,
+        cloud_accounts=("aws:123456789012",),
+    )
+
+
+@pytest.fixture
+def cloud_manifest() -> AdapterManifest:
+    return AdapterManifest(
+        id="prowler",
+        version="1.0.0",
+        adapter_api_version="v1",
+        license="Apache-2.0",
+        upstream=AdapterUpstream(
+            name="prowler",
+            url="https://github.com/prowler-cloud/prowler",
+            version="4.6.0",
+            digest="sha256:prowler-4.6.0",
+        ),
+        risk_class=RiskClass.PASSIVE,
+        coverage_domain=(CoverageDomain.CLOUD,),
+        input_schema="schema://prowler/input.json",
+        output_schema="schema://prowler/output.json",
+        network_policy="scoped-egress",
+        parser="secopent_adapters.prowler:parse",
+        permissions=("passive",),
+    )
+
+
+def _cloud_input(scope: ScopeSnapshot, targets: tuple[str, ...]) -> AdapterInput:
+    return AdapterInput(
+        run_id="run-cloud",
+        engagement_id="eng-1",
+        scope_snapshot=_scope_dict(scope),
+        targets=targets,
+        options={},
+        execution_policy=ExecutionPolicy(
+            timeout_seconds=60, max_concurrency=2, network_profile="scoped-egress"
+        ),
+    )
+
+
+def test_cloud_target_in_scope_executes_container(
+    cloud_manifest: AdapterManifest,
+    cloud_scope_snapshot: ScopeSnapshot,
+    tmp_path: Path,
+) -> None:
+    """An in-scope cloud-account target must pass the scope gate WITHOUT any
+    URL/port check (cloud accounts are not URLs) and execute the container."""
+    executor = RecordingExecutor(stdout="[]", artifacts={})
+    cas = FakeCASStore(base_dir=tmp_path)
+    runner = AdapterRunner(
+        executor=executor,
+        policy_engine=policy_evaluate,
+        cas_store=cas,
+        parser_registry={},
+    )
+
+    output = runner.run(cloud_manifest, _cloud_input(cloud_scope_snapshot, ("aws:123456789012",)))
+
+    assert output.status is OutputStatus.COMPLETED
+    assert len(executor.calls) == 1
+
+
+def test_cloud_target_out_of_scope_denied_before_container(
+    cloud_manifest: AdapterManifest,
+    cloud_scope_snapshot: ScopeSnapshot,
+    tmp_path: Path,
+) -> None:
+    """An out-of-scope cloud-account target must be denied before the container
+    runs - the cloud scope gate is a security boundary."""
+    executor = RecordingExecutor(stdout="should-not-run")
+    cas = FakeCASStore(base_dir=tmp_path)
+    runner = AdapterRunner(
+        executor=executor,
+        policy_engine=policy_evaluate,
+        cas_store=cas,
+        parser_registry={},
+    )
+
+    with pytest.raises(ScopeDeniedError):
+        runner.run(
+            cloud_manifest,
+            _cloud_input(cloud_scope_snapshot, ("aws:999999999999",)),
+        )
+
+    assert executor.calls == [], "container executed despite cloud scope denial"
+
+
+def test_cloud_target_normalizes_before_scope_check(
+    cloud_manifest: AdapterManifest,
+    cloud_scope_snapshot: ScopeSnapshot,
+    tmp_path: Path,
+) -> None:
+    """Provider casing/whitespace on the target must not defeat the scope match."""
+    executor = RecordingExecutor(stdout="[]", artifacts={})
+    cas = FakeCASStore(base_dir=tmp_path)
+    runner = AdapterRunner(
+        executor=executor,
+        policy_engine=policy_evaluate,
+        cas_store=cas,
+        parser_registry={},
+    )
+
+    output = runner.run(
+        cloud_manifest, _cloud_input(cloud_scope_snapshot, ("AWS:123456789012",))
+    )
+    assert output.status is OutputStatus.COMPLETED
+
+
+def test_destructive_cloud_target_denied(
+    cloud_manifest: AdapterManifest,
+    cloud_scope_snapshot: ScopeSnapshot,
+    tmp_path: Path,
+) -> None:
+    """A DESTRUCTIVE cloud adapter is denied even for an in-scope account,
+    mirroring the PolicyEngine decision order (Destructive first)."""
+    import dataclasses
+
+    destructive = dataclasses.replace(cloud_manifest, risk_class=RiskClass.DESTRUCTIVE)
+    executor = RecordingExecutor(stdout="should-not-run")
+    cas = FakeCASStore(base_dir=tmp_path)
+    runner = AdapterRunner(
+        executor=executor,
+        policy_engine=policy_evaluate,
+        cas_store=cas,
+        parser_registry={},
+    )
+
+    with pytest.raises(ScopeDeniedError):
+        runner.run(
+            destructive, _cloud_input(cloud_scope_snapshot, ("aws:123456789012",))
+        )
+    assert executor.calls == []
