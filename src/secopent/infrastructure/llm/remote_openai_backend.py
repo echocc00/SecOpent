@@ -43,6 +43,18 @@ class RemoteOpenAICompatibleBackend:
         self._api_key_env = api_key_env
         self._model = model
         self._timeout = timeout
+        # Records the most recent prompt actually sent, so callers can verify
+        # that the RemoteModelGateway redacted SENSITIVE data before it left.
+        self.last_sent_prompt: str | None = None
+
+    def complete(self, prompt: str) -> str:
+        """Satisfy the application-layer ModelBackend Protocol (complete-based).
+
+        Wraps :meth:`generate` with a single user message and returns the text.
+        """
+        self.last_sent_prompt = prompt
+        response = self.generate(messages=[{"role": "user", "content": prompt}])
+        return response.text
 
     def _api_key(self) -> str:
         key = os.environ.get(self._api_key_env, "")
