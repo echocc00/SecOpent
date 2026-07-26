@@ -2,8 +2,9 @@
 """OracleEngine: deterministic N/N verification of candidate findings (§9, ADR-004).
 
 A low-trust Observation promoted to a CandidateFinding is verified by running N
-independent reproductions through an injected verifier (the pentest-ai adapter
-in production) and aggregating with the deterministic ``decide_outcome`` rule.
+independent reproductions through an injected verifier (the self-built
+RescanVerifier in production - real rescan N/N reproduction, ADR-014 revised)
+and aggregating with the deterministic ``decide_outcome`` rule.
 Each reproduction carries a fresh single-use canary token. A finding is
 CONFIRMED only at N/N successes; server errors (5xx) count as INCONCLUSIVE,
 never REFUTED.
@@ -36,8 +37,9 @@ class OracleVerifier(Protocol):
     """One independent reproduction executed by the oracle backend.
 
     Returns SUCCESS / FAILURE / SERVER_ERROR. In production this is the
-    pentest-ai adapter; in tests a scripted fake. The verifier is responsible
-    for checking the canary echo/OOB and reporting the outcome.
+    self-built RescanVerifier (real rescan reproduction); in tests a scripted
+    fake. The verifier is responsible for checking the canary echo/OOB and
+    reporting the outcome.
     """
 
     def reproduce(

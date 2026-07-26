@@ -29,14 +29,13 @@ from secopent.domain.findings.models import FindingStatus
 from secopent.domain.policy.models import RiskClass
 from secopent.domain.verification.models import (
     CandidateFinding,
-    ReproductionStatus,
-    VerificationMethod,
     VerificationStatus,
     VulnType,
 )
 from secopent.domain.verification.registry import default_registry
 from secopent.infrastructure.adapters.real_scan import RealScanRunner
 from secopent.infrastructure.evidence_store.redaction import RedactionEngine
+from secopent.infrastructure.oracle.rescan_verifier import RescanVerifier
 from secopent.infrastructure.report_templates.renderer import Jinja2TemplateRenderer
 
 _NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -94,35 +93,6 @@ class _NullAudit:
 
     def record(self, **_: object) -> None:
         return None
-
-
-class RescanVerifier:
-    """Oracle verifier that reproduces a finding by RE-RUNNING the real scan.
-
-    A reproduction succeeds when the re-scan still finds the candidate's asset.
-    This is deterministic reproduction (a legitimate oracle for reproducible
-    findings); ptai-based verification replaces this in Phase A4.
-    """
-
-    def __init__(self, runner: RealScanRunner, scan_kwargs: dict) -> None:
-        self._runner = runner
-        self._scan_kwargs = scan_kwargs
-
-    def reproduce(
-        self,
-        candidate: CandidateFinding,
-        method: VerificationMethod,
-        *,
-        canary_token: str,
-    ) -> ReproductionStatus:
-        result = self._runner.scan(**self._scan_kwargs)
-        reproduced = any(
-            candidate.target == o.asset_identity
-            or candidate.target in o.asset_identity
-            or o.asset_identity in candidate.target
-            for o in result.observations
-        )
-        return ReproductionStatus.SUCCESS if reproduced else ReproductionStatus.FAILURE
 
 
 def _write_template(tmp_path: Path, body: str) -> str:

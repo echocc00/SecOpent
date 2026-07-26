@@ -44,7 +44,7 @@
 | 19 | Custom POC 晋升 | Community 审核 -> 可选晋升 TestCatalog（外部评审 M3） |
 | 20 | Redaction 范围 | 延伸到 Report 渲染层；区分我方/目标 secret（外部评审 M7/M9） |
 | 21 | MCP 供应链 | 采纳的 MCP 输出标 trust level + 供应链 mitigation（外部评审 M8） |
-| 22 | OracleEngine | 采纳 pentest-ai（MIT）作 oracle，建 VerificationMethodRegistry 策展层（不造轮子） |
+| 22 | OracleEngine | 自建 RescanVerifier（真实重扫 N/N 复现），ptai 重定位 peer agent（ADR-014 修正） |
 | 23 | LogicTestGenerator | 采纳 RESTler（跳步/乱序）+ Schemathesis（越界部分），自建不变量违反 + 编排层（不造轮子） |
 
 ---
@@ -588,9 +588,9 @@ Observation（工具产出，低信任）
 
 版本匹配类结果只能停 Candidate，必须 oracle 复现才确认。
 
-### 9.2 oracle N/N 复证（核心，采纳 pentest-ai，决策 22）
+### 9.2 oracle N/N 复证（核心，自建 RescanVerifier，决策 22 / ADR-014 修正）
 
-**OracleEngine 采纳 pentest-ai（ptai，MIT，`pip install ptai`）**：不自建 oracle 引擎。ptai 已实现 N/N 复证 + 14 类漏洞 oracle + 证据胶囊可回放。我们建 **VerificationMethodRegistry**（漏洞类型 -> 验证方法的策展层，含 N 值/重跑策略/5xx 阈值）覆盖在 ptai 之上，ptai 按 registry 配置执行验证。
+**OracleEngine 用自建 RescanVerifier（真实重扫 N/N 复现）**：oracle 通过**重新执行真实扫描**验证 Candidate 是否可复现（A3 已真实验证 Juice Shop SQLi）。我们建 **VerificationMethodRegistry**（漏洞类型 -> 验证方法的策展层，含 N 值/重跑策略/5xx 阈值）配置复证策略。**ptai 不作 oracle 后端**——A4 spike 证实 ptai 是自主 AI 渗透 agent（非验证库），重定位为未来可选 peer agent（见 ADR-014 修正、`sepcs/2026-07-27-a4-ptai-spike-findings.md`）。
 
 oracle 是确定性复现器，不是 LLM。对每个 Candidate：
 1. 从 VerificationMethodRegistry 读该漏洞类型的验证方法（确定性，策展）
@@ -1133,7 +1133,7 @@ Secret 永不发送；Restricted 默认禁止；Sensitive 默认脱敏。本地�
 23. **远程 Worker 推 V2**（O1=B）：V1 单机 Standalone + DB Lease，分布式基础设施推 V2，§6.7 spec 保留
 24. **CoverageMatrix 开源**（O4=B）：MIT 开源聚社区+透明信任，moat 转到 TestCatalog/AppModel/oracle
 25. **V1 市场实验定位**（19.6=B）：V1 验证差异化非盈利，V2 进 ToB；竞品差异化 mapping 见 §22
-26. **OracleEngine 采纳 pentest-ai**（决策 22）：不自建 oracle，采纳 ptai（MIT）+ 建 VerificationMethodRegistry 策展层；集成不造轮子
+26. **OracleEngine 自建 RescanVerifier**（决策 22 / ADR-014 修正）：A4 spike 证伪 ptai 假设（ptai 是自主 agent 非验证库）；自建 RescanVerifier 真实重扫 N/N 复现 + VerificationMethodRegistry 策展层；ptai 重定位 peer agent
 27. **LogicTestGenerator 采纳 RESTler + Schemathesis**（决策 23）：跳步/乱序/重放用 RESTler，越界用 Schemathesis，自建不变量违反 + 编排层；V1 覆盖 5 类（优于原 O3=B 的 3 类）；集成不造轮子
 
 ---
@@ -1565,7 +1565,7 @@ V1 的 Domain/Application/Infrastructure 边界 + Repository Contract 抽象已�
 
 | 开源同类 | 覆盖 | 采纳方式 | 替代的自建 |
 |---|---|---|---|
-| **pentest-ai / ptai**（MIT） | oracle N/N 复证 + 14 类漏洞 oracle + 证据胶囊 | Adapter/库，决策 22 | OracleEngine 自建 |
+| **pentest-ai / ptai**（MIT） | 自主 AI 渗透 agent（MCP server + CLI，200+ 工具） | **重定位为 peer agent**（MCP 注册表接入，需 Linux，V1.1/V2） | OracleEngine 自建 RescanVerifier（非 ptai） |
 | **RESTler**（微软，MIT） | 状态ful API 序列测试（跳步/乱序/重放） | Adapter，决策 23 | LogicTestGenerator 跳步/乱序/重放自建 |
 | **Schemathesis**（MIT） | property-based API boundary 测试（越界） | Adapter，决策 23 | LogicTestGenerator 越界自建 |
 | **HexStrike AI**（MIT） | 150+ 工具 MCP 封装，12+ agent | MCP 工具采纳 | MCP 工具自写 |
@@ -1617,7 +1617,7 @@ V1 的 Domain/Application/Infrastructure 边界 + Repository Contract 抽象已�
 | checkov | https://github.com/bridgecrewio/checkov | IaC 扫描 |
 | dalfox | https://github.com/hahwul/dalfox | XSS 专项扫描 |
 | ZAP | https://github.com/zaproxy/zaproxy | Web 主动扫描（Standalone-only） |
-| **pentest-ai (ptai)** | https://github.com/0xSteph/pentest-ai | **oracle N/N 验证（决策 22 采纳）** |
+| **pentest-ai (ptai)** | https://github.com/0xSteph/pentest-ai | **peer 渗透 agent（重定位，非 oracle；MCP 接入，需 Linux，V1.1/V2）** |
 | **RESTler** | https://github.com/microsoft/restler-fuzzer | **状态ful API 序列测试（决策 23 采纳）** |
 | **Schemathesis** | https://github.com/schemathesis/schemathesis | **API property-based 测试（决策 23 采纳）** |
 | cve-mcp-server | https://github.com/mukul975/cve-mcp-server | 漏洞情报 MCP（采纳） |

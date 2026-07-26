@@ -190,17 +190,18 @@
 
 ---
 
-## ADR-014：OracleEngine 采纳 pentest-ai，不自建
+## ADR-014：OracleEngine 自建 RescanVerifier，ptai 重定位为 peer agent
 
-**Context**：pentest-ai（ptai，MIT，`pip install ptai`）已实现 oracle N/N 复证 + 14 类漏洞 oracle + 证据胶囊。
+**Context**：设计初版假设 pentest-ai（ptai）是验证库（`ptai.verify()`），可作 OracleEngine 后端。A4 spike（2026-07-27）证实 ptai 1.1.0 是**自主 AI 渗透 agent**（MCP server + CLI，200+ 工具），不是验证库，没有 `verify()` API。其重依赖（impacket/bloodhound/scapy）在 Windows 装不上。详见 `sepcs/2026-07-27-a4-ptai-spike-findings.md`。
 
-**Decision**：采纳 ptai 作 OracleEngine，建 VerificationMethodRegistry 策展层（漏洞类型->验证方法 + N 值 + 重跑策略 + 5xx 阈值）覆盖在 ptai 之上。
+**Decision**：OracleEngine 用**自建 RescanVerifier**（真实重扫 N/N 复现，已在 A3 真实验证 Juice Shop SQLi）。ptai **不**作 oracle 后端，重定位为未来可选的 **peer 渗透 agent**（经 M4 MCP 注册表以 trust level `adopted_external_mcp` 接入，agent 把 ptai 当工具调用，输出经 oracle 复证才确认）。ptai 真实集成需 Linux 环境（V1.1/V2）。
 
-**Consequences**：依赖 ptai 上游；VerificationMethodRegistry 自建。换来：不自建 oracle 引擎 + M2 减 3-5 天 + ptai 证据胶囊复用。
+**Consequences**：oracle 自建（无 ptai 依赖，RescanVerifier 已验证）；ptai 集成推迟到 Linux 环境 + MCP peer agent 接入。换来：oracle 不依赖外部 agent，确定性可控；ptai 作为增强能力（peer agent）而非核心验证。
 
 **Rejected**：
-- *自建 OracleEngine*：ptai 已实现（MIT），自建造轮子。
-- *仅用 nuclei matcher*：非 N/N 复证，误报率高。
+- *原 ADR-014（采纳 ptai 作 oracle 后端）*：ptai 不是验证库，API 假设不成立（A4 spike 证伪）。
+- *强制装 ptai 作 oracle*：Windows 装不上；即使 Linux 装上，ptai 是自主 agent 非验证库，性质不符。
+- *仅用 nuclei matcher（非 N/N）*：误报率高，不满足确定性验证要求。
 
 ---
 
