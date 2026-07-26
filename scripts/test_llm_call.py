@@ -4,6 +4,7 @@ Reads MiniMax key from minimax-key.txt, sets env, calls RemoteOpenAICompatibleBa
 DO NOT commit this script's output (contains no key, but verify before sharing).
 """
 from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path

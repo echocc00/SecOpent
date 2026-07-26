@@ -1,7 +1,9 @@
 """Check cloud host deployment readiness for SecOpent."""
 from __future__ import annotations
-import paramiko
+
 import sys
+
+import paramiko
 
 HOST = "8.133.200.235"
 USER = "root"
