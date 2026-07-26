@@ -54,3 +54,8 @@ strict = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "integration: requires Docker + real tools (slow)",
+    "e2e_real: requires Docker + target ranges (slow)",
+    "browser: requires Playwright browser",
+]

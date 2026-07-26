@@ -157,16 +157,27 @@ class AdapterRunner:
     The runner is stateless across runs; all per-run state lives in the
     inputs and outputs. Dependencies (executor, policy_engine, cas_store,
     parser_registry) are injected so each is replaceable in tests.
+
+    If no ``executor`` is supplied, the production
+    :class:`SubprocessContainerExecutor` (real ``docker run``) is used. Tests
+    inject a mock executor. NOTE (Phase A): the production executor expects
+    digest-pinned image refs and a clean tool command; wiring the manifest's
+    image refs (IMAGE_CATALOG) and command format through the runner is
+    completed in A3 - unit tests here use the mock executor.
     """
 
     def __init__(
         self,
         *,
-        executor: ContainerExecutor,
+        executor: ContainerExecutor | None = None,
         policy_engine: PolicyEngineFn,
         cas_store: CASStore,
         parser_registry: Mapping[str, Callable[..., tuple[Observation, ...]]],
     ) -> None:
+        if executor is None:
+            from .subprocess_executor import SubprocessContainerExecutor
+
+            executor = SubprocessContainerExecutor()
         self._executor = executor
         self._policy_engine = policy_engine
         self._cas = cas_store
@@ -326,6 +337,33 @@ class AdapterRunner:
                 if path.is_file():
                     artifacts[path.name] = path.read_bytes()
         return parser(stdout=stdout, source=source, artifacts=artifacts)
+
+
+# ---------------------------------------------------------------------------
+# Production runner factory
+# ---------------------------------------------------------------------------
+
+
+def create_production_runner(
+    *,
+    policy_engine: PolicyEngineFn,
+    cas_store: CASStore,
+    parser_registry: Mapping[str, Callable[..., tuple[Observation, ...]]],
+) -> AdapterRunner:
+    """Build an AdapterRunner wired to the real SubprocessContainerExecutor.
+
+    The production execution path runs digest-pinned tool containers under the
+    §8.4 hardening flags. (Phase A: the manifest image-ref / command wiring
+    through the runner is completed in A3.)
+    """
+    from .subprocess_executor import SubprocessContainerExecutor
+
+    return AdapterRunner(
+        executor=SubprocessContainerExecutor(),
+        policy_engine=policy_engine,
+        cas_store=cas_store,
+        parser_registry=parser_registry,
+    )
 
 
 # ---------------------------------------------------------------------------

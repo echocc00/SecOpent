@@ -485,6 +485,35 @@ def test_scope_denied_error_is_domain_error() -> None:
     assert issubclass(ScopeDeniedError, DomainError)
 
 
+def test_default_executor_is_subprocess(tmp_path: Path) -> None:
+    """With no executor injected, the runner uses the real subprocess executor."""
+    from secopent.infrastructure.adapters.subprocess_executor import (
+        SubprocessContainerExecutor,
+    )
+
+    runner = AdapterRunner(
+        policy_engine=policy_evaluate,
+        cas_store=FakeCASStore(base_dir=tmp_path),
+        parser_registry={},
+    )
+    assert isinstance(runner._executor, SubprocessContainerExecutor)
+
+
+def test_create_production_runner_wires_subprocess(tmp_path: Path) -> None:
+    """The production factory wires the real subprocess executor."""
+    from secopent.infrastructure.adapters.base import create_production_runner
+    from secopent.infrastructure.adapters.subprocess_executor import (
+        SubprocessContainerExecutor,
+    )
+
+    runner = create_production_runner(
+        policy_engine=policy_evaluate,
+        cas_store=FakeCASStore(base_dir=tmp_path),
+        parser_registry={},
+    )
+    assert isinstance(runner._executor, SubprocessContainerExecutor)
+
+
 # ---------------------------------------------------------------------------
 # Cloud-target scope routing (M1 Task 12, §4.1.1 方案 B)
 # ---------------------------------------------------------------------------
