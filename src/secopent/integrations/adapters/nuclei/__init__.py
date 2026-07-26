@@ -193,9 +193,13 @@ def parse(
             or record.get("url")
             or ""
         )
-        if not host or host in seen:
+        # De-dupe on (template_id, matched target): real scans of one target
+        # emit many findings that share a host, and distinct templates can match
+        # the same URL - keying on host alone would drop distinct vulnerabilities.
+        dedup_key = f"{template_id}|{host}"
+        if not host or dedup_key in seen:
             continue
-        seen.add(host)
+        seen.add(dedup_key)
         tags = info.get("tags") or record.get("tags") or []
         cwe, owasp = _map_tags(tags)
         cve = _extract_cve(record.get("reference") or info.get("reference"))

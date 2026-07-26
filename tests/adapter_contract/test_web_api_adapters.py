@@ -504,3 +504,22 @@ def test_scope_deny_blocks_before_container(
     with pytest.raises(ScopeDeniedError):
         runner.run(manifest, adapter_input)
     assert executor.calls == [], "container executed despite scope denial"
+
+
+def test_nuclei_dedup_keeps_distinct_templates_on_same_host() -> None:
+    """A3.3: real scans of one target emit many findings sharing a host. Dedup
+    must key on (template-id, matched target), so distinct vulnerabilities at the
+    same URL survive, while exact duplicates collapse."""
+    same_host = "https://shop.test/login"
+    sqli = (
+        '{"template-id": "sqli-login", "info": {"name": "SQLi", '
+        '"tags": ["sqli"], "severity": "high"}, "matched-at": "' + same_host + '", "type": "http"}'
+    )
+    xss = (
+        '{"template-id": "xss-login", "info": {"name": "XSS", '
+        '"tags": ["xss"], "severity": "medium"}, "matched-at": "' + same_host + '", "type": "http"}'
+    )
+    jsonl = "\n".join([sqli, xss, sqli])  # third line duplicates the first
+    observations = nuclei.parse(stdout=jsonl, source=_ADAPTER_SOURCE, artifacts={})
+    rule_ids = sorted(o.rule_id for o in observations)
+    assert rule_ids == ["sqli-login", "xss-login"]
