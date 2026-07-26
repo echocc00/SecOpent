@@ -25,7 +25,7 @@ import os
 
 import httpx
 
-from . import LLMBackend, LLMError, LLMResponse
+from . import LLMError, LLMResponse
 
 
 class RemoteOpenAICompatibleBackend:
