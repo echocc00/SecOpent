@@ -15,13 +15,20 @@ in-memory store; the production app wires the SqlAlchemy repositories.
 from __future__ import annotations
 
 import json
+import tempfile
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy.engine import Engine
+
+from ...infrastructure.db.session import Database
+from ...infrastructure.db.sqlite import create_sqlite_engine
+from .routers import assessments_router, projects_router, scopes_router
 
 
 class FindingIn(BaseModel):
@@ -43,9 +50,24 @@ class FindingOut(BaseModel):
     cwe: list[str]
 
 
-def create_app() -> FastAPI:
-    """Build an isolated API instance with an in-memory store."""
+def create_app(engine: Engine | None = None) -> FastAPI:
+    """Build an API instance.
+
+    ``engine`` is the SQLAlchemy engine to bind; when omitted a temporary
+    SQLite engine is created (for tests / lightweight runs). Resource routers
+    (projects/scopes/assessments) are DB-backed via ``app.state.db``; the
+    findings/health/SSE endpoints below remain in-memory demonstrations.
+    """
     app = FastAPI(title="SecOpent API", version="0.1.0")
+    if engine is None:
+        engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
+    app.state.db = Database(engine)
+
+    # Resource routers (DB-backed).
+    app.include_router(projects_router)
+    app.include_router(scopes_router)
+    app.include_router(assessments_router)
+
     findings: dict[str, dict[str, Any]] = {}
     idempotency: dict[str, dict[str, Any]] = {}
     counter = {"n": 0}

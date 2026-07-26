@@ -8,14 +8,56 @@ from sqlalchemy.orm import Session
 from ...domain.assessments.models import Approval, Assessment, AssessmentStatus, ExecutionPlan
 from ...domain.audit.models import GENESIS_HASH, AuditEvent
 from ...domain.policy.models import ExecutionMode, RiskClass
+from ...domain.projects.models import Project, ProjectStatus
 from ...domain.scope.models import ScopeLimits, ScopeSnapshot
 from ..db.core_models import (
     CoreApproval,
     CoreAssessment,
     CoreAuditEvent,
     CoreExecutionPlan,
+    CoreProject,
     CoreScopeSnapshot,
 )
+
+
+class SqlAlchemyProjectRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, project: Project) -> None:
+        self._session.add(
+            CoreProject(
+                id=project.id,
+                name=project.name,
+                status=project.status.value,
+                created_at=project.created_at,
+            )
+        )
+
+    def get(self, project_id: str) -> Project | None:
+        row = self._session.get(CoreProject, project_id)
+        if row is None:
+            return None
+        return Project(
+            id=row.id,
+            name=row.name,
+            status=ProjectStatus(row.status),
+            created_at=row.created_at,
+        )
+
+    def list(self) -> list[Project]:
+        rows = self._session.execute(
+            select(CoreProject).order_by(CoreProject.created_at)
+        ).scalars().all()
+        return [
+            Project(
+                id=row.id,
+                name=row.name,
+                status=ProjectStatus(row.status),
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
 
 
 def _to_snapshot(row: CoreScopeSnapshot) -> ScopeSnapshot:
