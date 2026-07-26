@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,4 +27,4 @@ class CoreJob(CoreBase):
     )
     result_digest: Mapped[str] = mapped_column(String(80), nullable=False, default="")
     failure_class: Mapped[str] = mapped_column(String(32), nullable=False, default="")
-    dependencies: Mapped[list] = mapped_column(JSON, nullable=False)
+    dependencies: Mapped[list[Any]] = mapped_column(JSON, nullable=False)

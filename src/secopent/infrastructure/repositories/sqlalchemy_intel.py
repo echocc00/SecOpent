@@ -13,6 +13,7 @@ used by ``UpdateManager`` (Task 6).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
@@ -36,7 +37,7 @@ from ..db.update_models import CoreBundleActivation, CoreUpdateBundle
 # --- Provenance / CVSS serialization ----------------------------------------
 
 
-def _provenance_to_dict(prov: Provenance) -> dict:
+def _provenance_to_dict(prov: Provenance) -> dict[str, Any]:
     return {
         "source": prov.source,
         "fetched_at": prov.fetched_at.astimezone(UTC).isoformat().replace("+00:00", "Z"),
@@ -44,7 +45,7 @@ def _provenance_to_dict(prov: Provenance) -> dict:
     }
 
 
-def _provenance_from_dict(data: dict) -> Provenance:
+def _provenance_from_dict(data: dict[str, Any]) -> Provenance:
     fetched_at = datetime.fromisoformat(data["fetched_at"].replace("Z", "+00:00"))
     return Provenance(
         source=data["source"],
@@ -53,14 +54,14 @@ def _provenance_from_dict(data: dict) -> Provenance:
     )
 
 
-def _cvss_to_dict(cvss: dict[str, tuple[float, Provenance]]) -> dict:
+def _cvss_to_dict(cvss: dict[str, tuple[float, Provenance]]) -> dict[str, Any]:
     return {
         source: {"score": score, "provenance": _provenance_to_dict(prov)}
         for source, (score, prov) in cvss.items()
     }
 
 
-def _cvss_from_dict(data: dict) -> dict[str, tuple[float, Provenance]]:
+def _cvss_from_dict(data: dict[str, Any]) -> dict[str, tuple[float, Provenance]]:
     return {
         source: (entry["score"], _provenance_from_dict(entry["provenance"]))
         for source, entry in data.items()
@@ -278,7 +279,7 @@ class SqlAlchemyUpdateRepository:
         self._session = session
 
     def add_bundle(
-        self, bundle_id: str, version: str, digest: str, payload: dict
+        self, bundle_id: str, version: str, digest: str, payload: dict[str, Any]
     ) -> None:
         from ...domain.common.canonical import utc_now
         self._session.merge(CoreUpdateBundle(
@@ -286,7 +287,7 @@ class SqlAlchemyUpdateRepository:
             payload=payload, staged_at=utc_now(),
         ))
 
-    def get_bundle(self, bundle_id: str) -> dict | None:
+    def get_bundle(self, bundle_id: str) -> dict[str, Any] | None:
         row = self._session.get(CoreUpdateBundle, bundle_id)
         if not row:
             return None

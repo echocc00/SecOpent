@@ -12,6 +12,8 @@ creates every M0+M1 table.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,7 +32,7 @@ class CoreTestCatalog(CoreBase):
     __tablename__ = "core_test_catalogs"
 
     version: Mapped[str] = mapped_column(String(64), primary_key=True)
-    mappings: Mapped[dict] = mapped_column(JSON, nullable=False)
+    mappings: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     digest: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
 
@@ -45,6 +47,6 @@ class CoreCoverageMatrix(CoreBase):
 
     version: Mapped[str] = mapped_column(String(64), primary_key=True)
     framework: Mapped[str] = mapped_column(String(64), primary_key=True)
-    mappings: Mapped[dict] = mapped_column(JSON, nullable=False)
+    mappings: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     total_items: Mapped[int] = mapped_column(nullable=False)
     digest: Mapped[str] = mapped_column(String(80), nullable=False, index=True)

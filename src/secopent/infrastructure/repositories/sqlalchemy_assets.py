@@ -48,12 +48,12 @@ class SqlAlchemyAssetRepository:
         graph = AssetGraph()
         for node in nodes.values():
             graph = graph.add_node(node)
-        for row in self._session.query(CoreAssetEdge).all():
+        for edge_row in self._session.query(CoreAssetEdge).all():
             graph = graph.add_edge(
                 AssetEdge(
-                    src=nodes[row.src_id],
-                    dst=nodes[row.dst_id],
-                    rel=AssetRelation(row.rel),
+                    src=nodes[edge_row.src_id],
+                    dst=nodes[edge_row.dst_id],
+                    rel=AssetRelation(edge_row.rel),
                 )
             )
         return graph

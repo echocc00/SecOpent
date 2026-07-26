@@ -17,6 +17,7 @@ tables declaratively). The repository keeps the FTS row in sync with
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -36,13 +37,13 @@ class CoreVulnerability(CoreBase):
     __tablename__ = "core_vulnerabilities"
 
     canonical_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    aliases: Mapped[list] = mapped_column(JSON, nullable=False)
+    aliases: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=False)
-    cvss: Mapped[dict] = mapped_column(JSON, nullable=False)
-    cwe: Mapped[list] = mapped_column(JSON, nullable=False)
-    references: Mapped[list] = mapped_column(JSON, nullable=False)
+    cvss: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    cwe: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    references: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    provenance: Mapped[dict] = mapped_column(JSON, nullable=False)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     digest: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
 
 
@@ -60,7 +61,7 @@ class CoreAffectedProduct(CoreBase):
     cpe: Mapped[str | None] = mapped_column(String(256), nullable=True)
     package: Mapped[str | None] = mapped_column(String(256), nullable=True)
     version_range: Mapped[str] = mapped_column(String(256), nullable=False)
-    fixed_versions: Mapped[list] = mapped_column(JSON, nullable=False)
+    fixed_versions: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
 
 
 class CoreExploitationSignal(CoreBase):
@@ -109,4 +110,4 @@ class CoreIntelSnapshot(CoreBase):
     source_version: Mapped[str] = mapped_column(String(64), nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     cursor: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    counts: Mapped[dict] = mapped_column(JSON, nullable=False)
+    counts: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)

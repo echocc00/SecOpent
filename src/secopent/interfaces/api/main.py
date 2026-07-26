@@ -63,7 +63,7 @@ def create_app() -> FastAPI:
         if idempotency_key is not None and idempotency_key in idempotency:
             return idempotency[idempotency_key]
         counter["n"] += 1
-        finding = {
+        finding: dict[str, Any] = {
             "id": f"finding-{counter['n']}",
             "title": payload.title,
             "asset": payload.asset,

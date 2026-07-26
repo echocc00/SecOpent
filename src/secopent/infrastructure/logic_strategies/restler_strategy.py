@@ -15,6 +15,8 @@ here (RESTler binary is M5). Each case carries an idempotent signature.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from secopent.domain.appmodel.logic import (
     LogicTestCase,
     LogicTestClass,
@@ -76,7 +78,7 @@ class RestlerStrategy:
             )
         return cases
 
-    def _adjacent_pairs(self, app_model: AppModel) -> list[tuple]:
+    def _adjacent_pairs(self, app_model: AppModel) -> list[tuple[Any, Any]]:
         """Transition pairs where t1 feeds t2 (t1.to_state == t2.from_state)."""
         pairs = []
         for t1 in app_model.transitions:

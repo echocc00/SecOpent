@@ -48,7 +48,8 @@ class OpenApiImporter:
     source_type = "openapi"
 
     def to_draft(self, data: Mapping[str, Any]) -> AppModel:
-        info = data.get("info") if isinstance(data.get("info"), Mapping) else {}
+        info_raw = data.get("info")
+        info: Mapping[str, Any] = info_raw if isinstance(info_raw, Mapping) else {}
         title = str(info.get("title", "app"))
         version = str(info.get("version", "0.0.0"))
         paths = data.get("paths")

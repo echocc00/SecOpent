@@ -11,6 +11,7 @@ us enforce the single-active invariant via primary-key uniqueness.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -26,7 +27,7 @@ class CoreUpdateBundle(CoreBase):
     bundle_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     digest: Mapped[str] = mapped_column(String(80), nullable=False)
-    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     staged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

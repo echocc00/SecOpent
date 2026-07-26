@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -14,7 +15,7 @@ def create_sqlite_engine(path: Path) -> Engine:
     )
 
     @event.listens_for(engine, "connect")
-    def configure(dbapi_connection, _record) -> None:
+    def configure(dbapi_connection: Any, _record: Any) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")

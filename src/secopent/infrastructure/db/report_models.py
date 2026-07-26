@@ -2,6 +2,8 @@
 """ORM table for rendered reports (§13)."""
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import JSON, Boolean, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,7 +15,7 @@ class CoreReport(CoreBase):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     assessment_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(512), nullable=False)
-    sections: Mapped[list] = mapped_column(JSON, nullable=False)
+    sections: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     finding_count: Mapped[int] = mapped_column(nullable=False)
     coverage_rate: Mapped[float] = mapped_column(Float, nullable=False)
     completeness_ok: Mapped[bool] = mapped_column(Boolean, nullable=False)

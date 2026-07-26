@@ -30,7 +30,7 @@ class _PtaiModule(Protocol):
 def _import_ptai() -> Any:
     """Import pentest-ai lazily; raise a clear error if it is unavailable."""
     try:
-        import ptai  # type: ignore[import-not-found]
+        import ptai
     except ImportError as exc:  # pragma: no cover - environment dependent
         raise RuntimeError(
             "pentest-ai (ptai) is not installed; install it or inject a ptai "

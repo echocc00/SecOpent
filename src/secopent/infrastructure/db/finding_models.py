@@ -2,6 +2,8 @@
 """ORM table for correlated findings (§13)."""
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import JSON, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,9 +17,9 @@ class CoreFinding(CoreBase):
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     asset: Mapped[str] = mapped_column(String(512), nullable=False)
     severity: Mapped[str] = mapped_column(String(16), nullable=False)
-    cwe: Mapped[list] = mapped_column(JSON, nullable=False)
-    cve: Mapped[list] = mapped_column(JSON, nullable=False)
-    owasp: Mapped[list] = mapped_column(JSON, nullable=False)
-    observation_ids: Mapped[list] = mapped_column(JSON, nullable=False)
-    evidence_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    cwe: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    cve: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    owasp: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    observation_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
+    evidence_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)

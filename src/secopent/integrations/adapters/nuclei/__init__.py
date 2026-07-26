@@ -178,7 +178,8 @@ def parse(
     observations: list[Observation] = []
     seen: set[str] = set()
     for idx, record in enumerate(records):
-        info = record.get("info") if isinstance(record.get("info"), dict) else {}
+        info_raw = record.get("info")
+        info: dict[str, Any] = info_raw if isinstance(info_raw, dict) else {}
         template_id = (
             record.get("template-id")
             or record.get("templateID")

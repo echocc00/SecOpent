@@ -7,6 +7,8 @@ JSON columns for nested structures (mappings dict).
 """
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,7 +22,7 @@ from ...domain.policy.models import RiskClass
 from ..db.catalog_models import CoreCoverageMatrix, CoreTestCatalog
 
 
-def _required_class_to_dict(cls_: RequiredTestClass) -> dict:
+def _required_class_to_dict(cls_: RequiredTestClass) -> dict[str, Any]:
     return {
         "id": cls_.id,
         "cwe": list(cls_.cwe),
@@ -29,7 +31,7 @@ def _required_class_to_dict(cls_: RequiredTestClass) -> dict:
     }
 
 
-def _required_class_from_dict(data: dict) -> RequiredTestClass:
+def _required_class_from_dict(data: dict[str, Any]) -> RequiredTestClass:
     return RequiredTestClass(
         id=data["id"],
         cwe=tuple(data["cwe"]),
@@ -38,14 +40,14 @@ def _required_class_from_dict(data: dict) -> RequiredTestClass:
     )
 
 
-def _catalog_to_dict(catalog: TestCatalog) -> dict:
+def _catalog_to_dict(catalog: TestCatalog) -> dict[str, Any]:
     return {
         asset_type.value: [_required_class_to_dict(c) for c in classes]
         for asset_type, classes in catalog.mappings.items()
     }
 
 
-def _catalog_from_dict(data: dict) -> dict[AssetType, tuple[RequiredTestClass, ...]]:
+def _catalog_from_dict(data: dict[str, Any]) -> dict[AssetType, tuple[RequiredTestClass, ...]]:
     return {
         AssetType(key): tuple(_required_class_from_dict(c) for c in classes)
         for key, classes in data.items()
