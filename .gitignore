@@ -16,3 +16,4 @@ htmlcov/
 *.sqlite-journal
 *.wal
 *.shm
+minimax-key.txt
