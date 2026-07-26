@@ -1,0 +1,49 @@
+# Self-hosted Interactsh OOB server (Phase A Task A1, Step 4)
+#
+# Per design §9.4 + H4: domestic public OOB services (interact.sh/oast.live)
+# are unstable from CN networks. Self-host Interactsh for reliable OOB callbacks
+# (SSRF / blind SQLi / blind RCE / deserialization verification).
+#
+# Start:  docker compose -f scripts/provision/docker-compose.interactsh.yml up -d
+# Verify: dig @127.0.0.1 test.oast.local -> 127.0.0.1
+#
+# DNS setup (intranet testing):
+#   Add to C:\Windows\System32\drivers\etc\hosts (or /etc/hosts):
+#     127.0.0.1  oast.local
+#   For wildcard *.oast.local resolution, use a local DNS (dnsmasq/acme) or
+#   configure the system resolver to use 127.0.0.1 for *.oast.local.
+#
+# Public deployment (later): point a real domain's NS to this host's IP, then
+# interactsh-server with `-domain <your.domain>`. For Phase A, intranet suffices.
+
+services:
+  interactsh-server:
+    image: projectdiscovery/interactsh-server:latest
+    container_name: secopent-interactsh
+    ports:
+      - "5300:53/udp"   # DNS
+      - "5300:53/tcp"   # DNS over TCP
+      - "8081:80"       # HTTP callback
+      - "8444:443"      # HTTPS callback
+      - "2525:2525"     # SMTP callback
+    command:
+      - "-domain"
+      - "oast.local"
+      - "-listen-ip"
+      - "0.0.0.0"
+      - "-dns-port"
+      - "53"
+      - "-http-port"
+      - "80"
+      - "-https-port"
+      - "443"
+      - "-smtp-port"
+      - "2525"
+    networks:
+      - secopent-oob
+    restart: unless-stopped
+
+networks:
+  secopent-oob:
+    name: secopent-oob
+    driver: bridge

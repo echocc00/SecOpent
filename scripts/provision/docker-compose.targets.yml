@@ -1,0 +1,38 @@
+# SecOpent E2E target ranges (Phase A Task A1, Step 3)
+#
+# Three target archetypes for real E2E (Phase A Task A3):
+#   - juice-shop: Web app with known vulns (SQLi, XSS, IDOR, etc.) - OWASP training app
+#   - httpbin: basic HTTP echo for parser/scope testing
+#   - crapi: API with IDOR/auth issues (multi-service, started separately if needed)
+#
+# Start:  docker compose -f scripts/provision/docker-compose.targets.yml up -d
+# Stop:   docker compose -f scripts/provision/docker-compose.targets.yml down
+# Verify: curl -s http://localhost:3000 (juice-shop), http://localhost:8080 (httpbin)
+#
+# NOTE: crapi is multi-container (web+api+auth+db); pull from upstream crAPI repo
+# when needed. For Phase A core E2E, juice-shop + httpbin suffice.
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    container_name: secopent-juice-shop
+    ports:
+      - "3000:3000"
+    networks:
+      - secopent-targets
+    restart: unless-stopped
+
+  httpbin:
+    image: kennethreitz/httpbin:latest
+    # httpbin's default port is 80 inside the container
+    container_name: secopent-httpbin
+    ports:
+      - "8080:80"
+    networks:
+      - secopent-targets
+    restart: unless-stopped
+
+networks:
+  secopent-targets:
+    name: secopent-targets
+    driver: bridge

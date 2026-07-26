@@ -1,0 +1,58 @@
+# SecOpent LLM backend configuration (Phase A Task A1, Step 5)
+#
+# Decision: remote large model as primary (MiniMax/DeepSeek/etc.).
+# Local model (Ollama) reserved as interface for later (Phase B+).
+#
+# Pick ONE provider and set its API key env var. Examples below.
+# The RemoteOpenAICompatibleBackend works with any OpenAI-compatible API.
+
+# --- MiniMax (recommended, domestic, user has access) ---
+backend: remote
+endpoint: https://api.minimax.chat/v1
+api_key_env: MINIMAX_API_KEY
+model: abab6.5s-chat
+max_tokens: 2048
+temperature: 0.2
+
+# --- DeepSeek alternative (uncomment to use) ---
+# backend: remote
+# endpoint: https://api.deepseek.com/v1
+# api_key_env: DEEPSEEK_API_KEY
+# model: deepseek-chat
+# max_tokens: 2048
+# temperature: 0.2
+
+# --- Qwen/通义 alternative ---
+# backend: remote
+# endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1
+# api_key_env: DASHSCOPE_API_KEY
+# model: qwen-plus
+# max_tokens: 2048
+# temperature: 0.2
+
+# --- OpenAI alternative ---
+# backend: remote
+# endpoint: https://api.openai.com/v1
+# api_key_env: OPENAI_API_KEY
+# model: gpt-4o-mini
+# max_tokens: 2048
+# temperature: 0.2
+
+# Operational constraints (§12.11) - enforced by RemoteModelGateway
+budget:
+  daily_token_limit: 500000       # 500K tokens/day default
+  rate_limit_per_minute: 10       # 10 req/min
+  prompt_size_limit: 32000        # 32K tokens max per prompt
+  monthly_cost_limit_cny: 200     # optional monthly cap
+
+degradation:
+  on_budget_exceeded: stop_agent   # stop agent orchestration, keep catalog execution
+  on_rate_limited: queue_or_drop   # queue up to 100, then drop
+  on_backend_unavailable: stop_agent  # no local fallback yet (Phase B+)
+
+data_classification:
+  secret: never_send               # Secret never sent to LLM
+  restricted: deny_default         # Restricted denied unless explicit consent
+  sensitive: redact_default        # Sensitive redacted before send
+  internal: allow
+  public: allow
