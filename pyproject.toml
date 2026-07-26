@@ -36,6 +36,8 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # image_catalog.py: sha256 digests are inherently long, cannot be split
 "src/secopent/infrastructure/adapters/image_catalog.py" = ["E501"]
+# scripts/: utility scripts, long lines acceptable
+"scripts/*.py" = ["E501"]
 
 [tool.ruff]
 line-length = 100
