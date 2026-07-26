@@ -28,7 +28,12 @@ from sqlalchemy.engine import Engine
 
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
-from .routers import assessments_router, projects_router, scopes_router
+from .routers import (
+    assessments_router,
+    projects_router,
+    scopes_router,
+    tools_router,
+)
 
 
 class FindingIn(BaseModel):
@@ -63,10 +68,11 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
     app.state.db = Database(engine)
 
-    # Resource routers (DB-backed).
+    # Resource routers (DB-backed, except tools which reads the static catalog).
     app.include_router(projects_router)
     app.include_router(scopes_router)
     app.include_router(assessments_router)
+    app.include_router(tools_router)
 
     findings: dict[str, dict[str, Any]] = {}
     idempotency: dict[str, dict[str, Any]] = {}

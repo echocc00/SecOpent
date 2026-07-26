@@ -29,6 +29,20 @@ def test_openapi_spec_accessible(client: TestClient) -> None:
     assert "/projects" in paths
     assert "/scopes/draft" in paths
     assert "/assessments" in paths
+    assert "/tools" in paths
+
+
+def test_tools_lists_adapters(client: TestClient) -> None:
+    resp = client.get("/tools")
+    assert resp.status_code == 200
+    tools = resp.json()
+    keys = {t["key"] for t in tools}
+    assert "nuclei" in keys
+    assert "nmap" in keys
+    assert "prowler" in keys
+    nuclei = next(t for t in tools if t["key"] == "nuclei")
+    assert nuclei["domain"] == "web"
+    assert nuclei["digest"].startswith("sha256:")
 
 
 def test_project_create_get_list(client: TestClient) -> None:
