@@ -1,8 +1,15 @@
-import { useFindings, useProjects } from "@/api/hooks";
+import { useNavigate } from "react-router-dom";
+import { PlusCircle, ShieldCheck } from "lucide-react";
+import { useAssessments, useFindings, usePendingApprovals } from "@/api/hooks";
+import type { components } from "@/api/generated";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PagePlaceholder } from "@/components/shared/PagePlaceholder";
+import { DataTable, type Column } from "@/components/shared/DataTable";
+import { StatusBadge } from "@/components/shared/StatusBadge";
 
-function StatCard({ label, value }: { label: string; value: string }) {
+type Assessment = components["schemas"]["AssessmentOut"];
+
+function StatCard({ label, value }: { label: string; value: number }) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -18,24 +25,58 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 export function Dashboard() {
-  const projects = useProjects();
-  const findings = useFindings();
+  const navigate = useNavigate();
+  const assessments = useAssessments();
+  const pending = usePendingApprovals();
+  const confirmed = useFindings({ oracle_verdict: "confirmed" });
 
-  const projectCount = projects.data?.data?.length ?? 0;
-  const findingCount = findings.data?.data?.length ?? 0;
-  const isLive = projects.isSuccess && findings.isSuccess;
+  const assessmentList = assessments.data?.data ?? [];
+  const pendingCount = pending.data?.data?.length ?? 0;
+  const confirmedCount = confirmed.data?.data?.length ?? 0;
+
+  const columns: Column<Assessment>[] = [
+    { key: "id", header: "Assessment", sortValue: (a) => a.id },
+    { key: "mode", header: "Mode", sortValue: (a) => a.mode },
+    {
+      key: "status",
+      header: "Status",
+      sortValue: (a) => a.status,
+      render: (a) => <StatusBadge status={a.status} />,
+    },
+  ];
 
   return (
-    <PagePlaceholder
-      title="Dashboard"
-      milestone="W4a"
-      description="Overview of projects, assessments, and findings. The counts below are fetched live from the SecOpent API through the /api proxy to confirm the backend wiring."
-    >
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <StatCard label="Projects" value={String(projectCount)} />
-        <StatCard label="Findings" value={String(findingCount)} />
-        <StatCard label="API status" value={isLive ? "live" : "…"} />
+    <div className="flex flex-col gap-6 p-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate("/approvals")}>
+            <ShieldCheck className="mr-2 h-4 w-4" />
+            Approvals
+          </Button>
+          <Button onClick={() => navigate("/assessments/new")}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            New Assessment
+          </Button>
+        </div>
       </div>
-    </PagePlaceholder>
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Assessments" value={assessmentList.length} />
+        <StatCard label="Pending Approvals" value={pendingCount} />
+        <StatCard label="Confirmed Findings" value={confirmedCount} />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <h2 className="text-lg font-medium">Recent Assessments</h2>
+        <DataTable
+          data={assessmentList}
+          columns={columns}
+          rowKey={(a) => a.id}
+          onRowClick={(a) => navigate(`/assessments/${a.id}`)}
+          emptyMessage="No assessments yet. Create one to get started."
+        />
+      </div>
+    </div>
   );
 }
