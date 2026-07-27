@@ -140,6 +140,27 @@ def test_scope_freeze_and_get(client: TestClient) -> None:
     assert fetched.json()["id"] == snapshot["id"]
 
 
+def test_scope_limits_round_trip(client: TestClient) -> None:
+    project = client.post("/projects", json={"name": "Acme"}).json()
+    created = client.post(
+        "/scopes/draft",
+        json={
+            "project_id": project["id"],
+            "include": ["https://acme.test"],
+            "requests_per_second": 10.0,
+            "concurrency": 8,
+            "max_requests": 100_000,
+        },
+    )
+    assert created.status_code == 201
+    limits = created.json()["limits"]
+    assert limits == {
+        "requests_per_second": 10.0,
+        "concurrency": 8,
+        "max_requests": 100_000,
+    }
+
+
 def test_assessment_create_and_get(client: TestClient) -> None:
     project = client.post("/projects", json={"name": "Acme"}).json()
     scope = client.post(
@@ -240,6 +261,40 @@ def test_finding_idempotency_key_prevents_duplicate(client: TestClient) -> None:
     second = client.post("/findings", json=payload, headers={"Idempotency-Key": "k1"})
     assert first.json()["id"] == second.json()["id"]
     assert len(client.get("/findings").json()) == 1
+
+
+def test_finding_filters(client: TestClient) -> None:
+    client.post("/findings", json={"title": "a", "asset": "https://x.test/",
+                                   "severity": "high", "assessment_id": "asm-1"})
+    client.post("/findings", json={"title": "b", "asset": "https://x.test/",
+                                   "severity": "low", "assessment_id": "asm-2"})
+
+    by_assessment = client.get("/findings", params={"assessment_id": "asm-1"})
+    assert len(by_assessment.json()) == 1
+    assert by_assessment.json()[0]["title"] == "a"
+
+    by_severity = client.get("/findings", params={"severity": "low"})
+    assert len(by_severity.json()) == 1
+    assert by_severity.json()[0]["title"] == "b"
+
+
+def test_finding_oracle_verdict(client: TestClient) -> None:
+    finding = client.post(
+        "/findings", json={"title": "SQLi", "asset": "https://x.test/login"}
+    ).json()
+    assert finding["oracle_verdict"] == "pending"
+
+    verdict = client.post(
+        f"/findings/{finding['id']}/verdict", json={"verdict": "confirmed"}
+    )
+    assert verdict.status_code == 200
+    assert verdict.json()["oracle_verdict"] == "confirmed"
+
+    confirmed = client.get("/findings", params={"oracle_verdict": "confirmed"})
+    assert len(confirmed.json()) == 1
+
+    bad = client.post(f"/findings/{finding['id']}/verdict", json={"verdict": "bogus"})
+    assert bad.status_code == 422
 
 
 # --- Audit (hash chain) ------------------------------------------------------

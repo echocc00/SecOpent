@@ -13,6 +13,7 @@ from enum import StrEnum
 
 from ..adapters.contracts import Severity
 from ..common.errors import DomainValidationError
+from ..verification.models import VerificationStatus
 
 
 class FindingStatus(StrEnum):
@@ -41,6 +42,10 @@ class Finding:
     observation_ids: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
     status: FindingStatus = FindingStatus.DRAFT
+    # The assessment this finding belongs to ("" for standalone/manual findings).
+    assessment_id: str = ""
+    # Oracle N/N reproduction verdict (set by the oracle, never the LLM).
+    oracle_verdict: VerificationStatus = VerificationStatus.PENDING
 
     def __post_init__(self) -> None:
         if not self.id:

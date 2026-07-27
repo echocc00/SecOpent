@@ -12,7 +12,7 @@ from ....infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyScopeRepository,
 )
 from ..deps import DbSession
-from ..schemas import ScopeDraftCreate, ScopeSnapshotOut
+from ..schemas import ScopeDraftCreate, ScopeLimitsOut, ScopeSnapshotOut
 
 router = APIRouter(prefix="/scopes", tags=["scopes"])
 
@@ -25,6 +25,11 @@ def _to_out(snapshot: ScopeSnapshot) -> ScopeSnapshotOut:
         exclude=list(snapshot.exclude),
         ports=list(snapshot.ports),
         cloud_accounts=list(snapshot.cloud_accounts),
+        limits=ScopeLimitsOut(
+            requests_per_second=snapshot.limits.requests_per_second,
+            concurrency=snapshot.limits.concurrency,
+            max_requests=snapshot.limits.max_requests,
+        ),
         approved_by=snapshot.approved_by,
         digest=snapshot.digest,
     )
@@ -40,6 +45,9 @@ def freeze_scope(payload: ScopeDraftCreate, session: DbSession) -> ScopeSnapshot
         exclude=tuple(payload.exclude),
         ports=tuple(payload.ports),
         approved_by=payload.approved_by,
+        requests_per_second=payload.requests_per_second,
+        concurrency=payload.concurrency,
+        max_requests=payload.max_requests,
     )
     return _to_out(snapshot)
 

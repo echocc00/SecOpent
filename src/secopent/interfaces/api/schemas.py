@@ -31,6 +31,15 @@ class ScopeDraftCreate(BaseModel):
     exclude: list[str] = []
     ports: list[int] = [80, 443]
     approved_by: str = "analyst"
+    requests_per_second: float = 5.0
+    concurrency: int = 3
+    max_requests: int = 50_000
+
+
+class ScopeLimitsOut(BaseModel):
+    requests_per_second: float
+    concurrency: int
+    max_requests: int
 
 
 class ScopeSnapshotOut(BaseModel):
@@ -40,6 +49,7 @@ class ScopeSnapshotOut(BaseModel):
     exclude: list[str]
     ports: list[int]
     cloud_accounts: list[str]
+    limits: ScopeLimitsOut
     approved_by: str
     digest: str
 
@@ -65,6 +75,7 @@ class FindingCreate(BaseModel):
     asset: str
     severity: str = "medium"
     cwe: list[str] = []
+    assessment_id: str = ""
 
 
 class FindingOut(BaseModel):
@@ -77,6 +88,13 @@ class FindingOut(BaseModel):
     cve: list[str]
     owasp: list[str]
     status: str
+    assessment_id: str
+    oracle_verdict: str
+
+
+class FindingVerdict(BaseModel):
+    # Oracle N/N reproduction verdict: pending/confirmed/refuted/inconclusive.
+    verdict: str
 
 
 # --- Intel (vulnerability knowledge layer) ---

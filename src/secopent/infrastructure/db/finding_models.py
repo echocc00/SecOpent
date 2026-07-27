@@ -23,3 +23,5 @@ class CoreFinding(CoreBase):
     observation_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     evidence_ids: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    assessment_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    oracle_verdict: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
