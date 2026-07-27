@@ -878,6 +878,22 @@ def test_case_yaml_round_trip(client: TestClient) -> None:
     assert fetched["yaml"].startswith("id: case-sqli")
 
 
+def test_case_yaml_update(client: TestClient) -> None:
+    client.post("/cases", json=_case_payload())  # DRAFT
+    updated = client.put("/cases/case-sqli", json={"yaml": "id: case-sqli\nv: 2\n"})
+    assert updated.status_code == 200
+    assert updated.json()["yaml"] == "id: case-sqli\nv: 2\n"
+
+
+def test_case_yaml_update_signed_409(client: TestClient) -> None:
+    client.post("/cases", json=_case_payload())
+    client.post("/cases/case-sqli/validate")
+    client.post("/cases/case-sqli/review", json={"actor_role": "human"})
+    client.post("/cases/case-sqli/sign", json={"actor_role": "human"})
+    resp = client.put("/cases/case-sqli", json={"yaml": "changed: true"})
+    assert resp.status_code == 409
+
+
 def test_case_analyze_risk_ok(client: TestClient) -> None:
     client.post("/cases", json=_case_payload())  # GET step -> computed low
     analysis = client.post("/cases/case-sqli/analyze")

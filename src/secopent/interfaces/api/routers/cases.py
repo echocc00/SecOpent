@@ -19,6 +19,7 @@ out-of-order transition -> 409, risk-gate / validation failure -> 422.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -31,13 +32,20 @@ from ....application.cases import (
 )
 from ....application.risk_analyzer import RiskAnalyzer
 from ....application.signing_keys import SigningKeyNotFound
-from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStep
+from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStatus, CaseStep
 from ....domain.cases.risk import risk_rank
 from ....domain.common.errors import DomainError
 from ....domain.policy.models import RiskClass
 from ....infrastructure.repositories.sqlalchemy_cases import SqlAlchemyCaseRegistry
 from ..deps import DbSession
-from ..schemas import CaseAction, CaseAnalysisOut, CaseCreate, CaseOut, CaseStepOut
+from ..schemas import (
+    CaseAction,
+    CaseAnalysisOut,
+    CaseCreate,
+    CaseOut,
+    CaseStepOut,
+    CaseYamlUpdate,
+)
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -114,6 +122,30 @@ def list_cases(session: DbSession) -> list[CaseOut]:
 @router.get("/{case_id}", response_model=CaseOut)
 def get_case(case_id: str, session: DbSession) -> CaseOut:
     return _execute(lambda: _service(session).get(case_id))
+
+
+@router.put("/{case_id}", response_model=CaseOut)
+def update_case_yaml(
+    case_id: str, body: CaseYamlUpdate, session: DbSession
+) -> CaseOut:
+    """Update a case's YAML source (CaseStudio Monaco editor).
+
+    Only unsigned cases (DRAFT/VALIDATED) are editable; SIGNED/PUBLISHED cases
+    are immutable (immutability after signing).
+    """
+    repo = SqlAlchemyCaseRegistry(session)
+    existing = repo.get(case_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    if existing.status not in (CaseStatus.DRAFT, CaseStatus.VALIDATED):
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot edit a {existing.status.value} case "
+            "(signed/published cases are immutable)",
+        )
+    updated = replace(existing, yaml=body.yaml)
+    repo.put(updated)
+    return case_to_out(updated)
 
 
 @router.post("/{case_id}/validate", response_model=CaseOut)

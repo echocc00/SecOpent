@@ -373,6 +373,10 @@ class CaseAction(BaseModel):
     key_id: str | None = None
 
 
+class CaseYamlUpdate(BaseModel):
+    yaml: str
+
+
 # --- Signing keys (server-held Ed25519) ---
 class SigningKeyOut(BaseModel):
     key_id: str
