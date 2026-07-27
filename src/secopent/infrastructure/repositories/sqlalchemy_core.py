@@ -117,14 +117,22 @@ class SqlAlchemyAuditRepository:
         rows = self._session.execute(
             select(CoreAuditEvent).order_by(CoreAuditEvent.occurred_at)
         ).scalars().all()
-        return [
-            AuditEvent(
-                id=r.id, actor=r.actor, action=r.action, resource_type=r.resource_type,
-                resource_id=r.resource_id, payload=r.payload, previous_hash=r.previous_hash,
-                event_hash=r.event_hash, occurred_at=r.occurred_at,
+        events: list[AuditEvent] = []
+        for r in rows:
+            occurred_at = r.occurred_at
+            if occurred_at.tzinfo is None:
+                # SQLite stores DateTime(timezone=True) as naive; re-attach UTC
+                # so the round-tripped event hashes identically to the original
+                # (verify_chain recomputes the canonical digest over occurred_at).
+                occurred_at = occurred_at.replace(tzinfo=UTC)
+            events.append(
+                AuditEvent(
+                    id=r.id, actor=r.actor, action=r.action, resource_type=r.resource_type,
+                    resource_id=r.resource_id, payload=r.payload, previous_hash=r.previous_hash,
+                    event_hash=r.event_hash, occurred_at=occurred_at,
+                )
             )
-            for r in rows
-        ]
+        return events
 
     def last_hash(self) -> str:
         rows = self._session.execute(

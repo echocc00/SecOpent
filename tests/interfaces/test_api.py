@@ -30,7 +30,8 @@ def test_create_and_get_finding(client: TestClient) -> None:
     )
     assert created.status_code == 201
     finding = created.json()
-    assert finding["id"] == "finding-1"
+    # DB-backed findings use a deterministic content-addressed id.
+    assert finding["id"].startswith("finding:")
     assert finding["severity"] == "high"
 
     fetched = client.get(f"/findings/{finding['id']}")

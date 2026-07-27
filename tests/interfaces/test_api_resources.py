@@ -6,11 +6,27 @@ exercising the DB-backed routers end-to-end (create -> persist -> read).
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from secopent.domain.common.canonical import utc_now
+from secopent.domain.intel.models import (
+    AffectedProduct,
+    DetectionMapping,
+    ExploitationSignal,
+    Vulnerability,
+)
+from secopent.domain.intel.provenance import Provenance
+from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.db.session import init_db
 from secopent.infrastructure.db.sqlite import create_sqlite_engine
+from secopent.infrastructure.repositories.sqlalchemy_intel import (
+    SqlAlchemyIntelRepository,
+    SqlAlchemyUpdateRepository,
+)
 from secopent.interfaces.api.main import create_app
 
 
@@ -30,6 +46,11 @@ def test_openapi_spec_accessible(client: TestClient) -> None:
     assert "/scopes/draft" in paths
     assert "/assessments" in paths
     assert "/tools" in paths
+    assert "/findings" in paths
+    assert "/intel/search" in paths
+    assert "/updates/active" in paths
+    assert "/audit/events" in paths
+    assert "/audit/verify" in paths
 
 
 def test_tools_lists_adapters(client: TestClient) -> None:
@@ -120,3 +141,163 @@ def test_assessment_invalid_mode_422(client: TestClient) -> None:
         },
     )
     assert resp.status_code == 422
+
+
+# --- Findings (DB-backed, idempotent) ----------------------------------------
+
+
+def test_finding_create_get_list(client: TestClient) -> None:
+    created = client.post(
+        "/findings",
+        json={"title": "SQLi", "asset": "https://x.test/login", "severity": "high",
+              "cwe": ["CWE-89"]},
+    )
+    assert created.status_code == 201
+    finding = created.json()
+    assert finding["id"].startswith("finding:")
+    assert finding["severity"] == "high"
+    assert finding["status"] == "draft"
+
+    fetched = client.get(f"/findings/{finding['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["title"] == "SQLi"
+
+    client.post("/findings", json={"title": "XSS", "asset": "https://x.test/"})
+    listed = client.get("/findings")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 2
+
+
+def test_finding_unknown_404(client: TestClient) -> None:
+    assert client.get("/findings/nope").status_code == 404
+
+
+def test_finding_invalid_severity_422(client: TestClient) -> None:
+    resp = client.post(
+        "/findings",
+        json={"title": "x", "asset": "https://x.test/", "severity": "bogus"},
+    )
+    assert resp.status_code == 422
+
+
+def test_finding_idempotency_key_prevents_duplicate(client: TestClient) -> None:
+    payload = {"title": "SQLi", "asset": "https://x.test/login"}
+    first = client.post("/findings", json=payload, headers={"Idempotency-Key": "k1"})
+    second = client.post("/findings", json=payload, headers={"Idempotency-Key": "k1"})
+    assert first.json()["id"] == second.json()["id"]
+    assert len(client.get("/findings").json()) == 1
+
+
+# --- Audit (hash chain) ------------------------------------------------------
+
+
+def test_audit_events_and_verify(client: TestClient) -> None:
+    # Creating a scope records an audit event through the ScopeService chain.
+    project = client.post("/projects", json={"name": "Acme"}).json()
+    client.post(
+        "/scopes/draft",
+        json={"project_id": project["id"], "include": ["https://acme.test"]},
+    )
+    events = client.get("/audit/events")
+    assert events.status_code == 200
+    assert len(events.json()) >= 1
+
+    verify = client.get("/audit/verify")
+    assert verify.status_code == 200
+    body = verify.json()
+    assert body["valid"] is True
+    assert body["event_count"] >= 1
+
+
+# --- Intel (FTS5 search) -----------------------------------------------------
+
+
+def _provenance(source: str = "nvd") -> Provenance:
+    return Provenance(source=source, fetched_at=utc_now(), source_version="1.0")
+
+
+def _vulnerability(canonical_id: str, description: str, cwe: tuple[str, ...]) -> Vulnerability:
+    product = AffectedProduct(
+        vendor="acme", product="widget", cpe=None, package=None,
+        version_range=">=1.0,<2.0", fixed_versions=("2.0.1",),
+    )
+    mapping = DetectionMapping(
+        vulnerability_id=canonical_id, case_version="2026.07",
+        detection_type="network", risk=RiskClass.LOW, confidence=0.8,
+    )
+    signal = ExploitationSignal(
+        kev=False, epss_score=0.1, public_exploit=False,
+        ransomware=False, active_exploitation=False,
+    )
+    return Vulnerability(
+        canonical_id=canonical_id, aliases=(canonical_id,), description=description,
+        cvss={"nvd": (7.5, _provenance())}, cwe=cwe,
+        references=("https://example.org/advisory",),
+        published_at=datetime(2024, 6, 1, tzinfo=UTC),
+        affected_products=(product,), exploitation_signal=signal,
+        detection_mappings=(mapping,), provenance=_provenance(source="osv"),
+    )
+
+
+def test_intel_search_and_get(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "intel.db")
+    init_db(engine)
+    with Session(engine) as session:
+        SqlAlchemyIntelRepository(session).add_vulnerability(
+            _vulnerability("CVE-2024-1234", "Heap overflow in acme widget.", ("CWE-787",))
+        )
+        session.commit()
+
+    with TestClient(create_app(engine)) as intel_client:
+        by_cve = intel_client.get("/intel/search", params={"cve": "CVE-2024-1234"})
+        assert by_cve.status_code == 200
+        results = by_cve.json()
+        assert len(results) == 1
+        assert results[0]["canonical_id"] == "CVE-2024-1234"
+        # Multi-source CVSS preserved as source -> score.
+        assert results[0]["cvss"]["nvd"] == 7.5
+
+        fetched = intel_client.get("/intel/CVE-2024-1234")
+        assert fetched.status_code == 200
+        assert fetched.json()["affected_products"][0]["vendor"] == "acme"
+
+        assert intel_client.get("/intel/CVE-0000-0000").status_code == 404
+
+
+def test_intel_search_empty_query_returns_empty(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "intel2.db")
+    with TestClient(create_app(engine)) as intel_client:
+        resp = intel_client.get("/intel/search")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+# --- Updates (bundle state) --------------------------------------------------
+
+
+def test_updates_active_empty_and_bundle_404(client: TestClient) -> None:
+    active = client.get("/updates/active")
+    assert active.status_code == 200
+    assert active.json() == {"active_bundle_id": None, "bundle": None}
+    assert client.get("/updates/bundles/nope").status_code == 404
+
+
+def test_updates_active_bundle_after_seed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "updates.db")
+    init_db(engine)
+    with Session(engine) as session:
+        repo = SqlAlchemyUpdateRepository(session)
+        repo.add_bundle("bun-1", "2026.07.1", "sha256:abc", {"catalog": {}})
+        repo.set_active_bundle("bun-1")
+        session.commit()
+
+    with TestClient(create_app(engine)) as updates_client:
+        active = updates_client.get("/updates/active")
+        assert active.status_code == 200
+        body = active.json()
+        assert body["active_bundle_id"] == "bun-1"
+        assert body["bundle"]["version"] == "2026.07.1"
+
+        fetched = updates_client.get("/updates/bundles/bun-1")
+        assert fetched.status_code == 200
+        assert fetched.json()["digest"] == "sha256:abc"
