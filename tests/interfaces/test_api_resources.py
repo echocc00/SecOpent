@@ -161,6 +161,25 @@ def test_assessment_create_and_get(client: TestClient) -> None:
     assert fetched.json()["id"] == assessment["id"]
 
 
+def test_assessment_list_and_filter(client: TestClient) -> None:
+    project = client.post("/projects", json={"name": "Acme"}).json()
+    scope = client.post(
+        "/scopes/draft",
+        json={"project_id": project["id"], "include": ["https://acme.test"]},
+    ).json()
+    client.post(
+        "/assessments",
+        json={"project_id": project["id"], "scope_snapshot_id": scope["id"]},
+    )
+    listed = client.get("/assessments")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+
+    filtered = client.get("/assessments", params={"project_id": project["id"]})
+    assert len(filtered.json()) == 1
+    assert client.get("/assessments", params={"project_id": "other"}).json() == []
+
+
 def test_assessment_invalid_mode_422(client: TestClient) -> None:
     project = client.post("/projects", json={"name": "Acme"}).json()
     scope = client.post(

@@ -163,6 +163,21 @@ class SqlAlchemyAssessmentRepository:
             active_plan_id=row.active_plan_id, approval_id=row.approval_id,
         )
 
+    def list_all(self, project_id: str | None = None) -> list[Assessment]:
+        stmt = select(CoreAssessment)
+        if project_id is not None:
+            stmt = stmt.where(CoreAssessment.project_id == project_id)
+        rows = self._session.execute(stmt).scalars().all()
+        return [
+            Assessment(
+                id=row.id, project_id=row.project_id,
+                scope_snapshot_id=row.scope_snapshot_id,
+                mode=ExecutionMode(row.mode), status=AssessmentStatus(row.status),
+                active_plan_id=row.active_plan_id, approval_id=row.approval_id,
+            )
+            for row in rows
+        ]
+
     def save_plan(self, plan: ExecutionPlan) -> None:
         self._session.add(CoreExecutionPlan(
             id=plan.id, assessment_id=plan.assessment_id, version=plan.version,

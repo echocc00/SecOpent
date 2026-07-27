@@ -43,6 +43,14 @@ def create_assessment(
     return _to_out(assessment)
 
 
+@router.get("", response_model=list[AssessmentOut])
+def list_assessments(
+    session: DbSession, project_id: str | None = None
+) -> list[AssessmentOut]:
+    repo = SqlAlchemyAssessmentRepository(session)
+    return [_to_out(a) for a in repo.list_all(project_id)]
+
+
 @router.get("/{assessment_id}", response_model=AssessmentOut)
 def get_assessment(assessment_id: str, session: DbSession) -> AssessmentOut:
     assessment = SqlAlchemyAssessmentRepository(session).get(assessment_id)
