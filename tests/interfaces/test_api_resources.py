@@ -20,12 +20,16 @@ from secopent.domain.intel.models import (
     Vulnerability,
 )
 from secopent.domain.intel.provenance import Provenance
+from secopent.domain.jobs.models import Job, JobStatus
 from secopent.domain.policy.models import RiskClass
 from secopent.infrastructure.db.session import init_db
 from secopent.infrastructure.db.sqlite import create_sqlite_engine
 from secopent.infrastructure.repositories.sqlalchemy_intel import (
     SqlAlchemyIntelRepository,
     SqlAlchemyUpdateRepository,
+)
+from secopent.infrastructure.repositories.sqlalchemy_jobs import (
+    SqlAlchemyJobRepository,
 )
 from secopent.interfaces.api.main import create_app
 
@@ -51,6 +55,9 @@ def test_openapi_spec_accessible(client: TestClient) -> None:
     assert "/updates/active" in paths
     assert "/audit/events" in paths
     assert "/audit/verify" in paths
+    assert "/plans" in paths
+    assert "/approvals" in paths
+    assert "/jobs" in paths
 
 
 def test_tools_lists_adapters(client: TestClient) -> None:
@@ -301,3 +308,156 @@ def test_updates_active_bundle_after_seed(tmp_path) -> None:  # type: ignore[no-
         fetched = updates_client.get("/updates/bundles/bun-1")
         assert fetched.status_code == 200
         assert fetched.json()["digest"] == "sha256:abc"
+
+
+# --- Plans + Approvals (assessment workflow) ---------------------------------
+
+
+def _bootstrap_assessment(client: TestClient) -> dict[str, str]:
+    """Create a project + scope + assessment; return their ids."""
+    project = client.post("/projects", json={"name": "Acme"}).json()
+    scope = client.post(
+        "/scopes/draft",
+        json={"project_id": project["id"], "include": ["https://acme.test"]},
+    ).json()
+    assessment = client.post(
+        "/assessments",
+        json={"project_id": project["id"], "scope_snapshot_id": scope["id"]},
+    ).json()
+    return {"project": project["id"], "scope": scope["id"], "assessment": assessment["id"]}
+
+
+def test_plan_create_and_get(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    created = client.post(
+        "/plans",
+        json={
+            "assessment_id": ids["assessment"],
+            "steps": [
+                {"key": "recon", "runner": "nuclei", "risk": "low"},
+                {"key": "sqli", "runner": "nuclei", "risk": "active",
+                 "dependencies": ["recon"]},
+            ],
+        },
+    )
+    assert created.status_code == 201
+    plan = created.json()
+    assert plan["assessment_id"] == ids["assessment"]
+    assert plan["digest"].startswith("sha256:")
+    assert {s["key"] for s in plan["steps"]} == {"recon", "sqli"}
+
+    fetched = client.get(f"/plans/{plan['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == plan["id"]
+
+    # The assessment moved to awaiting_approval with the plan attached.
+    assessment = client.get(f"/assessments/{ids['assessment']}").json()
+    assert assessment["status"] == "awaiting_approval"
+
+
+def test_plan_unknown_assessment_404(client: TestClient) -> None:
+    resp = client.post(
+        "/plans",
+        json={"assessment_id": "nope", "steps": [{"key": "a", "runner": "nuclei", "risk": "low"}]},
+    )
+    assert resp.status_code == 404
+
+
+def test_plan_invalid_risk_422(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    resp = client.post(
+        "/plans",
+        json={"assessment_id": ids["assessment"],
+              "steps": [{"key": "a", "runner": "nuclei", "risk": "bogus"}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_plan_duplicate_step_key_422(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    resp = client.post(
+        "/plans",
+        json={"assessment_id": ids["assessment"],
+              "steps": [
+                  {"key": "a", "runner": "nuclei", "risk": "low"},
+                  {"key": "a", "runner": "nmap", "risk": "low"},
+              ]},
+    )
+    assert resp.status_code == 422
+
+
+def test_approval_create_and_get(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    plan = client.post(
+        "/plans",
+        json={"assessment_id": ids["assessment"],
+              "steps": [{"key": "recon", "runner": "nuclei", "risk": "low"}]},
+    ).json()
+
+    created = client.post(
+        "/approvals",
+        json={
+            "assessment_id": ids["assessment"],
+            "approved_by": "human-reviewer",
+            "approved_risks": ["low", "active"],
+            "approved_capabilities": ["network.scan"],
+        },
+    )
+    assert created.status_code == 201
+    approval = created.json()
+    assert approval["approved_by"] == "human-reviewer"
+    assert approval["plan_digest"] == plan["digest"]
+    assert approval["scope_digest"].startswith("sha256:")
+    assert approval["approved_risks"] == ["active", "low"]
+
+    fetched = client.get(f"/approvals/{approval['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == approval["id"]
+
+    # The assessment is now approved with the approval attached.
+    assessment = client.get(f"/assessments/{ids['assessment']}").json()
+    assert assessment["status"] == "approved"
+
+
+def test_approval_without_plan_422(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    resp = client.post(
+        "/approvals",
+        json={"assessment_id": ids["assessment"], "approved_by": "x"},
+    )
+    assert resp.status_code == 422
+
+
+def test_approval_unknown_assessment_404(client: TestClient) -> None:
+    resp = client.post("/approvals", json={"assessment_id": "nope", "approved_by": "x"})
+    assert resp.status_code == 404
+
+
+# --- Jobs (read-only) --------------------------------------------------------
+
+
+def test_jobs_empty_list_and_404(client: TestClient) -> None:
+    listed = client.get("/jobs")
+    assert listed.status_code == 200
+    assert listed.json() == []
+    assert client.get("/jobs/nope").status_code == 404
+
+
+def test_job_get_after_seed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "jobs.db")
+    init_db(engine)
+    with Session(engine) as session:
+        SqlAlchemyJobRepository(session).add(
+            Job(id="job-1", plan_step_key="web_app:TC-WEB-001",
+                idempotency_key="idem-1", status=JobStatus.READY)
+        )
+        session.commit()
+
+    with TestClient(create_app(engine)) as jobs_client:
+        listed = jobs_client.get("/jobs")
+        assert listed.status_code == 200
+        assert len(listed.json()) == 1
+
+        fetched = jobs_client.get("/jobs/job-1")
+        assert fetched.status_code == 200
+        assert fetched.json()["status"] == "ready"

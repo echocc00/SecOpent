@@ -29,10 +29,13 @@ from sqlalchemy.engine import Engine
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
 from .routers import (
+    approvals_router,
     assessments_router,
     audit_router,
     findings_router,
     intel_router,
+    jobs_router,
+    plans_router,
     projects_router,
     scopes_router,
     tools_router,
@@ -63,6 +66,9 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(intel_router)
     app.include_router(updates_router)
     app.include_router(audit_router)
+    app.include_router(plans_router)
+    app.include_router(approvals_router)
+    app.include_router(jobs_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

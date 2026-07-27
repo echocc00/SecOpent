@@ -140,3 +140,67 @@ class AuditEventOut(BaseModel):
 class AuditVerifyOut(BaseModel):
     valid: bool
     event_count: int
+
+
+# --- Plans ---
+class PlanStepIn(BaseModel):
+    key: str
+    runner: str
+    risk: str
+    parameters: dict[str, object] = {}
+    dependencies: list[str] = []
+
+
+class PlanStepOut(BaseModel):
+    key: str
+    runner: str
+    risk: str
+    parameters: dict[str, object]
+    dependencies: list[str]
+
+
+class PlanCreate(BaseModel):
+    assessment_id: str
+    steps: list[PlanStepIn]
+
+
+class PlanOut(BaseModel):
+    id: str
+    assessment_id: str
+    version: int
+    digest: str
+    steps: list[PlanStepOut]
+
+
+# --- Approvals ---
+class ApprovalCreate(BaseModel):
+    assessment_id: str
+    approved_by: str
+    approved_risks: list[str] = []
+    approved_capabilities: list[str] = []
+
+
+class ApprovalOut(BaseModel):
+    id: str
+    assessment_id: str
+    plan_digest: str
+    scope_digest: str
+    mode: str
+    approved_risks: list[str]
+    approved_capabilities: list[str]
+    approved_by: str
+    digest: str
+
+
+# --- Jobs ---
+class JobOut(BaseModel):
+    id: str
+    plan_step_key: str
+    idempotency_key: str
+    status: str
+    attempt: int
+    max_attempts: int
+    lease_owner: str | None
+    result_digest: str
+    failure_class: str
+    dependencies: list[str]

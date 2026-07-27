@@ -195,3 +195,16 @@ class SqlAlchemyAssessmentRepository:
             approved_capabilities=list(approval.approved_capabilities),
             approved_by=approval.approved_by, digest=approval.digest,
         ))
+
+    def get_approval(self, approval_id: str) -> Approval | None:
+        row = self._session.get(CoreApproval, approval_id)
+        if row is None:
+            return None
+        return Approval(
+            id=row.id, assessment_id=row.assessment_id,
+            plan_digest=row.plan_digest, scope_digest=row.scope_digest,
+            mode=ExecutionMode(row.mode),
+            approved_risks=frozenset(RiskClass(r) for r in row.approved_risks),
+            approved_capabilities=frozenset(row.approved_capabilities),
+            approved_by=row.approved_by, digest=row.digest,
+        )

@@ -2,10 +2,13 @@
 """REST API routers, one module per resource (Phase A P1, W1)."""
 from __future__ import annotations
 
+from .approvals import router as approvals_router
 from .assessments import router as assessments_router
 from .audit import router as audit_router
 from .findings import router as findings_router
 from .intel import router as intel_router
+from .jobs import router as jobs_router
+from .plans import router as plans_router
 from .projects import router as projects_router
 from .scopes import router as scopes_router
 from .tools import router as tools_router
@@ -20,4 +23,7 @@ __all__ = [
     "intel_router",
     "updates_router",
     "audit_router",
+    "plans_router",
+    "approvals_router",
+    "jobs_router",
 ]
