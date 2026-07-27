@@ -321,6 +321,7 @@ class CaseCreate(BaseModel):
     cve: list[str] = []
     owasp: list[str] = []
     origin: str = "manual"
+    yaml: str = ""
 
 
 class CaseStepOut(BaseModel):
@@ -343,6 +344,24 @@ class CaseOut(BaseModel):
     cwe: list[str]
     cve: list[str]
     owasp: list[str]
+    yaml: str
+
+
+class CaseAnalysisOut(BaseModel):
+    """Read-only risk/schema analysis for the CaseStudio YAML editor (decision D).
+
+    Computed by the deterministic RiskAnalyzer (never the LLM): ``computed_risk``
+    is None when a deny-listed pattern is present; ``risk_ok`` is True when the
+    declared risk is >= the computed risk.
+    """
+
+    case_id: str
+    declared_risk: str
+    computed_risk: str | None
+    denied: bool
+    risk_ok: bool
+    schema_ok: bool
+    errors: list[str]
 
 
 class CaseAction(BaseModel):

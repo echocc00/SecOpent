@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .core_models import CoreBase
@@ -38,3 +38,4 @@ class CoreCase(CoreBase):
     cve: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     owasp: Mapped[list[Any]] = mapped_column(JSON, nullable=False)
     verification: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    yaml: Mapped[str] = mapped_column(Text, nullable=False, default="")

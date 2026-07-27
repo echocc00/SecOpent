@@ -117,6 +117,9 @@ class CaseDefinition:
     min_engine_version: str = "1.0.0"
     origin: CaseOrigin = CaseOrigin.MANUAL
     status: CaseStatus = CaseStatus.DRAFT
+    # The Nuclei-compatible YAML source of the case (decision D: the backend
+    # stores the editable YAML; CaseStudio's Monaco editor reads/writes this).
+    yaml: str = ""
 
     def __post_init__(self) -> None:
         if not self.id:

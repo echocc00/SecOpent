@@ -813,6 +813,44 @@ def test_case_invalid_risk_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+def test_case_yaml_round_trip(client: TestClient) -> None:
+    payload = _case_payload()
+    payload["yaml"] = "id: case-sqli\ninfo:\n  severity: low\n"  # type: ignore[index]
+    created = client.post("/cases", json=payload)
+    assert created.status_code == 201
+    fetched = client.get("/cases/case-sqli").json()
+    assert fetched["yaml"].startswith("id: case-sqli")
+
+
+def test_case_analyze_risk_ok(client: TestClient) -> None:
+    client.post("/cases", json=_case_payload())  # GET step -> computed low
+    analysis = client.post("/cases/case-sqli/analyze")
+    assert analysis.status_code == 200
+    body = analysis.json()
+    assert body["computed_risk"] == "low"
+    assert body["risk_ok"] is True
+    assert body["denied"] is False
+    assert body["errors"] == []
+
+
+def test_case_analyze_risk_mismatch(client: TestClient) -> None:
+    # GET computes low but declared passive understates it.
+    client.post("/cases", json=_case_payload(risk="passive"))
+    body = client.post("/cases/case-sqli/analyze").json()
+    assert body["risk_ok"] is False
+    assert body["computed_risk"] == "low"
+    assert len(body["errors"]) == 1
+
+
+def test_case_analyze_denied_pattern(client: TestClient) -> None:
+    payload = _case_payload()
+    payload["steps"] = [{"id": "s1", "action": "os.shell", "spec": {}}]  # type: ignore[index]
+    client.post("/cases", json=payload)
+    body = client.post("/cases/case-sqli/analyze").json()
+    assert body["denied"] is True
+    assert body["computed_risk"] is None
+
+
 # --- AppModels (model-driven logic + LLM boundary) ---------------------------
 
 

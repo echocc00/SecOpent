@@ -55,6 +55,7 @@ def _to_case(row: CoreCase) -> CaseDefinition:
         min_engine_version=row.min_engine_version,
         origin=CaseOrigin(row.origin),
         status=CaseStatus(row.status),
+        yaml=row.yaml,
     )
 
 
@@ -83,6 +84,7 @@ def _from_case(case: CaseDefinition) -> CoreCase:
         cve=list(case.cve),
         owasp=list(case.owasp),
         verification=verification,
+        yaml=case.yaml,
     )
 
 

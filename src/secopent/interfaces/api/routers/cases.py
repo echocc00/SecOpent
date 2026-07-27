@@ -31,11 +31,12 @@ from ....application.cases import (
 )
 from ....application.risk_analyzer import RiskAnalyzer
 from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStep
+from ....domain.cases.risk import risk_rank
 from ....domain.common.errors import DomainError
 from ....domain.policy.models import RiskClass
 from ....infrastructure.repositories.sqlalchemy_cases import SqlAlchemyCaseRegistry
 from ..deps import DbSession
-from ..schemas import CaseAction, CaseCreate, CaseOut, CaseStepOut
+from ..schemas import CaseAction, CaseAnalysisOut, CaseCreate, CaseOut, CaseStepOut
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -57,6 +58,7 @@ def case_to_out(case: CaseDefinition) -> CaseOut:
         cwe=list(case.cwe),
         cve=list(case.cve),
         owasp=list(case.owasp),
+        yaml=case.yaml,
     )
 
 
@@ -96,6 +98,7 @@ def create_case(payload: CaseCreate, session: DbSession) -> CaseOut:
             cve=tuple(payload.cve),
             owasp=tuple(payload.owasp),
             origin=CaseOrigin(payload.origin),
+            yaml=payload.yaml,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"invalid field: {exc}") from exc
@@ -115,6 +118,42 @@ def get_case(case_id: str, session: DbSession) -> CaseOut:
 @router.post("/{case_id}/validate", response_model=CaseOut)
 def validate_case(case_id: str, session: DbSession) -> CaseOut:
     return _execute(lambda: _service(session).validate(case_id))
+
+
+@router.post("/{case_id}/analyze", response_model=CaseAnalysisOut)
+def analyze_case(case_id: str, session: DbSession) -> CaseAnalysisOut:
+    """Deterministic risk/schema analysis for the YAML editor (no transition).
+
+    Runs the RiskAnalyzer over the case and reports the declared-vs-computed
+    risk so the CaseStudio editor can preview risk and block publish on a
+    mismatch. This is static analysis - nothing is executed, and the LLM is
+    never involved.
+    """
+    case = SqlAlchemyCaseRegistry(session).get(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    computed = RiskAnalyzer().analyze(case)
+    computed_value = computed.value if computed is not None else None
+    denied = computed is None
+    risk_ok = computed is not None and risk_rank(case.risk) >= risk_rank(computed)
+    errors: list[str] = []
+    if denied:
+        errors.append(
+            "deny-listed pattern present (shell / unbounded loop / out-of-scope)"
+        )
+    elif not risk_ok:
+        errors.append(
+            f"declared risk {case.risk.value} is below computed risk {computed_value}"
+        )
+    return CaseAnalysisOut(
+        case_id=case.id,
+        declared_risk=case.risk.value,
+        computed_risk=computed_value,
+        denied=denied,
+        risk_ok=risk_ok,
+        schema_ok=bool(case.steps) and not denied,
+        errors=errors,
+    )
 
 
 @router.post("/{case_id}/review", response_model=CaseOut)
