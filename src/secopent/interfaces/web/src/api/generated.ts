@@ -572,7 +572,14 @@ export interface paths {
         };
         /** Get Case */
         get: operations["get_case_cases__case_id__get"];
-        put?: never;
+        /**
+         * Update Case Yaml
+         * @description Update a case's YAML source (CaseStudio Monaco editor).
+         *
+         *     Only unsigned cases (DRAFT/VALIDATED) are editable; SIGNED/PUBLISHED cases
+         *     are immutable (immutability after signing).
+         */
+        put: operations["update_case_yaml_cases__case_id__put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1294,6 +1301,11 @@ export interface components {
             spec: {
                 [key: string]: unknown;
             };
+        };
+        /** CaseYamlUpdate */
+        CaseYamlUpdate: {
+            /** Yaml */
+            yaml: string;
         };
         /** CreateSigningKey */
         CreateSigningKey: {
@@ -2799,6 +2811,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_case_yaml_cases__case_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseYamlUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

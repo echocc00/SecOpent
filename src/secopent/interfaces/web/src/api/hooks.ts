@@ -217,6 +217,15 @@ export const useAnalyzeCase = () =>
       api.POST("/cases/{case_id}/analyze", { params: { path: { case_id } } }),
   });
 
+export const useUpdateCaseYaml = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ case_id, body }: { case_id: string; body: Schemas["CaseYamlUpdate"] }) =>
+      api.PUT("/cases/{case_id}", { params: { path: { case_id } }, body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cases"] }),
+  });
+};
+
 export const useValidateCase = () => {
   const qc = useQueryClient();
   return useMutation({
