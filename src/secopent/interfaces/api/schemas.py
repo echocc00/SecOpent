@@ -67,6 +67,8 @@ class AssessmentOut(BaseModel):
     scope_snapshot_id: str
     mode: str
     status: str
+    active_plan_id: str | None = None
+    approval_id: str | None = None
 
 
 # --- Findings ---

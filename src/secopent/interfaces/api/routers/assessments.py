@@ -34,6 +34,8 @@ def _to_out(assessment: Assessment) -> AssessmentOut:
         scope_snapshot_id=assessment.scope_snapshot_id,
         mode=assessment.mode.value,
         status=assessment.status.value,
+        active_plan_id=assessment.active_plan_id,
+        approval_id=assessment.approval_id,
     )
 
 
