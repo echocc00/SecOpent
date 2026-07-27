@@ -20,6 +20,13 @@ from secopent.domain.assets.models import (
     AssetRelation,
     AssetType,
 )
+from secopent.domain.catalog.models import (
+    AssetType as CatalogAssetType,
+)
+from secopent.domain.catalog.models import (
+    RequiredTestClass,
+    TestCatalog,
+)
 from secopent.domain.common.canonical import utc_now
 from secopent.domain.evidence.models import Evidence, EvidenceLayer
 from secopent.domain.findings.models import Finding, FindingStatus
@@ -37,6 +44,9 @@ from secopent.infrastructure.db.session import init_db
 from secopent.infrastructure.db.sqlite import create_sqlite_engine
 from secopent.infrastructure.repositories.sqlalchemy_assets import (
     SqlAlchemyAssetRepository,
+)
+from secopent.infrastructure.repositories.sqlalchemy_catalog import (
+    SqlAlchemyCatalogRepository,
 )
 from secopent.infrastructure.repositories.sqlalchemy_evidence import (
     SqlAlchemyEvidenceRepository,
@@ -216,6 +226,52 @@ def test_assessment_invalid_mode_422(client: TestClient) -> None:
         },
     )
     assert resp.status_code == 422
+
+
+def test_generate_plan_from_catalog(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "genplan.db")
+    init_db(engine)
+    with Session(engine) as session:
+        SqlAlchemyCatalogRepository(session).add_catalog(
+            TestCatalog(
+                version="2026.07",
+                mappings={
+                    CatalogAssetType.WEB_APP: (
+                        RequiredTestClass(
+                            id="TC-WEB-001", cwe=("CWE-79",),
+                            owasp=("A03:2021",), risk=RiskClass.LOW,
+                        ),
+                    ),
+                },
+            )
+        )
+        session.commit()
+
+    with TestClient(create_app(engine)) as client:
+        project = client.post("/projects", json={"name": "Acme"}).json()
+        scope = client.post(
+            "/scopes/draft",
+            json={"project_id": project["id"], "include": ["https://acme.test"]},
+        ).json()
+        assessment = client.post(
+            "/assessments",
+            json={"project_id": project["id"], "scope_snapshot_id": scope["id"]},
+        ).json()
+
+        resp = client.post(f"/assessments/{assessment['id']}/plans")
+        assert resp.status_code == 201
+        plan = resp.json()
+        assert len(plan["steps"]) >= 1
+        assert plan["steps"][0]["key"].startswith("web_app:")
+        # The assessment moves to awaiting_approval with the plan attached.
+        fetched = client.get(f"/assessments/{assessment['id']}").json()
+        assert fetched["status"] == "awaiting_approval"
+
+
+def test_generate_plan_no_catalog_409(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    resp = client.post(f"/assessments/{ids['assessment']}/plans")
+    assert resp.status_code == 409
 
 
 # --- Findings (DB-backed, idempotent) ----------------------------------------

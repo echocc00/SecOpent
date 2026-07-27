@@ -106,6 +106,13 @@ class SqlAlchemyCatalogRepository:
         row = self._session.get(CoreTestCatalog, version)
         return _to_catalog(row) if row else None
 
+    def latest_catalog(self) -> TestCatalog | None:
+        """Return the highest-versioned catalog, or None if the store is empty."""
+        row = self._session.execute(
+            select(CoreTestCatalog).order_by(CoreTestCatalog.version.desc()).limit(1)
+        ).scalars().first()
+        return _to_catalog(row) if row else None
+
     def add_coverage(self, matrix: CoverageMatrix) -> None:
         self._session.merge(_from_matrix(matrix))
 
