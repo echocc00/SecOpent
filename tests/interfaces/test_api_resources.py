@@ -85,6 +85,7 @@ def test_openapi_spec_accessible(client: TestClient) -> None:
     assert "/evidence" in paths
     assert "/reports" in paths
     assert "/cases" in paths
+    assert "/appmodels" in paths
 
 
 def test_tools_lists_adapters(client: TestClient) -> None:
@@ -675,3 +676,85 @@ def test_case_list(client: TestClient) -> None:
 def test_case_invalid_risk_422(client: TestClient) -> None:
     resp = client.post("/cases", json=_case_payload(risk="bogus"))
     assert resp.status_code == 422
+
+
+# --- AppModels (model-driven logic + LLM boundary) ---------------------------
+
+
+def _appmodel_payload(app_id: str = "shop", version: str = "1.0") -> dict[str, object]:
+    return {
+        "app_id": app_id,
+        "version": version,
+        "states": ["cart_empty", "cart_has_items", "ordered"],
+        "transitions": [
+            {"id": "add", "from_state": "cart_empty", "to_state": "cart_has_items",
+             "endpoint": "POST /cart", "params": ["item_id"], "idempotent": False}
+        ],
+        "invariants": [{"id": "inv1", "expr": "cart.total >= 0"}],
+        "fields": [{"name": "qty", "type": "int", "range": [1, 100],
+                    "trusted_source": "server"}],
+        "roles": [{"id": "buyer", "capabilities": ["cart.add", "order.create"]}],
+        "out_of_scope_rules": ["payment gateway internals"],
+    }
+
+
+def test_appmodel_full_human_lifecycle(client: TestClient) -> None:
+    created = client.post("/appmodels", json=_appmodel_payload())
+    assert created.status_code == 201
+    body = created.json()
+    assert body["status"] == "draft"
+    assert body["digest"].startswith("sha256:")
+
+    validated = client.post(
+        "/appmodels/shop/1.0/validate", json={"actor_role": "human"}
+    )
+    assert validated.json()["status"] == "human_validated"
+
+    signed = client.post("/appmodels/shop/1.0/sign", json={"actor_role": "human"})
+    assert signed.json()["status"] == "signed"
+    assert signed.json()["signature"]  # server-held Ed25519 signature applied
+
+    fetched = client.get("/appmodels/shop/1.0")
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "signed"
+
+
+def test_appmodel_round_trips_nested_fields(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload())
+    fetched = client.get("/appmodels/shop/1.0").json()
+    assert fetched["transitions"][0]["endpoint"] == "POST /cart"
+    assert fetched["invariants"][0]["expr"] == "cart.total >= 0"
+    assert fetched["fields"][0]["range"] == [1, 100]
+    assert fetched["fields"][0]["trusted_source"] == "server"
+    assert fetched["roles"][0]["capabilities"] == ["cart.add", "order.create"]
+
+
+def test_appmodel_agent_cannot_validate(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload())
+    resp = client.post("/appmodels/shop/1.0/validate", json={"actor_role": "agent"})
+    assert resp.status_code == 403
+
+
+def test_appmodel_agent_cannot_sign(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload())
+    client.post("/appmodels/shop/1.0/validate", json={"actor_role": "human"})
+    resp = client.post("/appmodels/shop/1.0/sign", json={"actor_role": "agent"})
+    assert resp.status_code == 403
+
+
+def test_appmodel_sign_before_validate_409(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload())
+    resp = client.post("/appmodels/shop/1.0/sign", json={"actor_role": "human"})
+    assert resp.status_code == 409
+
+
+def test_appmodel_not_found_404(client: TestClient) -> None:
+    assert client.get("/appmodels/nope/1.0").status_code == 404
+
+
+def test_appmodel_list(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload("shop-a"))
+    client.post("/appmodels", json=_appmodel_payload("shop-b"))
+    listed = client.get("/appmodels")
+    assert listed.status_code == 200
+    assert {m["app_id"] for m in listed.json()} == {"shop-a", "shop-b"}

@@ -299,3 +299,85 @@ class CaseOut(BaseModel):
 class CaseAction(BaseModel):
     # "human" or "agent"; review/sign/publish are human-only (LLM boundary).
     actor_role: str = "human"
+
+
+# Generic actor-role body shared by human-only lifecycle actions (cases/appmodels).
+ActorRoleBody = CaseAction
+
+
+# --- AppModels (CaseStudio model-driven logic) ---
+class TransitionIn(BaseModel):
+    id: str
+    from_state: str
+    to_state: str
+    endpoint: str
+    params: list[str] = []
+    idempotent: bool = False
+
+
+class InvariantIn(BaseModel):
+    id: str
+    expr: str
+
+
+class FieldIn(BaseModel):
+    name: str
+    type: str
+    range: list[object] | None = None
+    trusted_source: str = "client"
+
+
+class RoleIn(BaseModel):
+    id: str
+    capabilities: list[str] = []
+
+
+class AppModelCreate(BaseModel):
+    app_id: str
+    version: str
+    states: list[str]
+    transitions: list[TransitionIn] = []
+    invariants: list[InvariantIn] = []
+    fields: list[FieldIn] = []
+    roles: list[RoleIn] = []
+    out_of_scope_rules: list[str] = []
+
+
+class TransitionOut(BaseModel):
+    id: str
+    from_state: str
+    to_state: str
+    endpoint: str
+    params: list[str]
+    idempotent: bool
+
+
+class InvariantOut(BaseModel):
+    id: str
+    expr: str
+
+
+class FieldOut(BaseModel):
+    name: str
+    type: str
+    range: list[object] | None
+    trusted_source: str
+
+
+class RoleOut(BaseModel):
+    id: str
+    capabilities: list[str]
+
+
+class AppModelOut(BaseModel):
+    app_id: str
+    version: str
+    states: list[str]
+    transitions: list[TransitionOut]
+    invariants: list[InvariantOut]
+    fields: list[FieldOut]
+    roles: list[RoleOut]
+    out_of_scope_rules: list[str]
+    status: str
+    digest: str
+    signature: str | None

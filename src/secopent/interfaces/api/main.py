@@ -30,6 +30,7 @@ from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
 from ...infrastructure.signing.ed25519 import Ed25519CaseSigner
 from .routers import (
+    appmodels_router,
     approvals_router,
     assessments_router,
     assets_router,
@@ -83,6 +84,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(evidence_router)
     app.include_router(reports_router)
     app.include_router(cases_router)
+    app.include_router(appmodels_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

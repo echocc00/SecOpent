@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 # Import every ORM model module so all tables register on CoreBase.metadata.
 from . import (  # noqa: F401
+    appmodel_models,
     asset_models,
     case_models,
     catalog_models,
