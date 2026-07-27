@@ -1104,6 +1104,10 @@ export interface components {
             mode: string;
             /** Status */
             status: string;
+            /** Active Plan Id */
+            active_plan_id?: string | null;
+            /** Approval Id */
+            approval_id?: string | null;
         };
         /** AssetEdgeOut */
         AssetEdgeOut: {
