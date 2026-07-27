@@ -26,21 +26,36 @@ from ....application.appmodels import (
     AppModelService,
     AppModelTransitionError,
 )
+from ....application.cases import CaseService
+from ....application.logic_generator import LogicTestGenerator
+from ....application.risk_analyzer import RiskAnalyzer
+from ....domain.appmodel.lifecycle import AppModelStatus
+from ....domain.appmodel.logic import LogicTestCase
 from ....domain.appmodel.models import AppModel, Field, Invariant, Role, Transition
+from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStep
 from ....domain.common.errors import DomainError
+from ....domain.policy.models import RiskClass
+from ....infrastructure.logic_strategies.invariant_strategy import InvariantStrategy
+from ....infrastructure.logic_strategies.restler_strategy import RestlerStrategy
+from ....infrastructure.logic_strategies.schemathesis_strategy import (
+    SchemathesisStrategy,
+)
 from ....infrastructure.repositories.sqlalchemy_appmodels import (
     SqlAlchemyAppModelRegistry,
 )
+from ....infrastructure.repositories.sqlalchemy_cases import SqlAlchemyCaseRegistry
 from ..deps import DbSession
 from ..schemas import (
     ActorRoleBody,
     AppModelCreate,
     AppModelOut,
+    CaseOut,
     FieldOut,
     InvariantOut,
     RoleOut,
     TransitionOut,
 )
+from .cases import case_to_out
 
 router = APIRouter(prefix="/appmodels", tags=["appmodels"])
 
@@ -162,3 +177,81 @@ def sign_app_model(
             app_id, version, signer=signer, actor_role=body.actor_role
         )
     )
+
+
+# --- Test generation (model-driven logic tests, §11.10) ----------------------
+
+_GENERATOR = LogicTestGenerator(
+    [RestlerStrategy(), SchemathesisStrategy(), InvariantStrategy()]
+)
+
+
+def _logic_to_case(model: AppModel, ltc: LogicTestCase) -> CaseDefinition:
+    """Wrap a generated LogicTestCase as a model-generated CaseDefinition.
+
+    Logic tests are ACTIVE risk (they actively exercise the app); the single
+    synthesized ``logic.test`` step carries the test class, target, and inputs.
+    The case inherits trust from the human-signed model via the fast path.
+    """
+    sig_suffix = ltc.signature.removeprefix("sha256:")[:12]
+    return CaseDefinition(
+        id=f"logic:{ltc.test_class.value}:{sig_suffix}",
+        version=model.version,
+        author="logic-generator",
+        risk=RiskClass.ACTIVE,
+        target_type="logic",
+        schema="secopent-logic/v1",
+        steps=(
+            CaseStep(
+                id="t1",
+                action="logic.test",
+                spec={
+                    "test_class": ltc.test_class.value,
+                    "target": ltc.target,
+                    "inputs": dict(ltc.inputs),
+                    "signature": ltc.signature,
+                    "app_model_digest": ltc.app_model_digest,
+                },
+            ),
+        ),
+        origin=CaseOrigin.MODEL_GENERATED,
+    )
+
+
+@router.post(
+    "/{app_id}/{version}/generate-tests",
+    status_code=201,
+    response_model=list[CaseOut],
+)
+def generate_tests(
+    app_id: str, version: str, session: DbSession
+) -> list[CaseOut]:
+    """Deterministically generate logic-test cases from a SIGNED AppModel.
+
+    Generation is a pure function of the signed model (never the LLM). Each
+    LogicTestCase is wrapped as a model-generated case and advanced through the
+    case fast path (auto risk-gate; ACTIVE cases stop at VALIDATED pending human
+    review). Idempotent: the same model yields the same case signatures.
+    """
+    model_service = AppModelService(SqlAlchemyAppModelRegistry(session))
+    try:
+        model = model_service.get(app_id, version)
+    except AppModelNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if model.status is not AppModelStatus.SIGNED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"model must be SIGNED to generate tests (is {model.status.value})",
+        )
+
+    case_service = CaseService(RiskAnalyzer(), SqlAlchemyCaseRegistry(session))
+    results: list[CaseOut] = []
+    for ltc in _GENERATOR.generate(model):
+        case = _logic_to_case(model, ltc)
+        try:
+            case_service.create_draft(case)
+            advanced = case_service.fast_track_model_generated(case.id)
+        except DomainError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        results.append(case_to_out(advanced))
+    return results

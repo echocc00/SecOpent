@@ -40,7 +40,7 @@ from ..schemas import CaseAction, CaseCreate, CaseOut, CaseStepOut
 router = APIRouter(prefix="/cases", tags=["cases"])
 
 
-def _to_out(case: CaseDefinition) -> CaseOut:
+def case_to_out(case: CaseDefinition) -> CaseOut:
     return CaseOut(
         id=case.id,
         version=case.version,
@@ -63,7 +63,7 @@ def _to_out(case: CaseDefinition) -> CaseOut:
 def _execute(action: Callable[[], CaseDefinition]) -> CaseOut:
     """Run a CaseService action, mapping domain errors to HTTP status codes."""
     try:
-        return _to_out(action())
+        return case_to_out(action())
     except CaseNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CasePermissionError as exc:
@@ -104,7 +104,7 @@ def create_case(payload: CaseCreate, session: DbSession) -> CaseOut:
 
 @router.get("", response_model=list[CaseOut])
 def list_cases(session: DbSession) -> list[CaseOut]:
-    return [_to_out(c) for c in _service(session).list_all()]
+    return [case_to_out(c) for c in _service(session).list_all()]
 
 
 @router.get("/{case_id}", response_model=CaseOut)

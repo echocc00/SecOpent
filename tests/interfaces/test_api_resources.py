@@ -758,3 +758,47 @@ def test_appmodel_list(client: TestClient) -> None:
     listed = client.get("/appmodels")
     assert listed.status_code == 200
     assert {m["app_id"] for m in listed.json()} == {"shop-a", "shop-b"}
+
+
+# --- Test generation (model-driven logic tests) ------------------------------
+
+
+def _sign_model(client: TestClient, app_id: str = "shop") -> None:
+    client.post("/appmodels", json=_appmodel_payload(app_id))
+    client.post(f"/appmodels/{app_id}/1.0/validate", json={"actor_role": "human"})
+    signed = client.post(f"/appmodels/{app_id}/1.0/sign", json={"actor_role": "human"})
+    assert signed.json()["status"] == "signed"
+
+
+def test_generate_tests_from_signed_model(client: TestClient) -> None:
+    _sign_model(client)
+    resp = client.post("/appmodels/shop/1.0/generate-tests")
+    assert resp.status_code == 201
+    cases = resp.json()
+    assert len(cases) >= 1
+    # Every generated case is model-generated and (ACTIVE) stops at validated.
+    for case in cases:
+        assert case["origin"] == "model_generated"
+        assert case["status"] == "validated"
+    # The invariant "cart.total >= 0" yields an invariant-violation test.
+    test_classes = {
+        c["steps"][0]["spec"]["test_class"] for c in cases
+    }
+    assert "invariant_violation" in test_classes
+
+
+def test_generate_tests_is_idempotent(client: TestClient) -> None:
+    _sign_model(client)
+    first = {c["id"] for c in client.post("/appmodels/shop/1.0/generate-tests").json()}
+    second = {c["id"] for c in client.post("/appmodels/shop/1.0/generate-tests").json()}
+    assert first == second  # same model -> same signatures -> same case ids
+
+
+def test_generate_tests_requires_signed_model(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload())  # draft, not signed
+    resp = client.post("/appmodels/shop/1.0/generate-tests")
+    assert resp.status_code == 409
+
+
+def test_generate_tests_missing_model_404(client: TestClient) -> None:
+    assert client.post("/appmodels/nope/1.0/generate-tests").status_code == 404
