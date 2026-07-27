@@ -249,3 +249,53 @@ class ReportOut(BaseModel):
     completeness_ok: bool
     status: str
     digest: str
+
+
+# --- Cases (CaseStudio lifecycle) ---
+class CaseStepIn(BaseModel):
+    id: str
+    action: str
+    spec: dict[str, object] = {}
+
+
+class CaseCreate(BaseModel):
+    id: str
+    version: str
+    author: str
+    risk: str
+    target_type: str
+    # Named ``case_schema`` (not ``schema``) to avoid shadowing
+    # ``BaseModel.schema``; maps to the domain CaseDefinition.schema field.
+    case_schema: str
+    steps: list[CaseStepIn]
+    cwe: list[str] = []
+    cve: list[str] = []
+    owasp: list[str] = []
+    origin: str = "manual"
+
+
+class CaseStepOut(BaseModel):
+    id: str
+    action: str
+    spec: dict[str, object]
+
+
+class CaseOut(BaseModel):
+    id: str
+    version: str
+    author: str
+    risk: str
+    target_type: str
+    case_schema: str
+    status: str
+    origin: str
+    signature: str
+    steps: list[CaseStepOut]
+    cwe: list[str]
+    cve: list[str]
+    owasp: list[str]
+
+
+class CaseAction(BaseModel):
+    # "human" or "agent"; review/sign/publish are human-only (LLM boundary).
+    actor_role: str = "human"

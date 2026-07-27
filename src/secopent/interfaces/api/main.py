@@ -26,13 +26,17 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from sqlalchemy.engine import Engine
 
+from ...application.cases import CaseService
+from ...application.risk_analyzer import RiskAnalyzer
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
+from ...infrastructure.signing.ed25519 import Ed25519CaseSigner
 from .routers import (
     approvals_router,
     assessments_router,
     assets_router,
     audit_router,
+    cases_router,
     evidence_router,
     findings_router,
     intel_router,
@@ -59,6 +63,12 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
     app.state.db = Database(engine)
     app.state.idempotency = {}
+    # CaseStudio: an app-scoped in-memory case registry + a server-held
+    # Ed25519 signing key. The private key never leaves the server (frontend
+    # can request a signature but never hold the key). Durable case persistence
+    # is a follow-up; the CaseService is in-memory by current (M2) design.
+    app.state.case_service = CaseService(RiskAnalyzer())
+    app.state.case_signer = Ed25519CaseSigner.generate()
 
     # Resource routers (DB-backed, except tools which reads the static catalog).
     app.include_router(projects_router)
@@ -75,6 +85,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(assets_router)
     app.include_router(evidence_router)
     app.include_router(reports_router)
+    app.include_router(cases_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

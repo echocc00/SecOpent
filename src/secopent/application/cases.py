@@ -77,6 +77,10 @@ class CaseService:
             raise CaseNotFoundError(f"case not found: {case_id}")
         return case
 
+    def list_all(self) -> list[CaseDefinition]:
+        """Return all registered cases (any status), ordered by id."""
+        return [self._cases[key] for key in sorted(self._cases)]
+
     def validate(self, case_id: str) -> CaseDefinition:
         """Run the static RiskAnalyzer gate; DRAFT -> VALIDATED (agents may do this)."""
         case = self.get(case_id)

@@ -84,6 +84,7 @@ def test_openapi_spec_accessible(client: TestClient) -> None:
     assert "/assets" in paths
     assert "/evidence" in paths
     assert "/reports" in paths
+    assert "/cases" in paths
 
 
 def test_tools_lists_adapters(client: TestClient) -> None:
@@ -592,3 +593,85 @@ def test_reports_list_and_get(tmp_path) -> None:  # type: ignore[no-untyped-def]
         assert fetched.json()["sections"][0]["name"] == "summary"
 
         assert rep_client.get("/reports/nope").status_code == 404
+
+
+# --- Cases (CaseStudio lifecycle + LLM boundary) -----------------------------
+
+
+def _case_payload(case_id: str = "case-sqli", risk: str = "low") -> dict[str, object]:
+    return {
+        "id": case_id,
+        "version": "1.0.0",
+        "author": "analyst",
+        "risk": risk,
+        "target_type": "web_app",
+        "case_schema": "secopent-case/v1",
+        "steps": [{"id": "s1", "action": "http.request", "spec": {"method": "GET"}}],
+        "cwe": ["CWE-89"],
+    }
+
+
+def test_case_full_human_lifecycle(client: TestClient) -> None:
+    created = client.post("/cases", json=_case_payload())
+    assert created.status_code == 201
+    assert created.json()["status"] == "draft"
+
+    assert client.post("/cases/case-sqli/validate").json()["status"] == "validated"
+    assert client.post(
+        "/cases/case-sqli/review", json={"actor_role": "human"}
+    ).json()["status"] == "reviewed"
+
+    signed = client.post("/cases/case-sqli/sign", json={"actor_role": "human"})
+    assert signed.json()["status"] == "signed"
+    assert signed.json()["signature"]  # server-held Ed25519 signature applied
+
+    published = client.post("/cases/case-sqli/publish", json={"actor_role": "human"})
+    assert published.json()["status"] == "published"
+
+
+def test_case_agent_cannot_sign(client: TestClient) -> None:
+    client.post("/cases", json=_case_payload())
+    client.post("/cases/case-sqli/validate")
+    client.post("/cases/case-sqli/review", json={"actor_role": "human"})
+    # The LLM boundary: an agent may not sign (human-only).
+    resp = client.post("/cases/case-sqli/sign", json={"actor_role": "agent"})
+    assert resp.status_code == 403
+
+
+def test_case_out_of_order_transition_409(client: TestClient) -> None:
+    client.post("/cases", json=_case_payload())
+    # draft -> publish skips validate/review/sign.
+    resp = client.post("/cases/case-sqli/publish", json={"actor_role": "human"})
+    assert resp.status_code == 409
+
+
+def test_case_risk_undeclared_422(client: TestClient) -> None:
+    # A GET step computes to Low; declaring passive understates it.
+    client.post("/cases", json=_case_payload(risk="passive"))
+    resp = client.post("/cases/case-sqli/validate")
+    assert resp.status_code == 422
+
+
+def test_case_deny_pattern_422(client: TestClient) -> None:
+    payload = _case_payload()
+    payload["steps"] = [{"id": "s1", "action": "os.shell", "spec": {}}]  # type: ignore[index]
+    client.post("/cases", json=payload)
+    resp = client.post("/cases/case-sqli/validate")
+    assert resp.status_code == 422
+
+
+def test_case_not_found_404(client: TestClient) -> None:
+    assert client.get("/cases/nope").status_code == 404
+
+
+def test_case_list(client: TestClient) -> None:
+    client.post("/cases", json=_case_payload("case-a"))
+    client.post("/cases", json=_case_payload("case-b"))
+    listed = client.get("/cases")
+    assert listed.status_code == 200
+    assert {c["id"] for c in listed.json()} == {"case-a", "case-b"}
+
+
+def test_case_invalid_risk_422(client: TestClient) -> None:
+    resp = client.post("/cases", json=_case_payload(risk="bogus"))
+    assert resp.status_code == 422

@@ -6,6 +6,7 @@ from .approvals import router as approvals_router
 from .assessments import router as assessments_router
 from .assets import router as assets_router
 from .audit import router as audit_router
+from .cases import router as cases_router
 from .evidence import router as evidence_router
 from .findings import router as findings_router
 from .intel import router as intel_router
@@ -32,4 +33,5 @@ __all__ = [
     "assets_router",
     "evidence_router",
     "reports_router",
+    "cases_router",
 ]

@@ -9,9 +9,14 @@ composition root wires this concrete implementation in.
 """
 from __future__ import annotations
 
+import base64
+
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from ...domain.updates.models import UpdateBundle
 
@@ -52,4 +57,39 @@ class Ed25519SignatureVerifier:
             return False
 
 
-__all__ = ["Ed25519SignatureVerifier"]
+__all__ = ["Ed25519SignatureVerifier", "Ed25519CaseSigner"]
+
+
+class Ed25519CaseSigner:
+    """Sign case/model payloads with a server-held Ed25519 private key.
+
+    Satisfies the application-layer ``CaseSigner`` alias
+    (``Callable[[bytes], str]``) via ``__call__``. The private key is held
+    server-side and NEVER exposed - only signatures leave this object, which is
+    what enforces the LLM/frontend boundary (the frontend can request a
+    signature but can never hold the signing key).
+
+    The signature is the raw Ed25519 signature, base64-encoded for transport.
+    """
+
+    def __init__(self, private_key: Ed25519PrivateKey) -> None:
+        self._key = private_key
+
+    @classmethod
+    def generate(cls) -> Ed25519CaseSigner:
+        """Create a signer with a fresh ephemeral key (dev / single-run)."""
+        return cls(Ed25519PrivateKey.generate())
+
+    def sign(self, payload: bytes) -> str:
+        signature = self._key.sign(payload)
+        return base64.b64encode(signature).decode("ascii")
+
+    def public_key_bytes(self) -> bytes:
+        """Return the raw 32-byte public key (safe to share for verification)."""
+        return self._key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+
+    def __call__(self, payload: bytes) -> str:
+        return self.sign(payload)
