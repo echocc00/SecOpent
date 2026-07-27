@@ -390,6 +390,14 @@ class AppModelCreate(BaseModel):
     fields: list[FieldIn] = []
     roles: list[RoleIn] = []
     out_of_scope_rules: list[str] = []
+    # True when an LLM proposed the model (starts at LLM_PROPOSED, needs human
+    # validation); False for a manually-authored draft (starts at DRAFT).
+    llm_proposed: bool = False
+
+
+class AppModelRevise(AppModelCreate):
+    # Target version for the new draft; auto-bumped from the source if omitted.
+    new_version: str | None = None
 
 
 class TransitionOut(BaseModel):

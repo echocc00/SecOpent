@@ -895,6 +895,39 @@ def test_appmodel_list(client: TestClient) -> None:
     assert {m["app_id"] for m in listed.json()} == {"shop-a", "shop-b"}
 
 
+def test_appmodel_update_in_place(client: TestClient) -> None:
+    client.post("/appmodels", json=_appmodel_payload())
+    payload = _appmodel_payload()
+    payload["invariants"] = [{"id": "inv2", "expr": "qty <= 100"}]  # type: ignore[index]
+    updated = client.put("/appmodels/shop/1.0", json=payload)
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "draft"
+    assert updated.json()["invariants"][0]["expr"] == "qty <= 100"
+
+
+def test_appmodel_update_signed_409(client: TestClient) -> None:
+    _sign_model(client)  # shop@1.0 -> signed
+    resp = client.put("/appmodels/shop/1.0", json=_appmodel_payload())
+    assert resp.status_code == 409
+
+
+def test_appmodel_revise_bumps_version(client: TestClient) -> None:
+    _sign_model(client)  # shop@1.0 signed (immutable)
+    revised = client.post("/appmodels/shop/1.0/revise", json=_appmodel_payload())
+    assert revised.status_code == 201
+    assert revised.json()["version"] == "1.1"
+    assert revised.json()["status"] == "draft"
+    # The signed source version is untouched.
+    assert client.get("/appmodels/shop/1.0").json()["status"] == "signed"
+
+
+def test_appmodel_llm_proposed(client: TestClient) -> None:
+    payload = _appmodel_payload("llm-shop")
+    payload["llm_proposed"] = True  # type: ignore[index]
+    created = client.post("/appmodels", json=payload)
+    assert created.json()["status"] == "llm_proposed"
+
+
 # --- Test generation (model-driven logic tests) ------------------------------
 
 

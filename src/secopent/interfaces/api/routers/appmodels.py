@@ -49,6 +49,7 @@ from ..schemas import (
     ActorRoleBody,
     AppModelCreate,
     AppModelOut,
+    AppModelRevise,
     CaseOut,
     FieldOut,
     InvariantOut,
@@ -115,9 +116,17 @@ def _service(session: Session) -> AppModelService:
 
 @router.post("", status_code=201, response_model=AppModelOut)
 def create_app_model(payload: AppModelCreate, session: DbSession) -> AppModelOut:
-    model = AppModel(
-        app_id=payload.app_id,
-        version=payload.version,
+    model = _to_domain(payload.app_id, payload.version, payload)
+    return _execute(
+        lambda: _service(session).create(model, proposed=payload.llm_proposed)
+    )
+
+
+def _to_domain(app_id: str, version: str, payload: AppModelCreate) -> AppModel:
+    """Build an AppModel domain object from a request body (path supplies ids)."""
+    return AppModel(
+        app_id=app_id,
+        version=version,
         states=tuple(payload.states),
         transitions=tuple(
             Transition(
@@ -145,7 +154,26 @@ def create_app_model(payload: AppModelCreate, session: DbSession) -> AppModelOut
         ),
         out_of_scope_rules=tuple(payload.out_of_scope_rules),
     )
-    return _execute(lambda: _service(session).create(model))
+
+
+@router.put("/{app_id}/{version}", response_model=AppModelOut)
+def update_app_model(
+    app_id: str, version: str, payload: AppModelCreate, session: DbSession
+) -> AppModelOut:
+    """Edit a model in place (only DRAFT/HUMAN_VALIDATED; signed -> revise)."""
+    model = _to_domain(app_id, version, payload)
+    return _execute(lambda: _service(session).update(model))
+
+
+@router.post("/{app_id}/{version}/revise", status_code=201, response_model=AppModelOut)
+def revise_app_model(
+    app_id: str, version: str, payload: AppModelRevise, session: DbSession
+) -> AppModelOut:
+    """Create a new DRAFT version (version bump) from the edited content."""
+    model = _to_domain(app_id, version, payload)
+    return _execute(
+        lambda: _service(session).revise(model, new_version=payload.new_version)
+    )
 
 
 @router.get("", response_model=list[AppModelOut])

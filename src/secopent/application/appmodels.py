@@ -69,9 +69,15 @@ class AppModelService:
     def __init__(self, registry: AppModelRegistry | None = None) -> None:
         self._registry: AppModelRegistry = registry or InMemoryAppModelRegistry()
 
-    def create(self, model: AppModel) -> AppModel:
-        """Register a model as a DRAFT (an agent may propose; a human may draft)."""
-        draft = replace(model, status=AppModelStatus.DRAFT)
+    def create(self, model: AppModel, *, proposed: bool = False) -> AppModel:
+        """Register a model as a DRAFT, or as LLM_PROPOSED when an agent proposed it.
+
+        A manually-built model starts at DRAFT; an LLM-proposed model starts at
+        LLM_PROPOSED and still requires human validation before signing
+        (LLM boundary).
+        """
+        status = AppModelStatus.LLM_PROPOSED if proposed else AppModelStatus.DRAFT
+        draft = replace(model, status=status)
         self._registry.put(draft)
         return draft
 
@@ -83,6 +89,80 @@ class AppModelService:
 
     def list_all(self) -> list[AppModel]:
         return self._registry.list()
+
+    def update(self, model: AppModel) -> AppModel:
+        """Edit a model in place. Only unsigned models (DRAFT/HUMAN_VALIDATED)
+        are mutable; a SIGNED/PUBLISHED model is immutable - use ``revise`` to
+        create a new version instead (decision E)."""
+        existing = self.get(model.app_id, model.version)
+        if existing.status not in (
+            AppModelStatus.DRAFT,
+            AppModelStatus.HUMAN_VALIDATED,
+        ):
+            raise AppModelTransitionError(
+                f"cannot edit a {existing.status.value} model in place; "
+                "create a new version via revise"
+            )
+        updated = AppModel(
+            app_id=model.app_id,
+            version=model.version,
+            states=model.states,
+            transitions=model.transitions,
+            invariants=model.invariants,
+            fields=model.fields,
+            roles=model.roles,
+            idempotency=model.idempotency,
+            out_of_scope_rules=model.out_of_scope_rules,
+            status=existing.status,
+        )
+        self._registry.put(updated)
+        return updated
+
+    def revise(self, model: AppModel, *, new_version: str | None = None) -> AppModel:
+        """Create a new DRAFT version from the given content (version bump).
+
+        Used to edit an immutable (SIGNED/PUBLISHED) model: the source version
+        is untouched and a fresh DRAFT version is created (decision E). If
+        ``new_version`` is omitted, the source version's last numeric segment is
+        incremented (1.0 -> 1.1), skipping versions that already exist.
+        """
+        self.get(model.app_id, model.version)  # source must exist
+        existing_versions = {
+            m.version for m in self._registry.list() if m.app_id == model.app_id
+        }
+        target = new_version or self._next_version(existing_versions, model.version)
+        if target in existing_versions:
+            raise AppModelTransitionError(
+                f"version {target} already exists for {model.app_id}"
+            )
+        revised = AppModel(
+            app_id=model.app_id,
+            version=target,
+            states=model.states,
+            transitions=model.transitions,
+            invariants=model.invariants,
+            fields=model.fields,
+            roles=model.roles,
+            idempotency=model.idempotency,
+            out_of_scope_rules=model.out_of_scope_rules,
+            status=AppModelStatus.DRAFT,
+        )
+        self._registry.put(revised)
+        return revised
+
+    @staticmethod
+    def _next_version(existing: set[str], current: str) -> str:
+        parts = current.split(".")
+        if parts and parts[-1].isdigit():
+            parts[-1] = str(int(parts[-1]) + 1)
+            candidate = ".".join(parts)
+        else:
+            candidate = current + ".1"
+        while candidate in existing:
+            bumped = candidate.split(".")
+            bumped[-1] = str(int(bumped[-1]) + 1)
+            candidate = ".".join(bumped)
+        return candidate
 
     def validate(self, app_id: str, version: str, *, actor_role: str) -> AppModel:
         """Human-only: advance to HUMAN_VALIDATED (a human has reviewed the model)."""
