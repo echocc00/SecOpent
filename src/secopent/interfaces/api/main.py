@@ -31,12 +31,15 @@ from ...infrastructure.db.sqlite import create_sqlite_engine
 from .routers import (
     approvals_router,
     assessments_router,
+    assets_router,
     audit_router,
+    evidence_router,
     findings_router,
     intel_router,
     jobs_router,
     plans_router,
     projects_router,
+    reports_router,
     scopes_router,
     tools_router,
     updates_router,
@@ -69,6 +72,9 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(plans_router)
     app.include_router(approvals_router)
     app.include_router(jobs_router)
+    app.include_router(assets_router)
+    app.include_router(evidence_router)
+    app.include_router(reports_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

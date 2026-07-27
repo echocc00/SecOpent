@@ -204,3 +204,48 @@ class JobOut(BaseModel):
     result_digest: str
     failure_class: str
     dependencies: list[str]
+
+
+# --- Assets (discovery graph) ---
+class AssetNodeOut(BaseModel):
+    type: str
+    value: str
+
+
+class AssetEdgeOut(BaseModel):
+    src: AssetNodeOut
+    dst: AssetNodeOut
+    rel: str
+
+
+class AssetGraphOut(BaseModel):
+    nodes: list[AssetNodeOut]
+    edges: list[AssetEdgeOut]
+
+
+# --- Evidence (three-layer, content-addressed) ---
+class EvidenceOut(BaseModel):
+    id: str
+    layer: str
+    sha256: str
+    storage_uri: str
+    source_id: str
+    signature: str
+
+
+# --- Reports ---
+class ReportSectionOut(BaseModel):
+    name: str
+    content: str
+
+
+class ReportOut(BaseModel):
+    id: str
+    assessment_id: str
+    title: str
+    sections: list[ReportSectionOut]
+    finding_count: int
+    coverage_rate: float
+    completeness_ok: bool
+    status: str
+    digest: str

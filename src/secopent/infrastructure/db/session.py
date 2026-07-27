@@ -18,6 +18,7 @@ from . import (  # noqa: F401
     asset_models,
     catalog_models,
     core_models,
+    evidence_models,
     finding_models,
     intel_models,
     job_models,

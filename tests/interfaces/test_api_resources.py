@@ -12,7 +12,17 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from secopent.domain.adapters.contracts import Severity
+from secopent.domain.assets.graph import AssetGraph
+from secopent.domain.assets.models import (
+    AssetEdge,
+    AssetNode,
+    AssetRelation,
+    AssetType,
+)
 from secopent.domain.common.canonical import utc_now
+from secopent.domain.evidence.models import Evidence, EvidenceLayer
+from secopent.domain.findings.models import Finding, FindingStatus
 from secopent.domain.intel.models import (
     AffectedProduct,
     DetectionMapping,
@@ -22,14 +32,27 @@ from secopent.domain.intel.models import (
 from secopent.domain.intel.provenance import Provenance
 from secopent.domain.jobs.models import Job, JobStatus
 from secopent.domain.policy.models import RiskClass
+from secopent.domain.reports.models import Report, ReportSection, ReportStatus
 from secopent.infrastructure.db.session import init_db
 from secopent.infrastructure.db.sqlite import create_sqlite_engine
+from secopent.infrastructure.repositories.sqlalchemy_assets import (
+    SqlAlchemyAssetRepository,
+)
+from secopent.infrastructure.repositories.sqlalchemy_evidence import (
+    SqlAlchemyEvidenceRepository,
+)
+from secopent.infrastructure.repositories.sqlalchemy_findings import (
+    SqlAlchemyFindingRepository,
+)
 from secopent.infrastructure.repositories.sqlalchemy_intel import (
     SqlAlchemyIntelRepository,
     SqlAlchemyUpdateRepository,
 )
 from secopent.infrastructure.repositories.sqlalchemy_jobs import (
     SqlAlchemyJobRepository,
+)
+from secopent.infrastructure.repositories.sqlalchemy_reports import (
+    SqlAlchemyReportRepository,
 )
 from secopent.interfaces.api.main import create_app
 
@@ -58,6 +81,9 @@ def test_openapi_spec_accessible(client: TestClient) -> None:
     assert "/plans" in paths
     assert "/approvals" in paths
     assert "/jobs" in paths
+    assert "/assets" in paths
+    assert "/evidence" in paths
+    assert "/reports" in paths
 
 
 def test_tools_lists_adapters(client: TestClient) -> None:
@@ -461,3 +487,108 @@ def test_job_get_after_seed(tmp_path) -> None:  # type: ignore[no-untyped-def]
         fetched = jobs_client.get("/jobs/job-1")
         assert fetched.status_code == 200
         assert fetched.json()["status"] == "ready"
+
+
+# --- Assets (discovery graph) ------------------------------------------------
+
+
+def test_asset_graph_round_trip(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "assets.db")
+    init_db(engine)
+    domain = AssetNode(type=AssetType.DOMAIN, value="acme.test")
+    ip = AssetNode(type=AssetType.IP, value="1.2.3.4")
+    graph = (
+        AssetGraph()
+        .add_node(domain)
+        .add_node(ip)
+        .add_edge(AssetEdge(src=domain, dst=ip, rel=AssetRelation.RESOLVES_TO))
+    )
+    with Session(engine) as session:
+        SqlAlchemyAssetRepository(session).save_graph(graph)
+        session.commit()
+
+    with TestClient(create_app(engine)) as assets_client:
+        resp = assets_client.get("/assets")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {(n["type"], n["value"]) for n in body["nodes"]} == {
+            ("domain", "acme.test"),
+            ("ip", "1.2.3.4"),
+        }
+        assert len(body["edges"]) == 1
+        assert body["edges"][0]["rel"] == "resolves_to"
+
+
+def test_asset_graph_empty(client: TestClient) -> None:
+    resp = client.get("/assets")
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": [], "edges": []}
+
+
+# --- Evidence (three-layer) --------------------------------------------------
+
+
+def test_evidence_get_and_filter_by_finding(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "evidence.db")
+    init_db(engine)
+    with Session(engine) as session:
+        SqlAlchemyEvidenceRepository(session).add(
+            Evidence(id="ev-1", layer=EvidenceLayer.RAW,
+                     sha256="sha256:aaa", storage_uri="cas://ev-1")
+        )
+        SqlAlchemyEvidenceRepository(session).add(
+            Evidence(id="ev-2", layer=EvidenceLayer.REDACTED,
+                     sha256="sha256:bbb", storage_uri="cas://ev-2", source_id="ev-1")
+        )
+        SqlAlchemyFindingRepository(session).add(
+            Finding(id="finding-1", fingerprint="sha256:fp", title="SQLi",
+                    asset="https://x.test/", severity=Severity.HIGH,
+                    evidence_ids=("ev-1", "ev-2"), status=FindingStatus.VALIDATED)
+        )
+        session.commit()
+
+    with TestClient(create_app(engine)) as ev_client:
+        one = ev_client.get("/evidence/ev-1")
+        assert one.status_code == 200
+        assert one.json()["layer"] == "raw"
+
+        all_ev = ev_client.get("/evidence")
+        assert len(all_ev.json()) == 2
+
+        by_finding = ev_client.get("/evidence", params={"finding_id": "finding-1"})
+        assert {e["id"] for e in by_finding.json()} == {"ev-1", "ev-2"}
+
+        assert ev_client.get("/evidence/nope").status_code == 404
+        assert ev_client.get(
+            "/evidence", params={"finding_id": "nope"}
+        ).status_code == 404
+
+
+# --- Reports -----------------------------------------------------------------
+
+
+def test_reports_list_and_get(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "reports.db")
+    init_db(engine)
+    with Session(engine) as session:
+        SqlAlchemyReportRepository(session).add(
+            Report(
+                id="rep-1", assessment_id="asm-1", title="Acme Assessment",
+                sections=(ReportSection(name="summary", content="One finding."),),
+                finding_count=1, coverage_rate=0.85, completeness_ok=True,
+                status=ReportStatus.RENDERED, digest="sha256:rep",
+            )
+        )
+        session.commit()
+
+    with TestClient(create_app(engine)) as rep_client:
+        listed = rep_client.get("/reports", params={"assessment_id": "asm-1"})
+        assert listed.status_code == 200
+        assert len(listed.json()) == 1
+        assert listed.json()[0]["title"] == "Acme Assessment"
+
+        fetched = rep_client.get("/reports/rep-1")
+        assert fetched.status_code == 200
+        assert fetched.json()["sections"][0]["name"] == "summary"
+
+        assert rep_client.get("/reports/nope").status_code == 404
