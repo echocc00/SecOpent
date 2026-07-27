@@ -1,7 +1,8 @@
 # src/secopent/interfaces/api/routers/cases.py
 """Cases resource router (Phase A P1, W1): the CaseStudio case lifecycle.
 
-Exposes the YAML-case lifecycle over an app-scoped ``CaseService``:
+Exposes the YAML-case lifecycle over a DB-backed ``CaseService`` (a
+``SqlAlchemyCaseRegistry`` is built per request from the request session):
 
     DRAFT -> VALIDATED -> REVIEWED -> SIGNED -> PUBLISHED
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException, Request
+from sqlalchemy.orm import Session
 
 from ....application.cases import (
     CaseNotFoundError,
@@ -27,9 +29,12 @@ from ....application.cases import (
     CaseService,
     CaseTransitionError,
 )
+from ....application.risk_analyzer import RiskAnalyzer
 from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStep
 from ....domain.common.errors import DomainError
 from ....domain.policy.models import RiskClass
+from ....infrastructure.repositories.sqlalchemy_cases import SqlAlchemyCaseRegistry
+from ..deps import DbSession
 from ..schemas import CaseAction, CaseCreate, CaseOut, CaseStepOut
 
 router = APIRouter(prefix="/cases", tags=["cases"])
@@ -70,12 +75,12 @@ def _execute(action: Callable[[], CaseDefinition]) -> CaseOut:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _service(request: Request) -> CaseService:
-    return request.app.state.case_service  # type: ignore[no-any-return]
+def _service(session: Session) -> CaseService:
+    return CaseService(RiskAnalyzer(), SqlAlchemyCaseRegistry(session))
 
 
 @router.post("", status_code=201, response_model=CaseOut)
-def create_case(payload: CaseCreate, request: Request) -> CaseOut:
+def create_case(payload: CaseCreate, session: DbSession) -> CaseOut:
     try:
         case = CaseDefinition(
             id=payload.id,
@@ -94,43 +99,41 @@ def create_case(payload: CaseCreate, request: Request) -> CaseOut:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=f"invalid field: {exc}") from exc
-    return _execute(lambda: _service(request).create_draft(case))
+    return _execute(lambda: _service(session).create_draft(case))
 
 
 @router.get("", response_model=list[CaseOut])
-def list_cases(request: Request) -> list[CaseOut]:
-    return [_to_out(c) for c in _service(request).list_all()]
+def list_cases(session: DbSession) -> list[CaseOut]:
+    return [_to_out(c) for c in _service(session).list_all()]
 
 
 @router.get("/{case_id}", response_model=CaseOut)
-def get_case(case_id: str, request: Request) -> CaseOut:
-    return _execute(lambda: _service(request).get(case_id))
+def get_case(case_id: str, session: DbSession) -> CaseOut:
+    return _execute(lambda: _service(session).get(case_id))
 
 
 @router.post("/{case_id}/validate", response_model=CaseOut)
-def validate_case(case_id: str, request: Request) -> CaseOut:
-    return _execute(lambda: _service(request).validate(case_id))
+def validate_case(case_id: str, session: DbSession) -> CaseOut:
+    return _execute(lambda: _service(session).validate(case_id))
 
 
 @router.post("/{case_id}/review", response_model=CaseOut)
-def review_case(case_id: str, body: CaseAction, request: Request) -> CaseOut:
-    return _execute(
-        lambda: _service(request).review(case_id, actor_role=body.actor_role)
-    )
+def review_case(case_id: str, body: CaseAction, session: DbSession) -> CaseOut:
+    return _execute(lambda: _service(session).review(case_id, actor_role=body.actor_role))
 
 
 @router.post("/{case_id}/sign", response_model=CaseOut)
-def sign_case(case_id: str, body: CaseAction, request: Request) -> CaseOut:
+def sign_case(
+    case_id: str, body: CaseAction, request: Request, session: DbSession
+) -> CaseOut:
     signer = request.app.state.case_signer
     return _execute(
-        lambda: _service(request).sign(
+        lambda: _service(session).sign(
             case_id, signer=signer, actor_role=body.actor_role
         )
     )
 
 
 @router.post("/{case_id}/publish", response_model=CaseOut)
-def publish_case(case_id: str, body: CaseAction, request: Request) -> CaseOut:
-    return _execute(
-        lambda: _service(request).publish(case_id, actor_role=body.actor_role)
-    )
+def publish_case(case_id: str, body: CaseAction, session: DbSession) -> CaseOut:
+    return _execute(lambda: _service(session).publish(case_id, actor_role=body.actor_role))

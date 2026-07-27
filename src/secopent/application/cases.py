@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Protocol
 
 from ..domain.cases.models import CaseDefinition, CaseOrigin, CaseStatus
 from ..domain.common.errors import DomainError
@@ -22,6 +23,35 @@ from .risk_analyzer import RiskAnalyzer
 
 # Signer signs a case's canonical payload bytes and returns a signature string.
 CaseSigner = Callable[[bytes], str]
+
+
+class CaseRegistry(Protocol):
+    """Storage port for cases (in-memory for tests, SqlAlchemy for production).
+
+    The CaseService owns lifecycle/risk/signing logic; persistence is injected
+    so the same service drives both the in-memory M2 surface and the DB-backed
+    REST API (Phase A P1).
+    """
+
+    def put(self, case: CaseDefinition) -> None: ...
+    def get(self, case_id: str) -> CaseDefinition | None: ...
+    def list(self) -> list[CaseDefinition]: ...
+
+
+class InMemoryCaseRegistry:
+    """Default in-memory CaseRegistry (M2 scope / tests)."""
+
+    def __init__(self) -> None:
+        self._cases: dict[str, CaseDefinition] = {}
+
+    def put(self, case: CaseDefinition) -> None:
+        self._cases[case.id] = case
+
+    def get(self, case_id: str) -> CaseDefinition | None:
+        return self._cases.get(case_id)
+
+    def list(self) -> list[CaseDefinition]:
+        return [self._cases[key] for key in sorted(self._cases)]
 
 # Allowed lifecycle transitions (YAML case path, §11.5).
 _TRANSITIONS: dict[CaseStatus, set[CaseStatus]] = {
@@ -61,25 +91,27 @@ def _signing_payload(case: CaseDefinition) -> bytes:
 class CaseService:
     """Manage the case lifecycle and enforce the publish gate + human-only steps."""
 
-    def __init__(self, risk_analyzer: RiskAnalyzer) -> None:
+    def __init__(
+        self, risk_analyzer: RiskAnalyzer, registry: CaseRegistry | None = None
+    ) -> None:
         self._risk = risk_analyzer
-        self._cases: dict[str, CaseDefinition] = {}
+        self._registry: CaseRegistry = registry or InMemoryCaseRegistry()
 
     def create_draft(self, case: CaseDefinition) -> CaseDefinition:
         """Register a case as a DRAFT (agents may do this)."""
         draft = replace(case, status=CaseStatus.DRAFT)
-        self._cases[draft.id] = draft
+        self._registry.put(draft)
         return draft
 
     def get(self, case_id: str) -> CaseDefinition:
-        case = self._cases.get(case_id)
+        case = self._registry.get(case_id)
         if case is None:
             raise CaseNotFoundError(f"case not found: {case_id}")
         return case
 
     def list_all(self) -> list[CaseDefinition]:
         """Return all registered cases (any status), ordered by id."""
-        return [self._cases[key] for key in sorted(self._cases)]
+        return self._registry.list()
 
     def validate(self, case_id: str) -> CaseDefinition:
         """Run the static RiskAnalyzer gate; DRAFT -> VALIDATED (agents may do this)."""
@@ -100,7 +132,7 @@ class CaseService:
         signed = replace(
             case, status=CaseStatus.SIGNED, signature=signer(_signing_payload(case))
         )
-        self._cases[case_id] = signed
+        self._registry.put(signed)
         return signed
 
     def publish(self, case_id: str, *, actor_role: str) -> CaseDefinition:
@@ -132,7 +164,7 @@ class CaseService:
     def _transition(self, case: CaseDefinition, to_status: CaseStatus) -> CaseDefinition:
         self._check_transition(case, to_status)
         updated = replace(case, status=to_status)
-        self._cases[case.id] = updated
+        self._registry.put(updated)
         return updated
 
     def _check_transition(self, case: CaseDefinition, to_status: CaseStatus) -> None:
