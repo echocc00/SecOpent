@@ -367,6 +367,20 @@ class CaseAnalysisOut(BaseModel):
 class CaseAction(BaseModel):
     # "human" or "agent"; review/sign/publish are human-only (LLM boundary).
     actor_role: str = "human"
+    # Signing key to use for sign actions (defaults to the server's default key).
+    key_id: str | None = None
+
+
+# --- Signing keys (server-held Ed25519) ---
+class SigningKeyOut(BaseModel):
+    key_id: str
+    name: str
+    public_key: str
+    created_at: datetime
+
+
+class CreateSigningKey(BaseModel):
+    name: str
 
 
 # Generic actor-role body shared by human-only lifecycle actions (cases/appmodels).

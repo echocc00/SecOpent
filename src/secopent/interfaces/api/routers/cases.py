@@ -30,6 +30,7 @@ from ....application.cases import (
     CaseTransitionError,
 )
 from ....application.risk_analyzer import RiskAnalyzer
+from ....application.signing_keys import SigningKeyNotFound
 from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStep
 from ....domain.cases.risk import risk_rank
 from ....domain.common.errors import DomainError
@@ -165,7 +166,10 @@ def review_case(case_id: str, body: CaseAction, session: DbSession) -> CaseOut:
 def sign_case(
     case_id: str, body: CaseAction, request: Request, session: DbSession
 ) -> CaseOut:
-    signer = request.app.state.case_signer
+    try:
+        signer = request.app.state.signing_keys.signer_for(body.key_id)
+    except SigningKeyNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _execute(
         lambda: _service(session).sign(
             case_id, signer=signer, actor_role=body.actor_role

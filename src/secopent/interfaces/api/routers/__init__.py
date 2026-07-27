@@ -16,6 +16,7 @@ from .plans import router as plans_router
 from .projects import router as projects_router
 from .reports import router as reports_router
 from .scopes import router as scopes_router
+from .signing_keys import router as signing_keys_router
 from .tools import router as tools_router
 from .updates import router as updates_router
 
@@ -36,4 +37,5 @@ __all__ = [
     "reports_router",
     "cases_router",
     "appmodels_router",
+    "signing_keys_router",
 ]

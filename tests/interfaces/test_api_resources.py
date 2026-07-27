@@ -907,6 +907,44 @@ def test_case_analyze_denied_pattern(client: TestClient) -> None:
     assert body["computed_risk"] is None
 
 
+# --- Signing keys (server-held Ed25519) --------------------------------------
+
+
+def test_signing_keys_default_and_create(client: TestClient) -> None:
+    listed = client.get("/signing-keys")
+    assert listed.status_code == 200
+    keys = listed.json()
+    assert len(keys) == 1  # the default key created at startup
+    assert keys[0]["name"] == "default"
+    assert keys[0]["public_key"]  # public key exposed
+    assert "private" not in keys[0]  # private material never exposed
+
+    created = client.post("/signing-keys", json={"name": "release"})
+    assert created.status_code == 201
+    assert len(client.get("/signing-keys").json()) == 2
+
+
+def test_case_sign_with_explicit_key(client: TestClient) -> None:
+    key_id = client.get("/signing-keys").json()[0]["key_id"]
+    client.post("/cases", json=_case_payload())
+    client.post("/cases/case-sqli/validate")
+    client.post("/cases/case-sqli/review", json={"actor_role": "human"})
+
+    signed = client.post(
+        "/cases/case-sqli/sign",
+        json={"actor_role": "human", "key_id": key_id},
+    )
+    assert signed.status_code == 200
+    assert signed.json()["status"] == "signed"
+    assert signed.json()["signature"]
+
+    bad = client.post(
+        "/cases/case-sqli/sign",
+        json={"actor_role": "human", "key_id": "secret:does-not-exist"},
+    )
+    assert bad.status_code == 404
+
+
 # --- AppModels (model-driven logic + LLM boundary) ---------------------------
 
 

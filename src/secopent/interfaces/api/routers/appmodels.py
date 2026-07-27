@@ -29,6 +29,7 @@ from ....application.appmodels import (
 from ....application.cases import CaseService
 from ....application.logic_generator import LogicTestGenerator
 from ....application.risk_analyzer import RiskAnalyzer
+from ....application.signing_keys import SigningKeyNotFound
 from ....domain.appmodel.lifecycle import AppModelStatus
 from ....domain.appmodel.logic import LogicTestCase
 from ....domain.appmodel.models import AppModel, Field, Invariant, Role, Transition
@@ -199,7 +200,10 @@ def validate_app_model(
 def sign_app_model(
     app_id: str, version: str, body: ActorRoleBody, request: Request, session: DbSession
 ) -> AppModelOut:
-    signer = request.app.state.case_signer
+    try:
+        signer = request.app.state.signing_keys.signer_for(body.key_id)
+    except SigningKeyNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _execute(
         lambda: _service(session).sign(
             app_id, version, signer=signer, actor_role=body.actor_role

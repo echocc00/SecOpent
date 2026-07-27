@@ -26,9 +26,13 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from sqlalchemy.engine import Engine
 
+from ...application.secret_store import SecretStore
+from ...application.signing_keys import SigningKeyService
+from ...domain.common.canonical import utc_now
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
-from ...infrastructure.signing.ed25519 import Ed25519CaseSigner
+from ...infrastructure.secrets.encrypted_file_backend import EncryptedFileBackend
+from ...infrastructure.signing.ed25519 import Ed25519KeyProvider
 from .routers import (
     appmodels_router,
     approvals_router,
@@ -44,6 +48,7 @@ from .routers import (
     projects_router,
     reports_router,
     scopes_router,
+    signing_keys_router,
     tools_router,
     updates_router,
 )
@@ -62,11 +67,14 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
     app.state.db = Database(engine)
     app.state.idempotency = {}
-    # CaseStudio: a server-held Ed25519 signing key. The private key never
-    # leaves the server (the frontend can request a signature but never hold the
-    # key). Cases themselves persist in the DB (SqlAlchemyCaseRegistry); the
-    # cases router builds a CaseService per request around the request session.
-    app.state.case_signer = Ed25519CaseSigner.generate()
+    # Server-side signing (decision H): Ed25519 private keys are held encrypted
+    # at rest in the SecretStore; the frontend can request a signature but never
+    # holds a private key. A default key is created at startup.
+    signing_keys = SigningKeyService(
+        SecretStore(EncryptedFileBackend()), Ed25519KeyProvider()
+    )
+    signing_keys.create_key("default", now=utc_now())
+    app.state.signing_keys = signing_keys
 
     # Resource routers (DB-backed, except tools which reads the static catalog).
     app.include_router(projects_router)
@@ -85,6 +93,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(reports_router)
     app.include_router(cases_router)
     app.include_router(appmodels_router)
+    app.include_router(signing_keys_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

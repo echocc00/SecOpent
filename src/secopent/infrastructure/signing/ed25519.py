@@ -10,6 +10,7 @@ composition root wires this concrete implementation in.
 from __future__ import annotations
 
 import base64
+from collections.abc import Callable
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -57,7 +58,7 @@ class Ed25519SignatureVerifier:
             return False
 
 
-__all__ = ["Ed25519SignatureVerifier", "Ed25519CaseSigner"]
+__all__ = ["Ed25519SignatureVerifier", "Ed25519CaseSigner", "Ed25519KeyProvider"]
 
 
 class Ed25519CaseSigner:
@@ -93,3 +94,37 @@ class Ed25519CaseSigner:
 
     def __call__(self, payload: bytes) -> str:
         return self.sign(payload)
+
+
+class Ed25519KeyProvider:
+    """``KeyProvider`` implementation using Ed25519 (decision H).
+
+    Satisfies the application-layer ``KeyProvider`` protocol structurally.
+    Private keys are serialized as base64 raw 32-byte seeds so they can be
+    stored as strings in the SecretStore (encrypted at rest); public keys are
+    base64 raw 32-byte keys, safe to expose for verification.
+    """
+
+    def generate(self) -> tuple[str, str]:
+        key = Ed25519PrivateKey.generate()
+        private_bytes = key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        public_bytes = key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        return (
+            base64.b64encode(private_bytes).decode("ascii"),
+            base64.b64encode(public_bytes).decode("ascii"),
+        )
+
+    def signer(self, private_material: str) -> Callable[[bytes], str]:
+        key = Ed25519PrivateKey.from_private_bytes(base64.b64decode(private_material))
+
+        def sign(payload: bytes) -> str:
+            return base64.b64encode(key.sign(payload)).decode("ascii")
+
+        return sign
