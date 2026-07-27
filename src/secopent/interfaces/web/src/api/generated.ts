@@ -108,6 +108,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assessments/{assessment_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Plan
+         * @description Deterministically generate the execution plan for an assessment (decision F).
+         *
+         *     The Planner turns the pinned TestCatalog's required classes for the scope's
+         *     asset types into a risk-tiered DAG (recon before active before intrusive).
+         *     The plan is attached to the assessment, which moves to awaiting_approval.
+         *     Generation is a pure function of catalog + scope - never the LLM.
+         */
+        post: operations["generate_plan_assessments__assessment_id__plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tools": {
         parameters: {
             query?: never;
@@ -154,6 +179,26 @@ export interface paths {
         get: operations["get_finding_findings__finding_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{finding_id}/verdict": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Verdict
+         * @description Record the oracle's N/N reproduction verdict on a finding.
+         */
+        post: operations["set_verdict_findings__finding_id__verdict_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -296,6 +341,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/approvals/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending Approvals */
+        get: operations["pending_approvals_approvals_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Approval History */
+        get: operations["approval_history_approvals_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/approvals": {
         parameters: {
             query?: never;
@@ -307,6 +386,23 @@ export interface paths {
         put?: never;
         /** Create Approval */
         post: operations["create_approval_approvals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Approval */
+        post: operations["reject_approval_approvals_reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -501,6 +597,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cases/{case_id}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analyze Case
+         * @description Deterministic risk/schema analysis for the YAML editor (no transition).
+         *
+         *     Runs the RiskAnalyzer over the case and reports the declared-vs-computed
+         *     risk so the CaseStudio editor can preview risk and block publish on a
+         *     mismatch. This is static analysis - nothing is executed, and the LLM is
+         *     never involved.
+         */
+        post: operations["analyze_case_cases__case_id__analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cases/{case_id}/review": {
         parameters: {
             query?: never;
@@ -579,8 +700,32 @@ export interface paths {
         };
         /** Get App Model */
         get: operations["get_app_model_appmodels__app_id___version__get"];
-        put?: never;
+        /**
+         * Update App Model
+         * @description Edit a model in place (only DRAFT/HUMAN_VALIDATED; signed -> revise).
+         */
+        put: operations["update_app_model_appmodels__app_id___version__put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/appmodels/{app_id}/{version}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revise App Model
+         * @description Create a new DRAFT version (version bump) from the edited content.
+         */
+        post: operations["revise_app_model_appmodels__app_id___version__revise_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -640,6 +785,24 @@ export interface paths {
          *     review). Idempotent: the same model yields the same case signatures.
          */
         post: operations["generate_tests_appmodels__app_id___version__generate_tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/signing-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Signing Keys */
+        get: operations["list_signing_keys_signing_keys_get"];
+        put?: never;
+        /** Create Signing Key */
+        post: operations["create_signing_key_signing_keys_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -741,6 +904,11 @@ export interface components {
              * @default []
              */
             out_of_scope_rules: string[];
+            /**
+             * Llm Proposed
+             * @default false
+             */
+            llm_proposed: boolean;
         };
         /** AppModelOut */
         AppModelOut: {
@@ -767,6 +935,47 @@ export interface components {
             /** Signature */
             signature: string | null;
         };
+        /** AppModelRevise */
+        AppModelRevise: {
+            /** App Id */
+            app_id: string;
+            /** Version */
+            version: string;
+            /** States */
+            states: string[];
+            /**
+             * Transitions
+             * @default []
+             */
+            transitions: components["schemas"]["TransitionIn"][];
+            /**
+             * Invariants
+             * @default []
+             */
+            invariants: components["schemas"]["InvariantIn"][];
+            /**
+             * Fields
+             * @default []
+             */
+            fields: components["schemas"]["FieldIn"][];
+            /**
+             * Roles
+             * @default []
+             */
+            roles: components["schemas"]["RoleIn"][];
+            /**
+             * Out Of Scope Rules
+             * @default []
+             */
+            out_of_scope_rules: string[];
+            /**
+             * Llm Proposed
+             * @default false
+             */
+            llm_proposed: boolean;
+            /** New Version */
+            new_version?: string | null;
+        };
         /** ApprovalCreate */
         ApprovalCreate: {
             /** Assessment Id */
@@ -783,6 +992,45 @@ export interface components {
              * @default []
              */
             approved_capabilities: string[];
+        };
+        /**
+         * ApprovalDecisionOut
+         * @description A decided approval (approved or rejected).
+         */
+        ApprovalDecisionOut: {
+            /** Assessment Id */
+            assessment_id: string;
+            /** Project Id */
+            project_id: string;
+            /** Decision */
+            decision: string;
+            /** Decided By */
+            decided_by: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Approved Risks
+             * @default []
+             */
+            approved_risks: string[];
+            /**
+             * Approved Capabilities
+             * @default []
+             */
+            approved_capabilities: string[];
+            /**
+             * Plan Digest
+             * @default
+             */
+            plan_digest: string;
+            /**
+             * Scope Digest
+             * @default
+             */
+            scope_digest: string;
         };
         /** ApprovalOut */
         ApprovalOut: {
@@ -804,6 +1052,33 @@ export interface components {
             approved_by: string;
             /** Digest */
             digest: string;
+        };
+        /** ApprovalReject */
+        ApprovalReject: {
+            /** Assessment Id */
+            assessment_id: string;
+            /** Rejected By */
+            rejected_by: string;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * ApprovalRequestOut
+         * @description A pending approval: an assessment awaiting a human decision.
+         */
+        ApprovalRequestOut: {
+            /** Assessment Id */
+            assessment_id: string;
+            /** Project Id */
+            project_id: string;
+            /** Mode */
+            mode: string;
+            /** Plan Id */
+            plan_id: string | null;
+            /** Plan Digest */
+            plan_digest: string | null;
+            /** Scope Digest */
+            scope_digest: string | null;
         };
         /** AssessmentCreate */
         AssessmentCreate: {
@@ -891,6 +1166,32 @@ export interface components {
              * @default human
              */
             actor_role: string;
+            /** Key Id */
+            key_id?: string | null;
+        };
+        /**
+         * CaseAnalysisOut
+         * @description Read-only risk/schema analysis for the CaseStudio YAML editor (decision D).
+         *
+         *     Computed by the deterministic RiskAnalyzer (never the LLM): ``computed_risk``
+         *     is None when a deny-listed pattern is present; ``risk_ok`` is True when the
+         *     declared risk is >= the computed risk.
+         */
+        CaseAnalysisOut: {
+            /** Case Id */
+            case_id: string;
+            /** Declared Risk */
+            declared_risk: string;
+            /** Computed Risk */
+            computed_risk: string | null;
+            /** Denied */
+            denied: boolean;
+            /** Risk Ok */
+            risk_ok: boolean;
+            /** Schema Ok */
+            schema_ok: boolean;
+            /** Errors */
+            errors: string[];
         };
         /** CaseCreate */
         CaseCreate: {
@@ -928,6 +1229,11 @@ export interface components {
              * @default manual
              */
             origin: string;
+            /**
+             * Yaml
+             * @default
+             */
+            yaml: string;
         };
         /** CaseOut */
         CaseOut: {
@@ -957,6 +1263,8 @@ export interface components {
             cve: string[];
             /** Owasp */
             owasp: string[];
+            /** Yaml */
+            yaml: string;
         };
         /** CaseStepIn */
         CaseStepIn: {
@@ -982,6 +1290,11 @@ export interface components {
             spec: {
                 [key: string]: unknown;
             };
+        };
+        /** CreateSigningKey */
+        CreateSigningKey: {
+            /** Name */
+            name: string;
         };
         /** EvidenceOut */
         EvidenceOut: {
@@ -1052,6 +1365,11 @@ export interface components {
              * @default []
              */
             cwe: string[];
+            /**
+             * Assessment Id
+             * @default
+             */
+            assessment_id: string;
         };
         /** FindingOut */
         FindingOut: {
@@ -1073,6 +1391,15 @@ export interface components {
             owasp: string[];
             /** Status */
             status: string;
+            /** Assessment Id */
+            assessment_id: string;
+            /** Oracle Verdict */
+            oracle_verdict: string;
+        };
+        /** FindingVerdict */
+        FindingVerdict: {
+            /** Verdict */
+            verdict: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1260,6 +1587,30 @@ export interface components {
              * @default analyst
              */
             approved_by: string;
+            /**
+             * Requests Per Second
+             * @default 5
+             */
+            requests_per_second: number;
+            /**
+             * Concurrency
+             * @default 3
+             */
+            concurrency: number;
+            /**
+             * Max Requests
+             * @default 50000
+             */
+            max_requests: number;
+        };
+        /** ScopeLimitsOut */
+        ScopeLimitsOut: {
+            /** Requests Per Second */
+            requests_per_second: number;
+            /** Concurrency */
+            concurrency: number;
+            /** Max Requests */
+            max_requests: number;
         };
         /** ScopeSnapshotOut */
         ScopeSnapshotOut: {
@@ -1275,10 +1626,25 @@ export interface components {
             ports: number[];
             /** Cloud Accounts */
             cloud_accounts: string[];
+            limits: components["schemas"]["ScopeLimitsOut"];
             /** Approved By */
             approved_by: string;
             /** Digest */
             digest: string;
+        };
+        /** SigningKeyOut */
+        SigningKeyOut: {
+            /** Key Id */
+            key_id: string;
+            /** Name */
+            name: string;
+            /** Public Key */
+            public_key: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** ToolOut */
         ToolOut: {
@@ -1628,6 +1994,39 @@ export interface operations {
             };
         };
     };
+    generate_plan_assessments__assessment_id__plans_post: {
+        parameters: {
+            query?: {
+                catalog_version?: string | null;
+            };
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tools_tools_get: {
         parameters: {
             query?: never;
@@ -1650,7 +2049,11 @@ export interface operations {
     };
     list_findings_findings_get: {
         parameters: {
-            query?: never;
+            query?: {
+                assessment_id?: string | null;
+                severity?: string | null;
+                oracle_verdict?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1664,6 +2067,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FindingOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1713,6 +2125,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_verdict_findings__finding_id__verdict_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindingVerdict"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -1953,6 +2400,46 @@ export interface operations {
             };
         };
     };
+    pending_approvals_approvals_pending_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalRequestOut"][];
+                };
+            };
+        };
+    };
+    approval_history_approvals_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionOut"][];
+                };
+            };
+        };
+    };
     create_approval_approvals_post: {
         parameters: {
             query?: never;
@@ -1973,6 +2460,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApprovalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_approval_approvals_reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalReject"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalDecisionOut"];
                 };
             };
             /** @description Validation Error */
@@ -2327,6 +2847,37 @@ export interface operations {
             };
         };
     };
+    analyze_case_cases__case_id__analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseAnalysisOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     review_case_cases__case_id__review_post: {
         parameters: {
             query?: never;
@@ -2517,6 +3068,78 @@ export interface operations {
             };
         };
     };
+    update_app_model_appmodels__app_id___version__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                app_id: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppModelCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revise_app_model_appmodels__app_id___version__revise_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                app_id: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppModelRevise"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     validate_app_model_appmodels__app_id___version__validate_post: {
         parameters: {
             query?: never;
@@ -2608,6 +3231,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CaseOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_signing_keys_signing_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeyOut"][];
+                };
+            };
+        };
+    };
+    create_signing_key_signing_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSigningKey"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeyOut"];
                 };
             };
             /** @description Validation Error */

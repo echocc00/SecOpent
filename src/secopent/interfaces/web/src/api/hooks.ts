@@ -60,19 +60,51 @@ export const useCreateAssessment = () => {
   });
 };
 
+export const useGeneratePlan = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (assessmentId: string) =>
+      api.POST("/assessments/{assessment_id}/plans", {
+        params: { path: { assessment_id: assessmentId } },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["assessments"] }),
+  });
+};
+
 // --- Tools ---
 export const useTools = () =>
   useQuery({ queryKey: ["tools"], queryFn: () => api.GET("/tools") });
 
 // --- Findings ---
-export const useFindings = () =>
-  useQuery({ queryKey: ["findings"], queryFn: () => api.GET("/findings") });
+export interface FindingFilters {
+  assessment_id?: string;
+  severity?: string;
+  oracle_verdict?: string;
+}
+
+export const useFindings = (filters?: FindingFilters) =>
+  useQuery({
+    queryKey: ["findings", filters],
+    queryFn: () => api.GET("/findings", { params: { query: filters ?? {} } }),
+  });
 
 export const useFinding = (id: string) =>
   useQuery({
     queryKey: ["findings", id],
     queryFn: () => api.GET("/findings/{finding_id}", { params: { path: { finding_id: id } } }),
   });
+
+export const useSetFindingVerdict = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ finding_id, body }: { finding_id: string; body: Schemas["FindingVerdict"] }) =>
+      api.POST("/findings/{finding_id}/verdict", {
+        params: { path: { finding_id } },
+        body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["findings"] }),
+  });
+};
 
 // --- Intel ---
 export const useIntelSearch = (params: { keyword?: string; cve?: string; cwe?: string }) =>
@@ -105,18 +137,31 @@ export const useCreatePlan = () =>
   });
 
 // --- Approvals ---
-export const useApproval = (id: string) =>
-  useQuery({
-    queryKey: ["approvals", id],
-    queryFn: () =>
-      api.GET("/approvals/{approval_id}", { params: { path: { approval_id: id } } }),
-  });
+export const usePendingApprovals = () =>
+  useQuery({ queryKey: ["approvals", "pending"], queryFn: () => api.GET("/approvals/pending") });
+
+export const useApprovalHistory = () =>
+  useQuery({ queryKey: ["approvals", "history"], queryFn: () => api.GET("/approvals/history") });
 
 export const useCreateApproval = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Schemas["ApprovalCreate"]) => api.POST("/approvals", { body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["assessments"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["approvals"] });
+      qc.invalidateQueries({ queryKey: ["assessments"] });
+    },
+  });
+};
+
+export const useRejectApproval = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["ApprovalReject"]) => api.POST("/approvals/reject", { body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["approvals"] });
+      qc.invalidateQueries({ queryKey: ["assessments"] });
+    },
   });
 };
 
@@ -141,23 +186,11 @@ export const useEvidenceByFinding = (findingId: string) =>
     queryFn: () => api.GET("/evidence", { params: { query: { finding_id: findingId } } }),
   });
 
-export const useEvidence = (id: string) =>
-  useQuery({
-    queryKey: ["evidence", "id", id],
-    queryFn: () => api.GET("/evidence/{evidence_id}", { params: { path: { evidence_id: id } } }),
-  });
-
 // --- Reports ---
 export const useReports = (assessmentId: string) =>
   useQuery({
     queryKey: ["reports", assessmentId],
     queryFn: () => api.GET("/reports", { params: { query: { assessment_id: assessmentId } } }),
-  });
-
-export const useReport = (id: string) =>
-  useQuery({
-    queryKey: ["reports", "id", id],
-    queryFn: () => api.GET("/reports/{report_id}", { params: { path: { report_id: id } } }),
   });
 
 // --- Cases (CaseStudio) ---
@@ -177,6 +210,12 @@ export const useCreateCase = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["cases"] }),
   });
 };
+
+export const useAnalyzeCase = () =>
+  useMutation({
+    mutationFn: (case_id: string) =>
+      api.POST("/cases/{case_id}/analyze", { params: { path: { case_id } } }),
+  });
 
 export const useValidateCase = () => {
   const qc = useQueryClient();
@@ -225,6 +264,30 @@ export const useCreateAppModel = () => {
   });
 };
 
+export const useUpdateAppModel = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ app_id, version, body }: { app_id: string; version: string; body: Schemas["AppModelCreate"] }) =>
+      api.PUT("/appmodels/{app_id}/{version}", {
+        params: { path: { app_id, version } },
+        body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["appmodels"] }),
+  });
+};
+
+export const useReviseAppModel = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ app_id, version, body }: { app_id: string; version: string; body: Schemas["AppModelRevise"] }) =>
+      api.POST("/appmodels/{app_id}/{version}/revise", {
+        params: { path: { app_id, version } },
+        body,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["appmodels"] }),
+  });
+};
+
 export const useValidateAppModel = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -260,5 +323,17 @@ export const useGenerateTests = () => {
       qc.invalidateQueries({ queryKey: ["cases"] });
       qc.invalidateQueries({ queryKey: ["appmodels"] });
     },
+  });
+};
+
+// --- Signing keys ---
+export const useSigningKeys = () =>
+  useQuery({ queryKey: ["signing-keys"], queryFn: () => api.GET("/signing-keys") });
+
+export const useCreateSigningKey = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["CreateSigningKey"]) => api.POST("/signing-keys", { body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["signing-keys"] }),
   });
 };
