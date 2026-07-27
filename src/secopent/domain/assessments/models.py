@@ -14,6 +14,7 @@ class AssessmentStatus(StrEnum):
     PLANNED = "planned"
     AWAITING_APPROVAL = "awaiting_approval"
     APPROVED = "approved"
+    REJECTED = "rejected"
     QUEUED = "queued"
     RUNNING = "running"
     PAUSED = "paused"

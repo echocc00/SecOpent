@@ -210,6 +210,37 @@ class ApprovalOut(BaseModel):
     digest: str
 
 
+class ApprovalRequestOut(BaseModel):
+    """A pending approval: an assessment awaiting a human decision."""
+
+    assessment_id: str
+    project_id: str
+    mode: str
+    plan_id: str | None
+    plan_digest: str | None
+    scope_digest: str | None
+
+
+class ApprovalDecisionOut(BaseModel):
+    """A decided approval (approved or rejected)."""
+
+    assessment_id: str
+    project_id: str
+    decision: str  # "approved" | "rejected"
+    decided_by: str
+    reason: str = ""
+    approved_risks: list[str] = []
+    approved_capabilities: list[str] = []
+    plan_digest: str = ""
+    scope_digest: str = ""
+
+
+class ApprovalReject(BaseModel):
+    assessment_id: str
+    rejected_by: str
+    reason: str
+
+
 # --- Jobs ---
 class JobOut(BaseModel):
     id: str

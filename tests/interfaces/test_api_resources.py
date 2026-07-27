@@ -535,6 +535,67 @@ def test_approval_unknown_assessment_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
+def _assessment_awaiting_approval(client: TestClient) -> str:
+    """Bootstrap an assessment with a plan attached (-> awaiting_approval)."""
+    ids = _bootstrap_assessment(client)
+    client.post(
+        "/plans",
+        json={"assessment_id": ids["assessment"],
+              "steps": [{"key": "recon", "runner": "nuclei", "risk": "low"}]},
+    )
+    return ids["assessment"]
+
+
+def test_approval_pending_then_approve(client: TestClient) -> None:
+    assessment_id = _assessment_awaiting_approval(client)
+
+    pending = client.get("/approvals/pending")
+    assert pending.status_code == 200
+    assert len(pending.json()) == 1
+    assert pending.json()[0]["assessment_id"] == assessment_id
+    assert pending.json()[0]["plan_digest"]
+
+    client.post(
+        "/approvals",
+        json={"assessment_id": assessment_id, "approved_by": "human",
+              "approved_risks": ["low"]},
+    )
+    assert client.get("/approvals/pending").json() == []
+
+    history = client.get("/approvals/history")
+    assert len(history.json()) == 1
+    assert history.json()[0]["decision"] == "approved"
+    assert history.json()[0]["decided_by"] == "human"
+
+
+def test_approval_reject_with_reason(client: TestClient) -> None:
+    assessment_id = _assessment_awaiting_approval(client)
+
+    rejected = client.post(
+        "/approvals/reject",
+        json={"assessment_id": assessment_id, "rejected_by": "human",
+              "reason": "scope too broad"},
+    )
+    assert rejected.status_code == 201
+    assert rejected.json()["decision"] == "rejected"
+
+    assessment = client.get(f"/assessments/{assessment_id}").json()
+    assert assessment["status"] == "rejected"
+
+    history = client.get("/approvals/history")
+    assert len(history.json()) == 1
+    assert history.json()[0]["reason"] == "scope too broad"
+
+
+def test_approval_reject_requires_reason(client: TestClient) -> None:
+    assessment_id = _assessment_awaiting_approval(client)
+    resp = client.post(
+        "/approvals/reject",
+        json={"assessment_id": assessment_id, "rejected_by": "human", "reason": "  "},
+    )
+    assert resp.status_code == 422
+
+
 # --- Jobs (read-only) --------------------------------------------------------
 
 

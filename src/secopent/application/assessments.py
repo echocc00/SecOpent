@@ -88,3 +88,26 @@ class AssessmentService:
         )
         self._repo.add(updated)
         return approval
+
+    def reject(
+        self, *, assessment_id: str, rejected_by: str, reason: str
+    ) -> Assessment:
+        """Human-only: reject an awaiting-approval assessment (with a reason).
+
+        Only assessments in AWAITING_APPROVAL may be rejected; a non-empty
+        reason is required (it is recorded in the audit chain by the caller).
+        Rejection is a human decision - never the LLM.
+        """
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        if assessment.status is not AssessmentStatus.AWAITING_APPROVAL:
+            raise DomainValidationError(
+                f"assessment {assessment_id} is not awaiting approval "
+                f"(status={assessment.status.value})"
+            )
+        if not reason.strip():
+            raise DomainValidationError("rejection reason must be non-empty")
+        updated = replace(assessment, status=AssessmentStatus.REJECTED)
+        self._repo.add(updated)
+        return updated
