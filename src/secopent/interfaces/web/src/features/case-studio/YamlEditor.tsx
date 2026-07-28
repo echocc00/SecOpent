@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import Editor, { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor/editor/editor.api";
+// Register only the YAML language (proper syntax highlighting) on top of the
+// editor.api core - no unused language packs are bundled. (monaco-editor 0.56
+// registers languages via languages/definitions/<lang>/register.)
+import "monaco-editor/languages/definitions/yaml/register";
 import editorWorker from "monaco-editor/editor/editor.worker?worker";
 import {
   useAnalyzeCase,
