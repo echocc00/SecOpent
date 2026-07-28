@@ -961,6 +961,51 @@ def test_case_sign_with_explicit_key(client: TestClient) -> None:
     assert bad.status_code == 404
 
 
+# --- LLM boundary: agent may not approve / verdict / create keys -------------
+
+
+def test_approval_agent_403(client: TestClient) -> None:
+    assessment_id = _assessment_awaiting_approval(client)
+    approve = client.post(
+        "/approvals",
+        json={"assessment_id": assessment_id, "approved_by": "agent-x",
+              "approved_risks": ["low"], "actor_role": "agent"},
+    )
+    assert approve.status_code == 403
+    reject = client.post(
+        "/approvals/reject",
+        json={"assessment_id": assessment_id, "rejected_by": "agent-x",
+              "reason": "nope", "actor_role": "agent"},
+    )
+    assert reject.status_code == 403
+    # The assessment stays awaiting_approval (neither approved nor rejected).
+    assert client.get(f"/assessments/{assessment_id}").json()["status"] == "awaiting_approval"
+
+
+def test_finding_verdict_agent_403(client: TestClient) -> None:
+    finding = client.post(
+        "/findings", json={"title": "SQLi", "asset": "https://x.test/login"}
+    ).json()
+    resp = client.post(
+        f"/findings/{finding['id']}/verdict",
+        json={"verdict": "confirmed", "actor_role": "agent"},
+    )
+    assert resp.status_code == 403
+    # Verdict unchanged.
+    assert client.get(f"/findings/{finding['id']}").json()["oracle_verdict"] == "pending"
+
+
+def test_signing_key_create_agent_403(client: TestClient) -> None:
+    resp = client.post(
+        "/signing-keys", json={"name": "rogue", "actor_role": "agent"}
+    )
+    assert resp.status_code == 403
+    # Listing keys stays open (UI key selector) -> only the default key.
+    listed = client.get("/signing-keys")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+
+
 # --- AppModels (model-driven logic + LLM boundary) ---------------------------
 
 

@@ -197,6 +197,11 @@ export interface paths {
         /**
          * Set Verdict
          * @description Record the oracle's N/N reproduction verdict on a finding.
+         *
+         *     The verdict is written by the deterministic oracle (internal, via the
+         *     application layer) or a human manual override. An agent may never set a
+         *     finding's verdict - confirming/refuting findings is forbidden to the LLM
+         *     (LLM boundary).
          */
         post: operations["set_verdict_findings__finding_id__verdict_post"];
         delete?: never;
@@ -999,6 +1004,11 @@ export interface components {
              * @default []
              */
             approved_capabilities: string[];
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
         };
         /**
          * ApprovalDecisionOut
@@ -1068,6 +1078,11 @@ export interface components {
             rejected_by: string;
             /** Reason */
             reason: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
         };
         /**
          * ApprovalRequestOut
@@ -1311,6 +1326,11 @@ export interface components {
         CreateSigningKey: {
             /** Name */
             name: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
         };
         /** EvidenceOut */
         EvidenceOut: {
@@ -1416,6 +1436,11 @@ export interface components {
         FindingVerdict: {
             /** Verdict */
             verdict: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {

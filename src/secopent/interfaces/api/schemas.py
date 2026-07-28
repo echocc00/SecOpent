@@ -97,6 +97,9 @@ class FindingOut(BaseModel):
 class FindingVerdict(BaseModel):
     # Oracle N/N reproduction verdict: pending/confirmed/refuted/inconclusive.
     verdict: str
+    # Written by the deterministic oracle or a human manual override; an agent
+    # may never set it (LLM boundary).
+    actor_role: str = "human"
 
 
 # --- Intel (vulnerability knowledge layer) ---
@@ -198,6 +201,8 @@ class ApprovalCreate(BaseModel):
     approved_by: str
     approved_risks: list[str] = []
     approved_capabilities: list[str] = []
+    # Approval is a human-only decision (LLM boundary); agents are rejected.
+    actor_role: str = "human"
 
 
 class ApprovalOut(BaseModel):
@@ -241,6 +246,8 @@ class ApprovalReject(BaseModel):
     assessment_id: str
     rejected_by: str
     reason: str
+    # Rejection is a human-only decision (LLM boundary); agents are rejected.
+    actor_role: str = "human"
 
 
 # --- Jobs ---
@@ -387,6 +394,9 @@ class SigningKeyOut(BaseModel):
 
 class CreateSigningKey(BaseModel):
     name: str
+    # Creating a signing key is a privileged admin action (LLM boundary);
+    # listing keys (GET) stays open for the UI key selector.
+    actor_role: str = "human"
 
 
 # Generic actor-role body shared by human-only lifecycle actions (cases/appmodels).

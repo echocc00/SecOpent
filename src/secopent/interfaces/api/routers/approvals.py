@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ....application.assessments import AssessmentService
+from ....application.assessments import AssessmentPermissionError, AssessmentService
 from ....application.audit import AuditService
 from ....domain.assessments.models import Approval, AssessmentStatus
 from ....domain.common.errors import DomainValidationError
@@ -147,7 +147,10 @@ def create_approval(payload: ApprovalCreate, session: DbSession) -> ApprovalOut:
             approved_risks=approved_risks,
             approved_capabilities=frozenset(payload.approved_capabilities),
             scope_digest=snapshot.digest,
+            actor_role=payload.actor_role,
         )
+    except AssessmentPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DomainValidationError as exc:
@@ -163,7 +166,10 @@ def reject_approval(payload: ApprovalReject, session: DbSession) -> ApprovalDeci
             assessment_id=payload.assessment_id,
             rejected_by=payload.rejected_by,
             reason=payload.reason,
+            actor_role=payload.actor_role,
         )
+    except AssessmentPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DomainValidationError as exc:

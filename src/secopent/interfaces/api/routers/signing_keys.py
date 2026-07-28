@@ -8,7 +8,7 @@ private key.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from ....application.signing_keys import SigningKeyInfo, SigningKeyService
 from ....domain.common.canonical import utc_now
@@ -39,5 +39,12 @@ def list_signing_keys(request: Request) -> list[SigningKeyOut]:
 def create_signing_key(
     payload: CreateSigningKey, request: Request
 ) -> SigningKeyOut:
+    # Creating a signing key is a privileged human-only admin action (LLM
+    # boundary). Listing keys (GET) stays open for the UI key selector.
+    if payload.actor_role != "human":
+        raise HTTPException(
+            status_code=403,
+            detail="agents cannot create signing keys (human-only admin action)",
+        )
     info = _service(request).create_key(payload.name, now=utc_now())
     return _to_out(info)

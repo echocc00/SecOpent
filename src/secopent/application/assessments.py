@@ -10,9 +10,13 @@ from ..domain.assessments.models import (
     ExecutionPlan,
     PlanStep,
 )
-from ..domain.common.errors import DomainValidationError
+from ..domain.common.errors import DomainError, DomainValidationError
 from ..domain.policy.models import ExecutionMode, RiskClass
 from .ports.repositories import AssessmentRepository
+
+
+class AssessmentPermissionError(DomainError):
+    """Raised when an agent attempts a human-only action (approve/reject)."""
 
 
 class AssessmentService:
@@ -53,6 +57,7 @@ class AssessmentService:
         approved_risks: frozenset[RiskClass],
         approved_capabilities: frozenset[str],
         scope_digest: str,
+        actor_role: str = "human",
     ) -> Approval:
         """Record a human approval against the assessment's active plan.
 
@@ -62,6 +67,7 @@ class AssessmentService:
         approver reviewed. On success the assessment moves to APPROVED and its
         ``approval_id`` is set. Approval is a human decision - never the LLM.
         """
+        self._require_human(actor_role)
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
@@ -90,7 +96,12 @@ class AssessmentService:
         return approval
 
     def reject(
-        self, *, assessment_id: str, rejected_by: str, reason: str
+        self,
+        *,
+        assessment_id: str,
+        rejected_by: str,
+        reason: str,
+        actor_role: str = "human",
     ) -> Assessment:
         """Human-only: reject an awaiting-approval assessment (with a reason).
 
@@ -98,6 +109,7 @@ class AssessmentService:
         reason is required (it is recorded in the audit chain by the caller).
         Rejection is a human decision - never the LLM.
         """
+        self._require_human(actor_role)
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
@@ -111,3 +123,12 @@ class AssessmentService:
         updated = replace(assessment, status=AssessmentStatus.REJECTED)
         self._repo.add(updated)
         return updated
+
+    @staticmethod
+    def _require_human(actor_role: str) -> None:
+        if actor_role == "agent":
+            raise AssessmentPermissionError(
+                "agents cannot approve or reject assessments (human-only action)"
+            )
+        if actor_role != "human":
+            raise AssessmentPermissionError(f"unknown actor role: {actor_role!r}")

@@ -115,7 +115,18 @@ def get_finding(finding_id: str, session: DbSession) -> FindingOut:
 def set_verdict(
     finding_id: str, body: FindingVerdict, session: DbSession
 ) -> FindingOut:
-    """Record the oracle's N/N reproduction verdict on a finding."""
+    """Record the oracle's N/N reproduction verdict on a finding.
+
+    The verdict is written by the deterministic oracle (internal, via the
+    application layer) or a human manual override. An agent may never set a
+    finding's verdict - confirming/refuting findings is forbidden to the LLM
+    (LLM boundary).
+    """
+    if body.actor_role == "agent":
+        raise HTTPException(
+            status_code=403,
+            detail="agents cannot set finding verdicts (oracle/human only)",
+        )
     repo = SqlAlchemyFindingRepository(session)
     finding = repo.get(finding_id)
     if finding is None:

@@ -127,6 +127,7 @@ export function NewAssessment() {
       approved_by: "analyst",
       approved_risks: risks,
       approved_capabilities: capabilities,
+      actor_role: "human",
     });
     navigate(`/assessments/${assessmentId}`);
   };

@@ -55,6 +55,7 @@ export function ApprovalCenter() {
       approved_by: approvedBy,
       approved_risks: risks,
       approved_capabilities: capabilities,
+      actor_role: "human",
     });
     closeDrawer();
   };
@@ -65,6 +66,7 @@ export function ApprovalCenter() {
       assessment_id: selected.assessment_id,
       rejected_by: approvedBy,
       reason: rejectReason.trim(),
+      actor_role: "human",
     });
     closeDrawer();
   };
