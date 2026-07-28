@@ -65,7 +65,7 @@ export function YamlEditor() {
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
         <Select value={caseId} onValueChange={(v) => setCaseId(v ?? "")}>
-          <SelectTrigger className="w-72">
+          <SelectTrigger className="w-72" aria-label="Select a case">
             <SelectValue placeholder="Select a case" />
           </SelectTrigger>
           <SelectContent>

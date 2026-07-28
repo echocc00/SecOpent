@@ -67,7 +67,7 @@ export function Findings() {
 
       <div className="flex flex-wrap gap-3">
         <Select value={severity} onValueChange={(v) => setSeverity(v ?? "")}>
-          <SelectTrigger className="w-40">
+          <SelectTrigger className="w-40" aria-label="Filter by severity">
             <SelectValue placeholder="Severity" />
           </SelectTrigger>
           <SelectContent>
@@ -79,7 +79,7 @@ export function Findings() {
           </SelectContent>
         </Select>
         <Select value={verdict} onValueChange={(v) => setVerdict(v ?? "")}>
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-44" aria-label="Filter by oracle verdict">
             <SelectValue placeholder="Oracle verdict" />
           </SelectTrigger>
           <SelectContent>

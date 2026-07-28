@@ -77,7 +77,7 @@ export function SigningPanel({ appId, version, status, signature, digest }: Sign
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <Select value={keyId} onValueChange={(v) => setKeyId(v ?? "")}>
-              <SelectTrigger className="w-72">
+              <SelectTrigger className="w-72" aria-label="Select signing key">
                 <SelectValue placeholder="Signing key (default if unset)" />
               </SelectTrigger>
               <SelectContent>

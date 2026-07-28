@@ -203,6 +203,7 @@ export function ApprovalCenter() {
                 <Textarea
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="Reason for rejection"
                   rows={2}
                 />
               </div>

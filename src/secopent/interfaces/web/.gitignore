@@ -15,6 +15,12 @@ dist-ssr
 # Generated OpenAPI schema dump (intermediate; src/api/generated.ts is the source of truth)
 openapi.json
 
+# Playwright artifacts
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
