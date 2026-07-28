@@ -399,6 +399,25 @@ class CreateSigningKey(BaseModel):
     actor_role: str = "human"
 
 
+# --- Catalog (knowledge layer: required test classes per asset type) ---
+class RequiredTestClassIn(BaseModel):
+    id: str
+    cwe: list[str] = []
+    owasp: list[str] = []
+    risk: str
+
+
+class CatalogCreate(BaseModel):
+    version: str
+    mappings: dict[str, list[RequiredTestClassIn]]
+
+
+class CatalogOut(BaseModel):
+    version: str
+    digest: str
+    mappings: dict[str, list[RequiredTestClassIn]]
+
+
 # Generic actor-role body shared by human-only lifecycle actions (cases/appmodels).
 ActorRoleBody = CaseAction
 

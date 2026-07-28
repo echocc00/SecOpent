@@ -274,6 +274,32 @@ def test_generate_plan_no_catalog_409(client: TestClient) -> None:
     assert resp.status_code == 409
 
 
+def test_catalog_endpoint_seeds_and_enables_plan(client: TestClient) -> None:
+    created = client.post(
+        "/catalog",
+        json={
+            "version": "2026.07",
+            "mappings": {
+                "web_app": [
+                    {"id": "TC-WEB-001", "cwe": ["CWE-79"], "owasp": ["A03:2021"], "risk": "low"}
+                ]
+            },
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["digest"].startswith("sha256:")
+
+    latest = client.get("/catalog/latest")
+    assert latest.status_code == 200
+    assert "web_app" in latest.json()["mappings"]
+
+    # A REST-seeded catalog enables plan generation for a web_app scope.
+    ids = _bootstrap_assessment(client)
+    plan = client.post(f"/assessments/{ids['assessment']}/plans")
+    assert plan.status_code == 201
+    assert len(plan.json()["steps"]) >= 1
+
+
 # --- Findings (DB-backed, idempotent) ----------------------------------------
 
 

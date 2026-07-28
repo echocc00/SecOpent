@@ -40,6 +40,7 @@ from .routers import (
     assets_router,
     audit_router,
     cases_router,
+    catalog_router,
     evidence_router,
     findings_router,
     intel_router,
@@ -94,6 +95,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.include_router(cases_router)
     app.include_router(appmodels_router)
     app.include_router(signing_keys_router)
+    app.include_router(catalog_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

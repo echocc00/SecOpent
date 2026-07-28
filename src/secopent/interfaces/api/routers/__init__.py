@@ -8,6 +8,7 @@ from .assessments import router as assessments_router
 from .assets import router as assets_router
 from .audit import router as audit_router
 from .cases import router as cases_router
+from .catalog import router as catalog_router
 from .evidence import router as evidence_router
 from .findings import router as findings_router
 from .intel import router as intel_router
@@ -38,4 +39,5 @@ __all__ = [
     "cases_router",
     "appmodels_router",
     "signing_keys_router",
+    "catalog_router",
 ]
