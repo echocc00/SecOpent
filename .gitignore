@@ -11,6 +11,9 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
+# Playwright artifacts (web/e2e)
+test-results/
+playwright-report/
 *.db
 *.sqlite
 *.sqlite-journal
