@@ -443,6 +443,7 @@ class SigningKeyOut(BaseModel):
     name: str
     public_key: str
     created_at: datetime
+    archived: bool = False
 
 
 class CreateSigningKey(BaseModel):

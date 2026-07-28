@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from ...application.remote_model import RemoteModelGateway
+from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
 from ...domain.common.canonical import utc_now
@@ -39,6 +39,7 @@ from ...infrastructure.db.sqlite import create_sqlite_engine
 from ...infrastructure.evidence_store.redaction import RedactionEngine
 from ...infrastructure.llm.null_backend import NullModelBackend
 from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
+from ...infrastructure.logging_setup import configure_logging
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -114,6 +115,9 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     SQLite engine is created (for tests / lightweight runs).
     """
     app = FastAPI(title="SecOpent API", version="0.1.0")
+    # Structured logging (§3.8): JSON when SECOPTENT_LOG_FORMAT=json, with
+    # sensitive-field redaction. Idempotent across calls.
+    configure_logging(json_format=os.environ.get("SECOPTENT_LOG_FORMAT") == "json")
     if engine is None:
         engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
     app.state.db = Database(engine)
@@ -138,6 +142,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
     # null backend so LLM-assisted endpoints degrade to their deterministic
     # path. The LLM only ever proposes/drafts - the deterministic layer decides.
+    llm_backend: ModelBackend
     if os.environ.get("MINIMAX_API_KEY"):
         llm_backend = RemoteOpenAICompatibleBackend(
             endpoint="https://api.minimax.chat/v1",

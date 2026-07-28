@@ -24,11 +24,48 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("version", help="Print the version and exit.")
     subparsers.add_parser("doctor", help="Health-check the deterministic core.")
+    backup = subparsers.add_parser(
+        "backup", help="Back up the SQLite store (consistent snapshot)."
+    )
+    backup.add_argument("--db", required=True, help="Path to the SQLite database file.")
+    backup.add_argument(
+        "--out", required=True, help="Directory to write the backup into."
+    )
     return parser
 
 
 def _cmd_version() -> int:
     print(__version__)
+    return 0
+
+
+def _cmd_backup(db_path: str, out_dir: str) -> int:
+    """Back up the SQLite store with a consistent online snapshot (§3.8).
+
+    Uses sqlite3 backup (safe even while the API writes). The SecretStore's
+    in-memory backend has nothing persistent to export; its references are
+    covered by the audit chain in the database.
+    """
+    import sqlite3
+    from datetime import datetime
+    from pathlib import Path
+
+    src = Path(db_path)
+    if not src.exists():
+        print(f"error: db not found: {db_path}")
+        return 1
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = out / f"secopent-backup-{timestamp}.db"
+    src_conn = sqlite3.connect(str(src))
+    dest_conn = sqlite3.connect(str(dest))
+    try:
+        src_conn.backup(dest_conn)
+    finally:
+        dest_conn.close()
+        src_conn.close()
+    print(f"backed up {src} -> {dest}")
     return 0
 
 
@@ -55,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_version()
     if args.command == "doctor":
         return _cmd_doctor()
+    if args.command == "backup":
+        return _cmd_backup(args.db, args.out)
     parser.print_help()
     return 1
 

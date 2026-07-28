@@ -12,7 +12,7 @@ infrastructure) so the application layer stays free of ``cryptography``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -42,12 +42,17 @@ class KeyProvider(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class SigningKeyInfo:
-    """Public information about a signing key (deliberately no private key)."""
+    """Public information about a signing key (deliberately no private key).
+
+    ``archived`` marks a rotated-out key: it is retained (its public key can
+    still verify old signatures) but is never used for new signatures.
+    """
 
     key_id: str
     name: str
     public_key: str
     created_at: datetime
+    archived: bool = False
 
 
 class SigningKeyService:
@@ -80,8 +85,20 @@ class SigningKeyService:
         return info
 
     def default_key_id(self) -> str | None:
-        keys = self.list_keys()
-        return keys[0].key_id if keys else None
+        """The newest non-archived key (insertion order), or None."""
+        active = [k for k in self._keys.values() if not k.archived]
+        return active[-1].key_id if active else None
+
+    def rotate(self, old_key_id: str, *, now: datetime) -> SigningKeyInfo:
+        """Rotate a key: create a new key and archive the old one (§3.8).
+
+        The old key is archived but RETAINED so its public key can still verify
+        signatures made before rotation; new signatures use the new key.
+        """
+        old = self.get(old_key_id)
+        new_info = self.create_key(f"{old.name}-next", now=now)
+        self._keys[old_key_id] = replace(old, archived=True)
+        return new_info
 
     def signer_for(self, key_id: str | None = None) -> KeySigner:
         """Resolve a signer for ``key_id`` (or the default key).

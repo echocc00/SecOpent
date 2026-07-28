@@ -10,9 +10,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ....application.signing_keys import SigningKeyInfo, SigningKeyService
+from ....application.signing_keys import (
+    SigningKeyInfo,
+    SigningKeyNotFound,
+    SigningKeyService,
+)
 from ....domain.common.canonical import utc_now
-from ..schemas import CreateSigningKey, SigningKeyOut
+from ..schemas import ActorRoleBody, CreateSigningKey, SigningKeyOut
 
 router = APIRouter(prefix="/signing-keys", tags=["signing-keys"])
 
@@ -27,6 +31,7 @@ def _to_out(info: SigningKeyInfo) -> SigningKeyOut:
         name=info.name,
         public_key=info.public_key,
         created_at=info.created_at,
+        archived=info.archived,
     )
 
 
@@ -47,4 +52,25 @@ def create_signing_key(
             detail="agents cannot create signing keys (human-only admin action)",
         )
     info = _service(request).create_key(payload.name, now=utc_now())
+    return _to_out(info)
+
+
+@router.post("/{key_id}/rotate", status_code=201, response_model=SigningKeyOut)
+def rotate_signing_key(
+    key_id: str, body: ActorRoleBody, request: Request
+) -> SigningKeyOut:
+    """Rotate a signing key (§3.8): create a new key, archive the old one.
+
+    Human-only (LLM boundary). The archived key is retained so signatures made
+    before rotation can still be verified; new signatures use the new key.
+    """
+    if body.actor_role != "human":
+        raise HTTPException(
+            status_code=403,
+            detail="agents cannot rotate signing keys (human-only admin action)",
+        )
+    try:
+        info = _service(request).rotate(key_id, now=utc_now())
+    except SigningKeyNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _to_out(info)

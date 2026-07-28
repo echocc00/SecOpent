@@ -1,7 +1,28 @@
 from __future__ import annotations
 
+import hashlib
+import hmac as _hmac
+
 from ..domain.audit.models import GENESIS_HASH, AuditEvent
 from .ports.repositories import AuditRepository
+
+
+def chain_hmac(events: list[AuditEvent], key: bytes) -> str:
+    """Keyed HMAC over the audit chain's event hashes (§3.8 tamper upgrade).
+
+    The hash chain already detects tampering; this adds keyed authenticity -
+    it proves the chain was produced by a holder of ``key``. Computed over the
+    ordered event hashes, so any reorder/edit/insert changes the MAC.
+    """
+    mac = _hmac.new(key, digestmod=hashlib.sha256)
+    for event in events:
+        mac.update(event.event_hash.encode("utf-8"))
+    return "hmac-sha256:" + mac.hexdigest()
+
+
+def verify_chain_hmac(events: list[AuditEvent], key: bytes, expected: str) -> bool:
+    """Constant-time check of a chain HMAC."""
+    return _hmac.compare_digest(chain_hmac(events, key), expected)
 
 
 class AuditService:
@@ -18,6 +39,10 @@ class AuditService:
         )
         self._repo.add(event)
         return event
+
+    def chain_hmac(self, key: bytes) -> str:
+        """Keyed HMAC over the current chain (§3.8)."""
+        return chain_hmac(self._repo.list_events(), key)
 
     @staticmethod
     def verify(events: list[AuditEvent]) -> bool:
