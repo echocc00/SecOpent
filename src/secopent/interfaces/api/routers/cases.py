@@ -30,10 +30,12 @@ from ....application.cases import (
     CaseService,
     CaseTransitionError,
 )
+from ....application.remote_model import DataClassification, RemoteModelGateway
 from ....application.risk_analyzer import RiskAnalyzer
 from ....application.signing_keys import SigningKeyNotFound
 from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStatus, CaseStep
 from ....domain.cases.risk import risk_rank
+from ....domain.common.canonical import utc_now
 from ....domain.common.errors import DomainError
 from ....domain.policy.models import RiskClass
 from ....infrastructure.repositories.sqlalchemy_cases import SqlAlchemyCaseRegistry
@@ -48,6 +50,37 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/cases", tags=["cases"])
+
+# Risk tiers the LLM may suggest (advisory only; the computed risk decides).
+_RISK_KEYWORDS = ("destructive", "intrusive", "active", "low", "passive")
+
+
+def _llm_suggest_risk(gateway: RemoteModelGateway, case: CaseDefinition) -> str | None:
+    """Ask the LLM to DRAFT a risk tier for a case (§3.3 dual channel).
+
+    Advisory only - the deterministic RiskAnalyzer result always decides
+    (LLM boundary). An empty/unparseable reply (e.g. the null backend when no
+    LLM is configured) yields None and the computed risk stands.
+    """
+    prompt = (
+        "You assist a security engineer. For this test case, suggest a risk tier "
+        "from {passive, low, active, intrusive, destructive}. Reply with ONLY the "
+        "tier word.\nCase: "
+        + case.id
+        + "; steps: "
+        + ", ".join(s.action for s in case.steps)
+    )
+    try:
+        response = gateway.call(
+            prompt, classification=DataClassification.INTERNAL, now=utc_now()
+        )
+    except DomainError:
+        return None
+    text = response.text.lower()
+    for keyword in _RISK_KEYWORDS:
+        if keyword in text:
+            return keyword
+    return None
 
 
 def case_to_out(case: CaseDefinition) -> CaseOut:
@@ -154,13 +187,16 @@ def validate_case(case_id: str, session: DbSession) -> CaseOut:
 
 
 @router.post("/{case_id}/analyze", response_model=CaseAnalysisOut)
-def analyze_case(case_id: str, session: DbSession) -> CaseAnalysisOut:
+def analyze_case(
+    case_id: str, session: DbSession, request: Request, use_llm: bool = False
+) -> CaseAnalysisOut:
     """Deterministic risk/schema analysis for the YAML editor (no transition).
 
     Runs the RiskAnalyzer over the case and reports the declared-vs-computed
     risk so the CaseStudio editor can preview risk and block publish on a
-    mismatch. This is static analysis - nothing is executed, and the LLM is
-    never involved.
+    mismatch. This is static analysis - nothing is executed. With ``use_llm``,
+    the LLM additionally DRAFTS a risk suggestion (``llm_risk``); it is advisory
+    only and never overrides the computed risk (LLM boundary).
     """
     case = SqlAlchemyCaseRegistry(session).get(case_id)
     if case is None:
@@ -178,6 +214,9 @@ def analyze_case(case_id: str, session: DbSession) -> CaseAnalysisOut:
         errors.append(
             f"declared risk {case.risk.value} is below computed risk {computed_value}"
         )
+    llm_risk = None
+    if use_llm:
+        llm_risk = _llm_suggest_risk(request.app.state.model_gateway, case)
     return CaseAnalysisOut(
         case_id=case.id,
         declared_risk=case.risk.value,
@@ -186,6 +225,7 @@ def analyze_case(case_id: str, session: DbSession) -> CaseAnalysisOut:
         risk_ok=risk_ok,
         schema_ok=bool(case.steps) and not denied,
         errors=errors,
+        llm_risk=llm_risk,
     )
 
 

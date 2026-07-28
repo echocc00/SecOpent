@@ -15,7 +15,9 @@ transition -> 409, validation failure -> 422.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
+from dataclasses import replace
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -29,12 +31,15 @@ from ....application.appmodels import (
 from ....application.cases import CaseService
 from ....application.drift_detector import DriftDetector
 from ....application.logic_generator import LogicTestGenerator
+from ....application.model_builder import ModelImporter
+from ....application.remote_model import DataClassification, RemoteModelGateway
 from ....application.risk_analyzer import RiskAnalyzer
 from ....application.signing_keys import SigningKeyNotFound
 from ....domain.appmodel.lifecycle import AppModelStatus
 from ....domain.appmodel.logic import LogicTestCase
 from ....domain.appmodel.models import AppModel, Field, Invariant, Role, Transition
 from ....domain.cases.models import CaseDefinition, CaseOrigin, CaseStep
+from ....domain.common.canonical import utc_now
 from ....domain.common.errors import DomainError
 from ....domain.policy.models import RiskClass
 from ....infrastructure.logic_strategies.invariant_strategy import InvariantStrategy
@@ -42,6 +47,8 @@ from ....infrastructure.logic_strategies.restler_strategy import RestlerStrategy
 from ....infrastructure.logic_strategies.schemathesis_strategy import (
     SchemathesisStrategy,
 )
+from ....infrastructure.model_sources.openapi import OpenApiImporter
+from ....infrastructure.model_sources.postman import PostmanImporter
 from ....infrastructure.repositories.sqlalchemy_appmodels import (
     SqlAlchemyAppModelRegistry,
 )
@@ -50,6 +57,7 @@ from ..deps import DbSession
 from ..schemas import (
     ActorRoleBody,
     AppModelCreate,
+    AppModelImport,
     AppModelOut,
     AppModelRevise,
     CaseOut,
@@ -63,6 +71,53 @@ from ..schemas import (
 from .cases import case_to_out
 
 router = APIRouter(prefix="/appmodels", tags=["appmodels"])
+
+_IMPORTERS: dict[str, ModelImporter] = {
+    "openapi": OpenApiImporter(),
+    "postman": PostmanImporter(),
+}
+
+
+def _llm_propose_enrichment(
+    gateway: RemoteModelGateway, draft: AppModel
+) -> AppModel:
+    """Ask the LLM to PROPOSE business states/invariants for an imported draft.
+
+    The LLM only PROPOSES (§3.3, LLM boundary): its suggestions are merged into
+    the draft and the result is registered as LLM_PROPOSED for human validation.
+    An empty/unparseable completion (e.g. the null backend when no LLM is
+    configured) simply yields the deterministic draft unchanged.
+    """
+    prompt = (
+        "You assist a security engineer modeling an application. From these API "
+        "endpoints, propose business states and invariants. Reply ONLY with JSON "
+        '{"states": ["..."], "invariants": [{"id": "...", "expr": "..."}]}.\n'
+        "Endpoints: " + ", ".join(t.endpoint for t in draft.transitions)
+    )
+    try:
+        response = gateway.call(
+            prompt, classification=DataClassification.INTERNAL, now=utc_now()
+        )
+        data = json.loads(response.text)
+    except (DomainError, ValueError, json.JSONDecodeError):
+        return draft  # LLM unavailable / unparseable -> deterministic draft
+
+    states = list(draft.states)
+    for state in data.get("states", []):
+        if isinstance(state, str) and state and state not in states:
+            states.append(state)
+    invariants = list(draft.invariants)
+    existing_ids = {i.id for i in invariants}
+    for inv in data.get("invariants", []):
+        if (
+            isinstance(inv, dict)
+            and inv.get("id")
+            and inv.get("expr")
+            and inv["id"] not in existing_ids
+        ):
+            invariants.append(Invariant(id=str(inv["id"]), expr=str(inv["expr"])))
+            existing_ids.add(str(inv["id"]))
+    return replace(draft, states=tuple(states), invariants=tuple(invariants))
 
 
 def _to_out(model: AppModel) -> AppModelOut:
@@ -124,6 +179,33 @@ def create_app_model(payload: AppModelCreate, session: DbSession) -> AppModelOut
     return _execute(
         lambda: _service(session).create(model, proposed=payload.llm_proposed)
     )
+
+
+@router.post("/import", status_code=201, response_model=AppModelOut)
+def import_app_model(
+    payload: AppModelImport, request: Request, session: DbSession
+) -> AppModelOut:
+    """Import an AppModel from an OpenAPI/Postman/traffic spec (§3.3).
+
+    The importer builds a deterministic DRAFT. With ``use_llm``, the governed
+    LLM gateway PROPOSES business states/invariants which are merged in and the
+    model is registered as LLM_PROPOSED for human validation (the LLM never
+    validates or signs - LLM boundary). Without an LLM the draft stays as the
+    deterministic draft (LLM_PROPOSED, awaiting the same human validation).
+    """
+    importer = _IMPORTERS.get(payload.source_type)
+    if importer is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown source_type: {payload.source_type}",
+        )
+    draft = importer.to_draft(payload.spec)
+    service = _service(session)
+    if not payload.use_llm:
+        return _to_out(service.create(draft))
+    gateway: RemoteModelGateway = request.app.state.model_gateway
+    enriched = _llm_propose_enrichment(gateway, draft)
+    return _to_out(service.create_proposed(enriched))
 
 
 def _to_domain(app_id: str, version: str, payload: AppModelCreate) -> AppModel:

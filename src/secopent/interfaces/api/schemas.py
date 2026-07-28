@@ -210,6 +210,9 @@ class HealthReportOut(BaseModel):
 class ReportGenerate(BaseModel):
     assessment_id: str
     title: str = "Security Assessment Report"
+    # With polish, the LLM polishes the executive summary narrative (numbers
+    # stay from the deterministic layer; added as an extra section, LLM boundary).
+    polish: bool = False
 
 
 # --- Plans ---
@@ -408,7 +411,9 @@ class CaseAnalysisOut(BaseModel):
 
     Computed by the deterministic RiskAnalyzer (never the LLM): ``computed_risk``
     is None when a deny-listed pattern is present; ``risk_ok`` is True when the
-    declared risk is >= the computed risk.
+    declared risk is >= the computed risk. ``llm_risk`` is an optional LLM DRAFT
+    suggestion (§3.3 dual channel) - advisory only, NEVER overrides the computed
+    risk (LLM boundary).
     """
 
     case_id: str
@@ -418,6 +423,7 @@ class CaseAnalysisOut(BaseModel):
     risk_ok: bool
     schema_ok: bool
     errors: list[str]
+    llm_risk: str | None = None
 
 
 class CaseAction(BaseModel):
@@ -513,6 +519,15 @@ class AppModelCreate(BaseModel):
 class AppModelRevise(AppModelCreate):
     # Target version for the new draft; auto-bumped from the source if omitted.
     new_version: str | None = None
+
+
+class AppModelImport(BaseModel):
+    # Import an AppModel from an OpenAPI/Postman/traffic spec. With use_llm the
+    # LLM PROPOSES business states/invariants (model lands as LLM_PROPOSED for
+    # human validation); without it the deterministic importer draft is DRAFT.
+    source_type: str
+    spec: dict[str, object]
+    use_llm: bool = False
 
 
 class TransitionOut(BaseModel):

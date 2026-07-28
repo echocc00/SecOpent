@@ -29,12 +29,16 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from ...application.remote_model import RemoteModelGateway
 from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
 from ...domain.common.canonical import utc_now
 from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
+from ...infrastructure.evidence_store.redaction import RedactionEngine
+from ...infrastructure.llm.null_backend import NullModelBackend
+from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -130,6 +134,21 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     )
     signing_keys.create_key("default", now=utc_now())
     app.state.signing_keys = signing_keys
+
+    # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
+    # null backend so LLM-assisted endpoints degrade to their deterministic
+    # path. The LLM only ever proposes/drafts - the deterministic layer decides.
+    if os.environ.get("MINIMAX_API_KEY"):
+        llm_backend = RemoteOpenAICompatibleBackend(
+            endpoint="https://api.minimax.chat/v1",
+            api_key_env="MINIMAX_API_KEY",
+            model="abab6.5s-chat",
+        )
+    else:
+        llm_backend = NullModelBackend()
+    app.state.model_gateway = RemoteModelGateway(
+        local_backend=llm_backend, redactor=RedactionEngine()
+    )
 
     # API at the root (dev: the vite proxy rewrites /api/* -> root).
     _register_api(app)

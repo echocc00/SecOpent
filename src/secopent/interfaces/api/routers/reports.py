@@ -13,11 +13,15 @@ reported as 0.0 until the coverage matrix is wired into the run (known gap).
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from ....application.remote_model import DataClassification, RemoteModelGateway
 from ....application.report_renderer import ReportData, ReportRenderer
-from ....domain.reports.models import Report
+from ....domain.common.canonical import utc_now
+from ....domain.common.errors import DomainError
+from ....domain.reports.models import Report, ReportSection
 from ....infrastructure.evidence_store.redaction import RedactionEngine
 from ....infrastructure.report_templates.renderer import Jinja2TemplateRenderer
 from ....infrastructure.repositories.sqlalchemy_core import (
@@ -50,8 +54,44 @@ def _to_out(report: Report) -> ReportOut:
     )
 
 
+def _polish_executive_summary(
+    gateway: RemoteModelGateway, report: Report
+) -> Report:
+    """LLM-polish the executive summary narrative (§3.3).
+
+    The LLM only polishes wording; the deterministic executive_summary section
+    is preserved verbatim and the polish is added as a separate
+    ``executive_summary_polished`` section. Numbers come from the deterministic
+    layer - the LLM never recomputes them (LLM boundary). An empty reply (no
+    LLM configured) leaves the report unchanged.
+    """
+    exec_section = report.section("executive_summary")
+    if exec_section is None:
+        return report
+    prompt = (
+        "Polish this security report executive summary for clarity and tone. "
+        "Keep ALL numbers exactly as written; do not add or change any figures.\n\n"
+        + exec_section.content
+    )
+    try:
+        response = gateway.call(
+            prompt, classification=DataClassification.INTERNAL, now=utc_now()
+        )
+    except DomainError:
+        return report
+    polished = response.text.strip()
+    if not polished:
+        return report
+    sections = (*report.sections, ReportSection(
+        name="executive_summary_polished", content=polished
+    ))
+    return replace(report, sections=sections)
+
+
 @router.post("", status_code=201, response_model=ReportOut)
-def generate_report(payload: ReportGenerate, session: DbSession) -> ReportOut:
+def generate_report(
+    payload: ReportGenerate, request: Request, session: DbSession
+) -> ReportOut:
     """Render + persist a data-driven report for an assessment."""
     assessment_repo = SqlAlchemyAssessmentRepository(session)
     assessment = assessment_repo.get(payload.assessment_id)
@@ -82,6 +122,8 @@ def generate_report(payload: ReportGenerate, session: DbSession) -> ReportOut:
     )
     renderer = ReportRenderer(Jinja2TemplateRenderer(), RedactionEngine())
     report = renderer.render(data, report_id=f"rep-{uuid.uuid4().hex[:12]}")
+    if payload.polish:
+        report = _polish_executive_summary(request.app.state.model_gateway, report)
     SqlAlchemyReportRepository(session).add(report)
     return _to_out(report)
 

@@ -81,6 +81,17 @@ class AppModelService:
         self._registry.put(draft)
         return draft
 
+    def create_proposed(self, model: AppModel) -> AppModel:
+        """Register an LLM-proposed model (status LLM_PROPOSED, §3.3).
+
+        The LLM may PROPOSE a model (from an OpenAPI/Postman import) but it is
+        NEVER validated or signed here - a human must validate and sign before
+        the model can generate tests (LLM boundary).
+        """
+        proposed = replace(model, status=AppModelStatus.LLM_PROPOSED)
+        self._registry.put(proposed)
+        return proposed
+
     def get(self, app_id: str, version: str) -> AppModel:
         model = self._registry.get(app_id, version)
         if model is None:
