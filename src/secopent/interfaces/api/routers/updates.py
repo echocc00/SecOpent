@@ -16,9 +16,18 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from ....application.audit import AuditService
+from ....application.health import KnowledgeHealthMonitor
+from ....infrastructure.health_checkers import (
+    CurationLagChecker,
+    GitFreshnessChecker,
+    OsvReachabilityChecker,
+    SignatureChecker,
+)
+from ....infrastructure.repositories.sqlalchemy_core import SqlAlchemyAuditRepository
 from ....infrastructure.repositories.sqlalchemy_intel import SqlAlchemyUpdateRepository
 from ..deps import DbSession
-from ..schemas import ActiveBundleOut, UpdateBundleOut
+from ..schemas import ActiveBundleOut, HealthAlertOut, HealthReportOut, UpdateBundleOut
 
 router = APIRouter(prefix="/updates", tags=["updates"])
 
@@ -29,6 +38,31 @@ def _to_out(row: dict[str, Any]) -> UpdateBundleOut:
         version=row["version"],
         digest=row["digest"],
         staged_at=row.get("staged_at"),
+    )
+
+
+@router.get("/health", response_model=HealthReportOut)
+def updates_health(session: DbSession) -> HealthReportOut:
+    """Run the §7.3 knowledge-health detectors and return active alerts.
+
+    OSV reachability is a real probe; git freshness reports stale when no
+    local nuclei-templates clone is configured; curation-lag and signature
+    checks are placeholders until the curation pipeline is wired (P3 §3.4).
+    """
+    audit = AuditService(SqlAlchemyAuditRepository(session))
+    monitor = KnowledgeHealthMonitor(
+        audit_service=audit,
+        freshness_checker=GitFreshnessChecker(),
+        curation_checker=CurationLagChecker(),
+        reachability_checker=OsvReachabilityChecker(),
+        signature_checker=SignatureChecker(),
+    )
+    report = monitor.check_all()
+    return HealthReportOut(
+        alerts=[
+            HealthAlertOut(kind=a.kind.value, source=a.source, details=a.details)
+            for a in report.alerts
+        ]
     )
 
 

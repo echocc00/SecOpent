@@ -165,6 +165,53 @@ class AuditVerifyOut(BaseModel):
     event_count: int
 
 
+# --- Drift (AppModel re-import diff) ---
+class DriftRequest(BaseModel):
+    states: list[str]
+    transitions: list[TransitionIn]
+
+
+class DriftReportOut(BaseModel):
+    app_id: str
+    added: list[str]
+    removed: list[str]
+    changed: list[str]
+    has_drift: bool
+
+
+# --- Emergency stop ---
+class StopRequest(BaseModel):
+    actor: str
+    reason: str
+    actor_role: str = "human"
+
+
+class EmergencyReportOut(BaseModel):
+    triggered: bool
+    revoked_permits: int
+    terminated_containers: int
+    evidence_preserved: bool
+    actor: str
+    reason: str
+
+
+# --- Knowledge health ---
+class HealthAlertOut(BaseModel):
+    kind: str
+    source: str
+    details: dict[str, object]
+
+
+class HealthReportOut(BaseModel):
+    alerts: list[HealthAlertOut]
+
+
+# --- Report generation ---
+class ReportGenerate(BaseModel):
+    assessment_id: str
+    title: str = "Security Assessment Report"
+
+
 # --- Plans ---
 class PlanStepIn(BaseModel):
     key: str

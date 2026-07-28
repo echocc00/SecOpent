@@ -1032,6 +1032,87 @@ def test_signing_key_create_agent_403(client: TestClient) -> None:
     assert len(listed.json()) == 1
 
 
+# --- P2 placeholder wiring: job retry / drift / report / stop / health -------
+
+
+def test_job_retry_resets_failed_to_ready(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    engine = create_sqlite_engine(tmp_path / "jobs.db")
+    init_db(engine)
+    with Session(engine) as session:
+        SqlAlchemyJobRepository(session).add(
+            Job(id="job-1", plan_step_key="s1", idempotency_key="k1",
+                status=JobStatus.FAILED, failure_class="timeout")
+        )
+        session.commit()
+    with TestClient(create_app(engine)) as jobs_client:
+        retried = jobs_client.post("/jobs/job-1/retry")
+        assert retried.status_code == 200
+        assert retried.json()["status"] == "ready"
+        # A non-failed (now READY) job cannot be retried again.
+        assert jobs_client.post("/jobs/job-1/retry").status_code == 409
+
+
+def test_appmodel_drift_detects_added_endpoint(client: TestClient) -> None:
+    client.post(
+        "/appmodels",
+        json={"app_id": "drift-app", "version": "1.0", "states": ["a", "b"],
+              "transitions": [{"id": "t1", "from_state": "a", "to_state": "b",
+                               "endpoint": "POST /x", "params": [], "idempotent": False}]},
+    )
+    resp = client.post(
+        "/appmodels/drift-app/1.0/drift",
+        json={"states": ["a", "b", "c"],
+              "transitions": [
+                  {"id": "t1", "from_state": "a", "to_state": "b",
+                   "endpoint": "POST /x", "params": [], "idempotent": False},
+                  {"id": "t2", "from_state": "b", "to_state": "c",
+                   "endpoint": "POST /y", "params": [], "idempotent": False},
+              ]},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["has_drift"] is True
+    assert "POST /y" in body["added"]
+
+
+def test_report_generate_and_persist(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    resp = client.post(
+        "/reports", json={"assessment_id": ids["assessment"], "title": "Test Report"}
+    )
+    assert resp.status_code == 201
+    report = resp.json()
+    assert report["assessment_id"] == ids["assessment"]
+    assert any(s["name"] == "executive_summary" for s in report["sections"])
+    listed = client.get("/reports", params={"assessment_id": ids["assessment"]})
+    assert len(listed.json()) == 1
+
+
+def test_emergency_stop_human_only(client: TestClient) -> None:
+    ids = _bootstrap_assessment(client)
+    resp = client.post(
+        f"/assessments/{ids['assessment']}/stop",
+        json={"actor": "operator", "reason": "compromise detected", "actor_role": "human"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["triggered"] is True
+    agent = client.post(
+        f"/assessments/{ids['assessment']}/stop",
+        json={"actor": "agent", "reason": "x", "actor_role": "agent"},
+    )
+    assert agent.status_code == 403
+
+
+def test_updates_health_reports_detectors(client: TestClient) -> None:
+    resp = client.get("/updates/health")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "alerts" in body
+    # No local nuclei-templates clone is configured -> source_stale alert.
+    kinds = [a["kind"] for a in body["alerts"]]
+    assert "source_stale" in kinds
+
+
 # --- AppModels (model-driven logic + LLM boundary) ---------------------------
 
 

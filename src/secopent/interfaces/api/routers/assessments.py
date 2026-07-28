@@ -8,6 +8,8 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from ....application.assessments import AssessmentService
+from ....application.audit import AuditService
+from ....application.emergency_stop import EmergencyStop
 from ....application.planner import Planner
 from ....domain.assessments.models import Assessment, ExecutionPlan
 from ....domain.catalog.models import AssetType
@@ -19,10 +21,22 @@ from ....infrastructure.repositories.sqlalchemy_catalog import (
 )
 from ....infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyAssessmentRepository,
+    SqlAlchemyAuditRepository,
     SqlAlchemyScopeRepository,
 )
+from ....infrastructure.safety.emergency_infra import (
+    DockerContainerTerminator,
+    NullPermitRevoker,
+)
 from ..deps import DbSession
-from ..schemas import AssessmentCreate, AssessmentOut, PlanOut, PlanStepOut
+from ..schemas import (
+    AssessmentCreate,
+    AssessmentOut,
+    EmergencyReportOut,
+    PlanOut,
+    PlanStepOut,
+    StopRequest,
+)
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
 
@@ -171,3 +185,37 @@ def generate_plan(
     if created is None:  # pragma: no cover - attach_plan always sets active_plan_id
         raise HTTPException(status_code=500, detail="plan was not persisted")
     return _plan_to_out(created)
+
+
+@router.post("/{assessment_id}/stop", response_model=EmergencyReportOut)
+def emergency_stop(
+    assessment_id: str, payload: StopRequest, session: DbSession
+) -> EmergencyReportOut:
+    """Trigger the emergency stop for an assessment (human-only, §12).
+
+    Revokes unused permits, terminates active execution containers, preserves
+    evidence, and writes a high-priority audit event. Agent callers are
+    rejected (403) - the kill switch is a human-only action (LLM boundary).
+    """
+    if payload.actor_role != "human":
+        raise HTTPException(
+            status_code=403, detail="emergency stop is human-only (LLM boundary)"
+        )
+    if SqlAlchemyAssessmentRepository(session).get(assessment_id) is None:
+        raise HTTPException(status_code=404, detail="assessment not found")
+
+    audit = AuditService(SqlAlchemyAuditRepository(session))
+    stop = EmergencyStop(
+        permit_revoker=NullPermitRevoker(),
+        container_terminator=DockerContainerTerminator(),
+        audit=audit,
+    )
+    report = stop.trigger(actor=payload.actor, reason=payload.reason)
+    return EmergencyReportOut(
+        triggered=report.triggered,
+        revoked_permits=report.revoked_permits,
+        terminated_containers=report.terminated_containers,
+        evidence_preserved=report.evidence_preserved,
+        actor=report.actor,
+        reason=report.reason,
+    )

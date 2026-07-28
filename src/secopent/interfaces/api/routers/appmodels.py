@@ -27,6 +27,7 @@ from ....application.appmodels import (
     AppModelTransitionError,
 )
 from ....application.cases import CaseService
+from ....application.drift_detector import DriftDetector
 from ....application.logic_generator import LogicTestGenerator
 from ....application.risk_analyzer import RiskAnalyzer
 from ....application.signing_keys import SigningKeyNotFound
@@ -52,6 +53,8 @@ from ..schemas import (
     AppModelOut,
     AppModelRevise,
     CaseOut,
+    DriftReportOut,
+    DriftRequest,
     FieldOut,
     InvariantOut,
     RoleOut,
@@ -287,3 +290,45 @@ def generate_tests(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         results.append(case_to_out(advanced))
     return results
+
+
+# --- Drift detection (AppModel re-import diff, §11.9) ------------------------
+
+
+@router.post("/{app_id}/{version}/drift", response_model=DriftReportOut)
+def check_drift(
+    app_id: str, version: str, payload: DriftRequest, session: DbSession
+) -> DriftReportOut:
+    """Diff a re-imported model against the stored one (endpoint-level drift).
+
+    The client submits the re-imported states/transitions (e.g. from a fresh
+    OpenAPI/Postman import); the DriftDetector reports added/removed/changed
+    endpoints so the UI can prompt regeneration of affected logic tests.
+    """
+    current = SqlAlchemyAppModelRegistry(session).get(app_id, version)
+    if current is None:
+        raise HTTPException(status_code=404, detail="app model not found")
+    reimported = AppModel(
+        app_id=app_id,
+        version=version,
+        states=tuple(payload.states),
+        transitions=tuple(
+            Transition(
+                id=t.id,
+                from_state=t.from_state,
+                to_state=t.to_state,
+                endpoint=t.endpoint,
+                params=tuple(t.params),
+                idempotent=t.idempotent,
+            )
+            for t in payload.transitions
+        ),
+    )
+    report = DriftDetector().check(current, reimported)
+    return DriftReportOut(
+        app_id=report.app_id,
+        added=list(report.added),
+        removed=list(report.removed),
+        changed=list(report.changed),
+        has_drift=report.has_drift,
+    )
