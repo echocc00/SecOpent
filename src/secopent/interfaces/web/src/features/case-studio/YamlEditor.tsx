@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import Editor from "@monaco-editor/react";
+import Editor, { loader } from "@monaco-editor/react";
+import * as monaco from "monaco-editor/editor/editor.api";
+import editorWorker from "monaco-editor/editor/editor.worker?worker";
 import {
   useAnalyzeCase,
   useCases,
@@ -17,6 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+// Use the locally bundled monaco (not the CDN default): the editor worker runs
+// from a bundled worker chunk, so the YAML editor works offline (W11).
+(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment =
+  {
+    getWorker: () => new editorWorker(),
+  };
+loader.config({ monaco });
 
 type Analysis = components["schemas"]["CaseAnalysisOut"];
 

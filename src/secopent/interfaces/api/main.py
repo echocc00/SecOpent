@@ -2,20 +2,21 @@
 """FastAPI OpenAPI surface (§13): command/query separation, idempotency, SSE.
 
 The app is a factory (``create_app``) so tests get an isolated instance.
-Resource routers (projects/scopes/assessments/tools/findings/intel/updates/
-audit) are DB-backed via ``app.state.db``; the health + long-task SSE endpoints
-below remain lightweight demonstrations of the M4 contract.
+Resource routers are DB-backed via ``app.state.db``.
 
-- **command/query separation**: POST mutates, GET reads;
-- **idempotency**: a repeated POST with the same ``Idempotency-Key`` returns the
-  original response instead of creating a duplicate (findings router);
-- **long-task SSE**: ``/assessments/{id}/events`` streams status as
-  ``text/event-stream``;
-- standard error codes (404 for unknown resources, 422 for invalid payloads).
+Serving modes:
+- **Dev**: vite dev server (:5173) proxies ``/api/*`` -> the backend root
+  (rewriting the ``/api`` prefix away), so the routers are registered at the
+  root here.
+- **Production**: when ``SECOPTENT_WEB_DIST`` points at the built frontend, the
+  same routers are ALSO mounted under ``/api`` (the frontend calls ``/api/*``
+  and there is no proxy to rewrite), and a SPA fallback serves ``index.html``
+  for client-side routes.
 """
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import time
 from collections.abc import Iterator
@@ -23,7 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 
 from ...application.secret_store import SecretStore
@@ -55,29 +57,8 @@ from .routers import (
 )
 
 
-def create_app(engine: Engine | None = None) -> FastAPI:
-    """Build an API instance.
-
-    ``engine`` is the SQLAlchemy engine to bind; when omitted a temporary
-    SQLite engine is created (for tests / lightweight runs). Resource routers
-    are DB-backed via ``app.state.db``. ``app.state.idempotency`` holds the
-    per-instance idempotency cache used by the findings router.
-    """
-    app = FastAPI(title="SecOpent API", version="0.1.0")
-    if engine is None:
-        engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
-    app.state.db = Database(engine)
-    app.state.idempotency = {}
-    # Server-side signing (decision H): Ed25519 private keys are held encrypted
-    # at rest in the SecretStore; the frontend can request a signature but never
-    # holds a private key. A default key is created at startup.
-    signing_keys = SigningKeyService(
-        SecretStore(EncryptedFileBackend()), Ed25519KeyProvider()
-    )
-    signing_keys.create_key("default", now=utc_now())
-    app.state.signing_keys = signing_keys
-
-    # Resource routers (DB-backed, except tools which reads the static catalog).
+def _register_api(app: FastAPI) -> None:
+    """Register all resource routers + health/SSE on a target app."""
     app.include_router(projects_router)
     app.include_router(scopes_router)
     app.include_router(assessments_router)
@@ -115,5 +96,55 @@ def create_app(engine: Engine | None = None) -> FastAPI:
                 time.sleep(0)
 
         return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
+def create_app(engine: Engine | None = None) -> FastAPI:
+    """Build an API instance.
+
+    ``engine`` is the SQLAlchemy engine to bind; when omitted a temporary
+    SQLite engine is created (for tests / lightweight runs).
+    """
+    app = FastAPI(title="SecOpent API", version="0.1.0")
+    if engine is None:
+        engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
+    app.state.db = Database(engine)
+    app.state.idempotency = {}
+    # Server-side signing (decision H): Ed25519 private keys are held encrypted
+    # at rest in the SecretStore; the frontend can request a signature but never
+    # holds a private key. A default key is created at startup.
+    signing_keys = SigningKeyService(
+        SecretStore(EncryptedFileBackend()), Ed25519KeyProvider()
+    )
+    signing_keys.create_key("default", now=utc_now())
+    app.state.signing_keys = signing_keys
+
+    # API at the root (dev: the vite proxy rewrites /api/* -> root).
+    _register_api(app)
+
+    # The same API under /api (production: the frontend calls /api/* directly,
+    # no proxy rewrite). The sub-app shares the main app's state objects.
+    api = FastAPI()
+    api.state.db = app.state.db
+    api.state.idempotency = app.state.idempotency
+    api.state.signing_keys = app.state.signing_keys
+    _register_api(api)
+    app.mount("/api", api)
+
+    # Production static serving (W11): serve the built frontend's hashed assets
+    # and fall back to index.html for client-side routing. Registered AFTER the
+    # /api mount so API routes win; only active when SECOPTENT_WEB_DIST is set.
+    web_dist_env = os.environ.get("SECOPTENT_WEB_DIST", "")
+    if web_dist_env:
+        web_dist = Path(web_dist_env)
+        if web_dist.exists():
+            assets_dir = web_dist / "assets"
+            if assets_dir.exists():
+                app.mount(
+                    "/assets", StaticFiles(directory=assets_dir), name="web-assets"
+                )
+
+            @app.get("/{full_path:path}", include_in_schema=False)
+            def spa_fallback(full_path: str) -> FileResponse:
+                return FileResponse(web_dist / "index.html")
 
     return app

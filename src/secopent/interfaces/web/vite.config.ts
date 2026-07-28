@@ -24,5 +24,10 @@ export default defineConfig({
       "/ws": { target: "ws://localhost:8000", ws: true },
     },
   },
-  build: { outDir: "dist", sourcemap: true },
+  build: {
+    outDir: "dist",
+    sourcemap: true,
+    // Monaco (lazy-loaded in the CaseStudio chunk) is intentionally large.
+    chunkSizeWarningLimit: 3000,
+  },
 });

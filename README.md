@@ -35,6 +35,33 @@ py -3.12 -m pip install -e ".[dev]"
 py -3.12 -m pytest -q
 ```
 
+## Web Case Studio (P1)
+
+The React Case Studio lives in `src/secopent/interfaces/web`.
+
+**Development** (API on :8000 + Vite dev server on :5173 with an `/api` proxy):
+
+```bash
+# Terminal 1 - API
+py -3.12 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000
+# Terminal 2 - frontend
+cd src/secopent/interfaces/web && npm install && npm run dev
+# open http://localhost:5173
+```
+
+**Production** (build + serve the SPA and API together on :8000):
+
+```bash
+bash scripts/build_web.sh   # vite build, then uvicorn serves dist via SECOPTENT_WEB_DIST
+# open http://localhost:8000 (SPA fallback for client-side routes; /api coexists)
+```
+
+**End-to-end** (Playwright; starts both servers itself):
+
+```bash
+cd src/secopent/interfaces/web && npx playwright install chromium && npx playwright test
+```
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

@@ -27,13 +27,19 @@ test("reject: pending -> rejected with reason, recorded in audit chain", async (
   await page.getByPlaceholder("Reason for rejection").fill("scope too broad");
   await page.getByRole("button", { name: "Reject", exact: true }).click();
 
-  // Rejection is recorded in the tamper-evident audit chain
-  const audit = await request.get("/api/audit/events");
-  const events = await audit.json();
-  expect(
-    events.some(
-      (e: { action: string; resource_id: string }) =>
-        e.action === "approval.rejected" && e.resource_id === assessmentId,
-    ),
-  ).toBeTruthy();
+  // Wait for the rejection to leave the pending list, then poll the audit
+  // chain (the audit commit lands just after the response, so poll for it).
+  await expect(page.getByText(assessmentId)).toHaveCount(0);
+  await expect
+    .poll(
+      async () => {
+        const events = await (await request.get("/api/audit/events")).json();
+        return events.some(
+          (e: { action: string; resource_id: string }) =>
+            e.action === "approval.rejected" && e.resource_id === assessmentId,
+        );
+      },
+      { timeout: 10000 },
+    )
+    .toBeTruthy();
 });
