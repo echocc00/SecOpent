@@ -20,6 +20,11 @@ def create_sqlite_engine(path: Path) -> Engine:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
+        # §3.5 performance: synchronous=NORMAL is durable under WAL (only the
+        # final commit fsync is skipped) and much faster than FULL; cap the WAL
+        # file so a long-running assessment cannot grow it without bound.
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA journal_size_limit=67108864")
         cursor.close()
 
     return engine
