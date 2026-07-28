@@ -268,10 +268,21 @@ def test_generate_plan_from_catalog(tmp_path) -> None:  # type: ignore[no-untype
         assert fetched["status"] == "awaiting_approval"
 
 
-def test_generate_plan_no_catalog_409(client: TestClient) -> None:
+def test_plan_generation_uses_default_catalog(client: TestClient) -> None:
+    # The bundled default catalog is seeded at startup (§3.1), so plan
+    # generation works out of the box (no operator import required).
     ids = _bootstrap_assessment(client)
-    resp = client.post(f"/assessments/{ids['assessment']}/plans")
-    assert resp.status_code == 409
+    plan = client.post(f"/assessments/{ids['assessment']}/plans")
+    assert plan.status_code == 201
+    assert len(plan.json()["steps"]) >= 1
+
+
+def test_default_catalog_seeded(client: TestClient) -> None:
+    latest = client.get("/catalog/latest")
+    assert latest.status_code == 200
+    body = latest.json()
+    assert body["version"] == "2026.07-default"
+    assert "web_app" in body["mappings"]
 
 
 def test_catalog_endpoint_seeds_and_enables_plan(client: TestClient) -> None:

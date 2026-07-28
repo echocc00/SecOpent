@@ -27,12 +27,17 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
 from ...domain.common.canonical import utc_now
+from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
+from ...infrastructure.repositories.sqlalchemy_catalog import (
+    SqlAlchemyCatalogRepository,
+)
 from ...infrastructure.secrets.encrypted_file_backend import EncryptedFileBackend
 from ...infrastructure.signing.ed25519 import Ed25519KeyProvider
 from .routers import (
@@ -109,6 +114,14 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
     app.state.db = Database(engine)
     app.state.idempotency = {}
+
+    # Seed the bundled default TestCatalog (§3.1) so plan generation works out
+    # of the box when the store is empty (no operator import required).
+    with Session(engine) as seed_session:
+        catalog_repo = SqlAlchemyCatalogRepository(seed_session)
+        if catalog_repo.latest_catalog() is None:
+            catalog_repo.add_catalog(build_default_catalog())
+            seed_session.commit()
     # Server-side signing (decision H): Ed25519 private keys are held encrypted
     # at rest in the SecretStore; the frontend can request a signature but never
     # holds a private key. A default key is created at startup.
