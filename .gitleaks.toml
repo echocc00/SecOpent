@@ -1,0 +1,14 @@
+# gitleaks configuration for SecOpent (P3 T1 - SAST into CI).
+#
+# Extends gitleaks' default rule set. The allowlist scopes secret scanning away
+# from intentional fake data (adapter test fixtures + test suites) so the scan
+# stays green on sample tool output, while real source/config remains scanned.
+# Note: minimax-key.txt and 云主机.txt are gitignored and never committed, so
+# they are not present in the git history that gitleaks scans.
+
+[allowlist]
+description = "Test fixtures and test suites contain intentional fake data"
+paths = [
+  '''(^|[/\\])fixtures([/\\]|$)''',
+  '''(^|[/\\])tests([/\\]|$)''',
+]

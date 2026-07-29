@@ -132,6 +132,8 @@ class SubprocessContainerExecutor:
             "ALL",
             "--read-only",
             "--tmpfs",
+            # nosec B108 - "/tmp" here is a container-internal tmpfs mount
+            # (hardened: rw,noexec,nosuid), not predictable host temp usage.
             "/tmp:rw,noexec,nosuid",
             # Non-root tools need a writable HOME under the read-only rootfs
             # (e.g. nuclei writes its config to $HOME/.config). The /tmp tmpfs

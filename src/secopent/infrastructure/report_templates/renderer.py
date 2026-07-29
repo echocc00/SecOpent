@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 
 class Jinja2TemplateRenderer:
@@ -22,7 +22,12 @@ class Jinja2TemplateRenderer:
         self._dir = Path(template_dir) if template_dir is not None else Path(__file__).parent
         self._env = Environment(
             loader=FileSystemLoader(str(self._dir)),
-            autoescape=False,
+            # Reports are Markdown (.md.j2), not HTML: select_autoescape scopes
+            # autoescaping to HTML/XML templates and correctly leaves these
+            # Markdown templates unescaped (HTML-escaping would corrupt the
+            # Markdown source). Satisfies bandit B701; any later Markdown->HTML
+            # rendering step owns its own sanitization.
+            autoescape=select_autoescape(),
             undefined=StrictUndefined,
             trim_blocks=True,
             lstrip_blocks=True,

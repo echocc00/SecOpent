@@ -120,7 +120,12 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # sensitive-field redaction. Idempotent across calls.
     configure_logging(json_format=os.environ.get("SECOPTENT_LOG_FORMAT") == "json")
     if engine is None:
-        engine = create_sqlite_engine(Path(tempfile.mktemp(suffix=".db")))
+        # mkstemp (not mktemp) creates the temp file securely with no
+        # predictable-name race (bandit B306). Lightweight default for
+        # tests/dev; production injects a persistent engine (docs/deployment.md).
+        fd, db_path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        engine = create_sqlite_engine(Path(db_path))
     app.state.db = Database(engine)
     app.state.idempotency = {}
 

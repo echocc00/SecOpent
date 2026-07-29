@@ -256,9 +256,11 @@ class SqlAlchemyIntelRepository:
             column = "cwe"
         else:
             column = "description"  # keyword: match the description column
+        # ``column`` is chosen from a fixed allowlist (cve/cwe/description) above,
+        # never from user input; the match value is parameterized via :q (B608 FP).
         stmt = text(
             "SELECT canonical_id FROM core_vulnerabilities_fts "
-            f"WHERE {column} MATCH :q"
+            f"WHERE {column} MATCH :q"  # nosec B608
         )
         rows = self._session.execute(stmt, {"q": f'"{query}"'}).all()
         result: list[Vulnerability] = []

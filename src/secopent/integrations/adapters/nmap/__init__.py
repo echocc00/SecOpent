@@ -24,6 +24,9 @@ import re
 from typing import Any
 from xml.etree import ElementTree as ET
 
+import defusedxml.ElementTree as _SafeET
+from defusedxml.common import DefusedXmlException
+
 from secopent.domain.adapters.contracts import (
     AdapterManifest,
     AdapterSource,
@@ -157,8 +160,10 @@ def parse(
     if not stdout or not stdout.strip():
         return ()
     try:
-        root = ET.fromstring(stdout)
-    except ET.ParseError:
+        # defusedxml hardens against XML entity/DTD attacks (bandit B314);
+        # malformed or malicious XML yields zero Observations, never a raise.
+        root = _SafeET.fromstring(stdout)
+    except (ET.ParseError, DefusedXmlException):
         return ()
 
     observations: list[Observation] = []

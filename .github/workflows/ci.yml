@@ -73,3 +73,47 @@ jobs:
       # unavailable.
       - name: Smoke marker
         run: echo "compose smoke deferred to Docker-enabled environment (M5 E2E)"
+
+  sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so gitleaks can scan all commits
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Bandit (Python SAST, gate medium+)
+        run: bandit -r src/secopent -ll
+      - name: gitleaks (secret scan)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # Required by gitleaks-action (free for public repos; configure the
+          # secret for private repos). Config: .gitleaks.toml.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install (Python)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: pip-audit (Python dependency CVE scan)
+        run: pip-audit
+      - name: npm audit (frontend dependency CVE scan, block on critical)
+        working-directory: src/secopent/interfaces/web
+        run: |
+          npm ci
+          npm audit --audit-level=critical
