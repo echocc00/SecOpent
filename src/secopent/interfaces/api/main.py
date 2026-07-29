@@ -15,15 +15,13 @@ Serving modes:
 """
 from __future__ import annotations
 
-import json
 import os
 import tempfile
-import time
-from collections.abc import Iterator
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
@@ -43,6 +41,9 @@ from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBa
 from ...infrastructure.logging_setup import configure_logging
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
+)
+from ...infrastructure.repositories.sqlalchemy_core import (
+    SqlAlchemyAssessmentRepository,
 )
 from ...infrastructure.secrets.encrypted_file_backend import EncryptedFileBackend
 from ...infrastructure.signing.ed25519 import Ed25519KeyProvider
@@ -65,6 +66,12 @@ from .routers import (
     signing_keys_router,
     tools_router,
     updates_router,
+)
+from .sse import event_stream
+
+# Assessment statuses that end the SSE stream (no further state changes).
+_TERMINAL_ASSESSMENT_STATUSES = frozenset(
+    {"completed", "partial", "failed", "cancelled", "rejected"}
 )
 
 
@@ -94,19 +101,40 @@ def _register_api(app: FastAPI) -> None:
         return {"status": "ok"}
 
     @app.get("/assessments/{assessment_id}/events")
-    def assessment_events(assessment_id: str) -> StreamingResponse:
-        """Stream assessment status as server-sent events (long task)."""
+    async def assessment_events(
+        assessment_id: str, request: Request
+    ) -> StreamingResponse:
+        """Stream assessment status as SSE with bounded backpressure (P3 §3.5).
 
-        def _stream() -> Iterator[str]:
-            for status in ("queued", "running", "completed"):
-                event: dict[str, Any] = {
-                    "assessment_id": assessment_id,
-                    "status": status,
-                }
-                yield f"data: {json.dumps(event)}\n\n"
-                time.sleep(0)
+        Polls the assessment's live status each tick, emits only on change
+        (signature de-dup), bounds memory via a 64-slot queue (a slow client is
+        dropped, never OOM), and stops on client disconnect or a terminal status.
+        """
+        db: Database = app.state.db
 
-        return StreamingResponse(_stream(), media_type="text/event-stream")
+        async def snapshot() -> list[dict[str, Any]]:
+            session = db.open_session()
+            try:
+                assessment = SqlAlchemyAssessmentRepository(session).get(assessment_id)
+            finally:
+                session.close()
+            status = assessment.status.value if assessment is not None else "not_found"
+            return [{"assessment_id": assessment_id, "status": status}]
+
+        def stop_when(events: Sequence[dict[str, Any]]) -> bool:
+            if not events:
+                return False
+            status = events[0].get("status")
+            return status == "not_found" or status in _TERMINAL_ASSESSMENT_STATUSES
+
+        return StreamingResponse(
+            event_stream(
+                snapshot,
+                is_disconnected=request.is_disconnected,
+                stop_when=stop_when,
+            ),
+            media_type="text/event-stream",
+        )
 
 
 def create_app(engine: Engine | None = None) -> FastAPI:

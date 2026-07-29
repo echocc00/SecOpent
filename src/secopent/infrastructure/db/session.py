@@ -68,3 +68,12 @@ class Database:
             raise
         finally:
             session.close()
+
+    def open_session(self) -> Session:
+        """Open a standalone session; the caller owns commit/close.
+
+        Used by long-lived streams (SSE, P3 §3.5) that poll outside a single
+        request's dependency scope - each poll opens and closes a short-lived
+        session rather than holding one for the stream's whole lifetime.
+        """
+        return self._factory()

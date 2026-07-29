@@ -65,10 +65,12 @@ def test_idempotency_key_prevents_duplicate(client: TestClient) -> None:
 
 
 def test_sse_streams_events(client: TestClient) -> None:
+    # P3 §3.5: the endpoint streams the assessment's REAL status (not the old
+    # demo loop). An unknown assessment emits a terminal "not_found" snapshot
+    # and the stream closes, so iter_text() terminates rather than hanging.
     with client.stream("GET", "/assessments/assess-1/events") as response:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/event-stream")
         body = "".join(chunk for chunk in response.iter_text())
-    assert "queued" in body
-    assert "completed" in body
     assert "assess-1" in body
+    assert "not_found" in body
