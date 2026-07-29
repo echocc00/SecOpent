@@ -11,6 +11,7 @@ worker.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -52,9 +53,14 @@ class StepRunner(Protocol):
 class Orchestrator:
     """Dispatch and execute plan steps as leased jobs."""
 
-    def __init__(self, jobs: JobService, runner: StepRunner) -> None:
+    def __init__(
+        self, jobs: JobService, runner: StepRunner, *, max_workers: int = 1
+    ) -> None:
+        if max_workers < 1:
+            raise ValueError(f"max_workers must be >= 1, got {max_workers}")
         self._jobs = jobs
         self._runner = runner
+        self._max_workers = max_workers
         self._steps: dict[str, PlanStep] = {}
 
     def dispatch(self, plan: ExecutionPlan) -> tuple[Job, ...]:
@@ -74,13 +80,34 @@ class Orchestrator:
         return tuple(created)
 
     def execute_ready(self, *, owner: str, now: datetime) -> tuple[Job, ...]:
-        """Lease + execute every currently-leaseable job once; then unblock deps."""
-        results: list[Job] = []
+        """Lease + execute every currently-leaseable job once; then unblock deps.
+
+        With ``max_workers > 1`` the per-step executions run concurrently on a
+        thread pool (P3 §3.5 / T4). The JobService lease is atomic, so distinct
+        jobs are processed in parallel without double-leasing (no race/deadlock);
+        the slow ``runner.run`` calls overlap instead of running serially.
+        """
+        targets: list[tuple[Job, PlanStep]] = []
         for job in self._jobs.leaseable(now):
             step = self._steps.get(job.plan_step_key)
-            if step is None:
-                continue
-            results.append(self._execute(job, step, owner=owner, now=now))
+            if step is not None:
+                targets.append((job, step))
+
+        if self._max_workers <= 1 or len(targets) <= 1:
+            results = [
+                self._execute(job, step, owner=owner, now=now)
+                for job, step in targets
+            ]
+        else:
+            with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+                results = list(
+                    pool.map(
+                        lambda pair: self._execute(
+                            pair[0], pair[1], owner=owner, now=now
+                        ),
+                        targets,
+                    )
+                )
         self._resolve_dependencies()
         return tuple(results)
 

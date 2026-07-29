@@ -25,6 +25,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -52,10 +53,28 @@ class SubprocessContainerExecutor:
         docker_bin: str = "docker",
         default_timeout: int = 600,
         inspect_timeout: int = 30,
+        max_workers: int = 1,
     ) -> None:
+        if max_workers < 1:
+            raise ValueError(f"max_workers must be >= 1, got {max_workers}")
         self._docker = docker_bin
         self._timeout = default_timeout
         self._inspect_timeout = inspect_timeout
+        self._max_workers = max_workers
+
+    def run_many(
+        self, invocations: Sequence[Mapping[str, Any]]
+    ) -> list[ContainerResult]:
+        """Run multiple container invocations, concurrently when max_workers>1.
+
+        Each invocation is the kwargs for one ``run`` call. With a single worker
+        (default) this is a plain serial map; with ``max_workers > 1`` the runs
+        overlap on a thread pool (P3 §3.5 / T4). Results preserve input order.
+        """
+        if self._max_workers <= 1 or len(invocations) <= 1:
+            return [self.run(**invocation) for invocation in invocations]
+        with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+            return list(pool.map(lambda invocation: self.run(**invocation), invocations))
 
     def run(
         self,

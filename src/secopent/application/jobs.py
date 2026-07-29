@@ -7,9 +7,15 @@ expires and another worker can re-lease. ``add`` is idempotent on the
 ``idempotency_key`` so re-dispatching the same plan does not duplicate work.
 The in-memory store is M4 scope; the SQLite-backed lease lands behind the same
 surface (Task 11).
+
+Thread-safety (P3 §3.5 / T4): all public operations hold a re-entrant lock so
+the lease check-then-set is atomic - concurrent workers cannot double-lease the
+same job, and the parallel Orchestrator (``execute_ready`` with max_workers>1)
+runs adapter executions concurrently without racing the store.
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 from datetime import datetime, timedelta
 
@@ -31,56 +37,68 @@ class JobLeaseError(DomainError):
 
 
 class JobService:
-    """Lease-based job store (single-machine V1)."""
+    """Lease-based job store (single-machine V1), thread-safe."""
 
     def __init__(self, *, lease_ttl_seconds: int = 300) -> None:
         self._jobs: dict[str, Job] = {}
         self._ttl = lease_ttl_seconds
+        # RLock: public methods lock, and they call each other (e.g. lease ->
+        # get / _set), so the lock must be re-entrant within a thread.
+        self._lock = threading.RLock()
 
     def add(self, job: Job) -> Job:
         """Store a job, idempotent on idempotency_key (returns the existing one)."""
-        for existing in self._jobs.values():
-            if existing.idempotency_key == job.idempotency_key:
-                return existing
-        self._jobs[job.id] = job
-        return job
+        with self._lock:
+            for existing in self._jobs.values():
+                if existing.idempotency_key == job.idempotency_key:
+                    return existing
+            self._jobs[job.id] = job
+            return job
 
     def get(self, job_id: str) -> Job:
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise JobNotFoundError(f"job not found: {job_id}")
-        return job
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise JobNotFoundError(f"job not found: {job_id}")
+            return job
 
     def all(self) -> tuple[Job, ...]:
-        return tuple(self._jobs.values())
+        with self._lock:
+            return tuple(self._jobs.values())
 
     def mark_ready(self, job_id: str) -> Job:
         return self._set(job_id, status=JobStatus.READY)
 
     def lease(self, job_id: str, *, owner: str, now: datetime) -> Job:
-        """Lease a READY (or stale-LEASED) job to ``owner``; increments attempt."""
-        job = self.get(job_id)
-        stale = (
-            job.status is JobStatus.LEASED
-            and job.lease_expires_at is not None
-            and job.lease_expires_at <= now
-        )
-        if job.status is not JobStatus.READY and not stale:
-            raise JobLeaseError(f"cannot lease job in status {job.status.value}")
-        return self._set(
-            job_id,
-            status=JobStatus.LEASED,
-            lease_owner=owner,
-            lease_expires_at=now + timedelta(seconds=self._ttl),
-            attempt=job.attempt + 1,
-        )
+        """Lease a READY (or stale-LEASED) job to ``owner``; increments attempt.
+
+        Atomic under the lock: the READY/stale check and the LEASED write happen
+        together, so two concurrent workers cannot both lease the same job.
+        """
+        with self._lock:
+            job = self.get(job_id)
+            stale = (
+                job.status is JobStatus.LEASED
+                and job.lease_expires_at is not None
+                and job.lease_expires_at <= now
+            )
+            if job.status is not JobStatus.READY and not stale:
+                raise JobLeaseError(f"cannot lease job in status {job.status.value}")
+            return self._set(
+                job_id,
+                status=JobStatus.LEASED,
+                lease_owner=owner,
+                lease_expires_at=now + timedelta(seconds=self._ttl),
+                attempt=job.attempt + 1,
+            )
 
     def renew(self, job_id: str, *, owner: str, now: datetime) -> Job:
         """Extend the lease; only the current owner may renew."""
-        job = self.get(job_id)
-        if job.lease_owner != owner:
-            raise JobLeaseError("only the lease owner may renew")
-        return self._set(job_id, lease_expires_at=now + timedelta(seconds=self._ttl))
+        with self._lock:
+            job = self.get(job_id)
+            if job.lease_owner != owner:
+                raise JobLeaseError("only the lease owner may renew")
+            return self._set(job_id, lease_expires_at=now + timedelta(seconds=self._ttl))
 
     def complete(self, job_id: str, *, result_digest: str) -> Job:
         return self._set(job_id, status=JobStatus.SUCCEEDED, result_digest=result_digest)
@@ -99,19 +117,22 @@ class JobService:
 
     def leaseable(self, now: datetime) -> tuple[Job, ...]:
         """Jobs that can be leased now: READY, or LEASED with an expired lease."""
-        result = []
-        for job in self._jobs.values():
-            stale_lease = (
-                job.status is JobStatus.LEASED
-                and job.lease_expires_at is not None
-                and job.lease_expires_at <= now
-            )
-            if job.status is JobStatus.READY or stale_lease:
-                result.append(job)
-        return tuple(result)
+        with self._lock:
+            result = []
+            for job in self._jobs.values():
+                stale_lease = (
+                    job.status is JobStatus.LEASED
+                    and job.lease_expires_at is not None
+                    and job.lease_expires_at <= now
+                )
+                if job.status is JobStatus.READY or stale_lease:
+                    result.append(job)
+            return tuple(result)
 
     def _set(self, job_id: str, **changes: object) -> Job:
-        job = self.get(job_id)
-        updated = replace(job, **changes)  # type: ignore[arg-type]
-        self._jobs[job_id] = updated
-        return updated
+        # Callers hold the (re-entrant) lock; get() re-acquires it safely.
+        with self._lock:
+            job = self.get(job_id)
+            updated = replace(job, **changes)  # type: ignore[arg-type]
+            self._jobs[job_id] = updated
+            return updated
