@@ -121,6 +121,12 @@ export function DagView({ nodes, edges, onNodeClick }: DagViewProps) {
         nodes={flowNodes}
         edges={flowEdges}
         fitView
+        fitViewOptions={{ padding: 0.2 }}
+        // P3 §3.5: viewport virtualization - only nodes/edges in (or near) the
+        // viewport are mounted, so large DAGs (100+ nodes) render in <1s instead
+        // of mounting every node up front. Layered positions come from
+        // computeLayout above; fitView frames the whole graph on load.
+        onlyRenderVisibleElements
         proOptions={{ hideAttribution: true }}
         onNodeClick={(_, node) => onNodeClick?.(node.id)}
       >
