@@ -119,6 +119,25 @@ class SignatureChecker(Protocol):
         ...
 
 
+class BundleSignatureState:
+    """Mutable holder for the most recent bundle signature verification.
+
+    Shared between the intel bundle publisher (which writes the result of each
+    real Ed25519 verification, P3 §3.4) and the ``SignatureChecker`` that backs
+    detector 5. Framework-free so it can live in the application layer and be
+    stashed on the composition root's app state. Defaults to "valid" (no
+    verification has failed) until a publish records otherwise.
+    """
+
+    def __init__(self) -> None:
+        self.last_valid = True
+        self.last_bundle_id: str | None = None
+
+    def record(self, bundle_id: str, *, valid: bool) -> None:
+        self.last_bundle_id = bundle_id
+        self.last_valid = valid
+
+
 # --- Monitor ----------------------------------------------------------------
 
 
@@ -341,6 +360,7 @@ class KnowledgeHealthMonitor:
 
 
 __all__ = [
+    "BundleSignatureState",
     "HealthAlert",
     "HealthAlertKind",
     "HealthReport",

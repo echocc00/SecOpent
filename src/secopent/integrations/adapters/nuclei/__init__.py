@@ -81,6 +81,16 @@ _SEVERITY_MAP: dict[str, Severity] = {
 }
 
 
+def tag_coverage_map() -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Public view of the curated nuclei template-tag -> (CWE, OWASP) map.
+
+    Consumed by the knowledge-layer curation-lag checker (P3 §3.4) to decide
+    which upstream nuclei tags already map onto curated TestCatalog coverage.
+    Returns a copy so callers cannot mutate the module's curated table.
+    """
+    return dict(_TAG_MAP)
+
+
 def manifest() -> AdapterManifest:
     """Return the nuclei AdapterManifest.
 

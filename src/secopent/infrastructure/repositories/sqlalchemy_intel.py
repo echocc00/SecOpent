@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ...domain.intel.models import (
@@ -267,6 +267,14 @@ class SqlAlchemyIntelRepository:
             if vuln is not None:
                 result.append(vuln)
         return result
+
+    def count_vulnerabilities(self) -> int:
+        """Total number of canonical vulnerability records in the store."""
+        return int(
+            self._session.execute(
+                select(func.count()).select_from(CoreVulnerability)
+            ).scalar_one()
+        )
 
 
 # --- Update bundle repository ----------------------------------------------

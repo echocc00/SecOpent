@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from ...application.health import BundleSignatureState
 from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
@@ -138,6 +139,9 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     )
     signing_keys.create_key("default", now=utc_now())
     app.state.signing_keys = signing_keys
+    # Shared state for the §7.3 signature detector (P3 §3.4): the intel bundle
+    # publisher records each real verification here; /updates/health reads it.
+    app.state.bundle_signature_state = BundleSignatureState()
 
     # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
     # null backend so LLM-assisted endpoints degrade to their deterministic
