@@ -57,18 +57,31 @@ LLM 提供方选择与参数在 `config/llm.yaml`（endpoint / api_key_env / mod
 ## 6. 备份与恢复
 
 ```bash
+# 备份（可选 --include-secrets --secrets <secrets.enc> 一并备份加密 SecretStore）
 secopent backup --db <sqlite文件> --out <目录>
 # -> <目录>/secopent-backup-<时间戳>.db（sqlite3 在线一致性快照，API 写入时也安全）
+
+# 恢复（先验备份审计链 -> 留回滚点 .pre-restore-<ts> -> 原子替换 -> 复验）
+secopent restore --db <sqlite文件> --from <备份文件>
 ```
 
-- 备份是 SQLite 在线 backup（一致性快照）。SecretStore 内存后端无持久内容可导（其引用由库内审计链覆盖）。
-- 恢复：停服 → 用备份文件替换运行库（或将其作为 engine 路径）→ 起服。建议定期对备份做 round-trip 验证。
+- 备份是 SQLite 在线 backup（一致性快照）。`--include-secrets` 复制**加密** SecretStore；**Fernet 主密钥不进备份**，须另行托管（KMS/离线）。
+- 恢复自带审计链校验与回滚点；`scripts/verify_backup.py` 可独立复核。详见 [`ops/backup-restore.md`](ops/backup-restore.md)（含月度演练）。
 - `secopent version` / `secopent doctor`（确定性核心健康检查，应输出 `ok`）用于部署自检。
 
-## 7. 日志与审计
+## 7. 日志、审计与可观测性
 
-- **结构化日志**（`infrastructure/logging_setup.py`，structlog）：`SECOPTENT_LOG_FORMAT=json` 输出 JSON。**敏感字段脱敏**：`password / secret / token / api_key / authorization / cookie / signature / private_key` 一律渲染为 `[REDACTED]`——密钥材料绝不进日志。
-- **审计链**：所有关键动作入哈希链；可选 HMAC 密钥做防篡改升级（`application/audit.py`，非破坏性——无密钥时仍按原哈希链工作）。审计经 `/audit` 查询，可验完整性。
+- **结构化日志**（`infrastructure/logging_setup.py`，structlog）：`SECOPTENT_LOG_FORMAT=json` 输出 JSON，每请求绑定 `request_id`/`tenant`（T16）。**敏感字段脱敏**：`password / secret / token / api_key / authorization / cookie / signature / private_key` 一律渲染为 `[REDACTED]`——密钥材料绝不进日志。
+- **审计链**：所有关键动作入哈希链；可选 HMAC 密钥做防篡改升级（`application/audit.py`）。审计经 `/audit` 查询，可验完整性。
+- **指标**：`GET /metrics` 输出 Prometheus 文本格式（评估/发现计数、oracle 与适配器时延、LLM token）。`docs/ops/grafana-dashboard.json` 提供配套 Grafana 面板。
+- **追踪**：OpenTelemetry FastAPI 自动埋点（best-effort，未配置 exporter 时为 no-op）。
+
+## 7a. 更新包分发（§⑨ / T17）
+
+- **发布（curator）**：`POST /updates/publish`（human-only）本地签名并激活一个 intel bundle。
+- **分发（registry）**：将 bundle 上传到 GitHub Releases，每个 release（tag）含三个 asset：`bundle.json`（bundle 文档）、`bundle.json.sig`（Ed25519  detached 签名）、`revocations.json`（`{"revoked": ["<tag>", ...]}` 撤销列表）。
+- **拉取（实例）**：`POST /updates/sync`，body `{"source": "github:<owner>/<repo>:<tag>", "actor_role": "human"}`。流程：fetch → Ed25519 验签 → schema 校验 → 原子激活 → 审计。**撤销的 tag 返回 409 拒绝激活**。
+- **中国镜像**：`GithubBundleFetcher(base_url=...)` 可指向 Gitee / CDN 镜像（替代 github.com），asset 路径约定不变（`<base>/<owner>/<repo>/releases/download/<tag>/<asset>`）。GitHub 直连慢/被阻断时配置镜像源。
 
 ## 8. 生产清单
 

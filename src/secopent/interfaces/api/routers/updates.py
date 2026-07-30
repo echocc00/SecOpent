@@ -12,16 +12,19 @@ Surface over ``SqlAlchemyUpdateRepository`` + the knowledge-health monitor:
 """
 from __future__ import annotations
 
+import base64
 import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
 from ....application.audit import AuditService
+from ....application.bundle_sync import BundleSyncService
 from ....application.health import KnowledgeHealthMonitor
 from ....application.intel_bundle import IntelBundlePublisher
 from ....application.signing_keys import SigningKeyNotFound
 from ....domain.common.canonical import canonical_digest, utc_now
+from ....domain.common.errors import DomainValidationError
 from ....infrastructure.health_checkers import (
     BundledNucleiTagProvider,
     CurationLagChecker,
@@ -40,6 +43,11 @@ from ....infrastructure.repositories.sqlalchemy_intel import (
     SqlAlchemyUpdateRepository,
 )
 from ....infrastructure.signing.ed25519 import Ed25519SignatureVerifier
+from ....infrastructure.updates.github_bundle_fetcher import (
+    BundleFetchError,
+    BundleRevokedError,
+    GithubBundleFetcher,
+)
 from ....integrations.adapters import nuclei
 from ..deps import DbSession
 from ..schemas import (
@@ -47,6 +55,8 @@ from ..schemas import (
     ActorRoleBody,
     HealthAlertOut,
     HealthReportOut,
+    SyncBundleBody,
+    SyncResultOut,
     UpdateBundleOut,
 )
 
@@ -165,6 +175,58 @@ def publish_intel_bundle(
     if row is None:  # defensive: publish stages the bundle in the same txn
         raise HTTPException(status_code=500, detail="bundle publish lost state")
     return _to_out(row)
+
+
+@router.post("/sync", response_model=SyncResultOut)
+def sync_bundle(
+    body: SyncBundleBody, request: Request, session: DbSession
+) -> SyncResultOut:
+    """Fetch, verify, and activate an update bundle from a registry (§⑨).
+
+    Resolves ``body.source`` (e.g. ``github:secopent/bundles:v2026.07``) via the
+    ``BundleFetcher`` (GitHub Releases by default; overridable via
+    ``app.state.bundle_fetcher`` for tests/mirrors), then runs the full
+    ``UpdateManager`` pipeline: stage -> Ed25519 verify -> schema check -> atomic
+    activate -> audit. Human-only (``actor_role="agent"`` -> 403). A revoked
+    bundle -> 409; an unfetchable bundle -> 502; a bad signature/schema -> 422.
+    """
+    if body.actor_role != "human":
+        raise HTTPException(
+            status_code=403,
+            detail="agents cannot sync update bundles (human-only admin action)",
+        )
+    fetcher = getattr(request.app.state, "bundle_fetcher", None) or GithubBundleFetcher()
+    signing_keys = request.app.state.signing_keys
+    key_id = body.key_id or signing_keys.default_key_id()
+    if key_id is None:
+        raise HTTPException(status_code=404, detail="no signing keys available")
+    try:
+        public_key_b64 = signing_keys.get(key_id).public_key
+    except SigningKeyNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    manager = BundleSyncService(
+        fetcher=fetcher,
+        verifier=Ed25519SignatureVerifier(),
+        store=SqlAlchemyUpdateRepository(session),
+        audit_service=AuditService(SqlAlchemyAuditRepository(session)),
+        expected_schema_version=IntelBundlePublisher.DEFAULT_SCHEMA,
+        public_key=base64.b64decode(public_key_b64),
+    )
+    try:
+        result = manager.sync(source=body.source)
+    except BundleRevokedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BundleFetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except DomainValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return SyncResultOut(
+        bundle_id=result.bundle_id,
+        version=result.version,
+        digest=result.digest,
+        previous_bundle_id=result.previous_bundle_id,
+    )
 
 
 @router.get("/active", response_model=ActiveBundleOut)

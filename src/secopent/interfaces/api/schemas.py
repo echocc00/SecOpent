@@ -147,6 +147,22 @@ class ActiveBundleOut(BaseModel):
     bundle: UpdateBundleOut | None
 
 
+class SyncBundleBody(BaseModel):
+    # Registry source, e.g. "github:secopent/bundles:v2026.07".
+    source: str
+    # "human" or "agent"; syncing bundles is human-only (LLM boundary).
+    actor_role: str = "human"
+    # Signing key whose public key verifies the bundle (default: server default).
+    key_id: str | None = None
+
+
+class SyncResultOut(BaseModel):
+    bundle_id: str
+    version: str
+    digest: str
+    previous_bundle_id: str | None
+
+
 # --- Audit (tamper-evident hash chain) ---
 class AuditEventOut(BaseModel):
     id: str
