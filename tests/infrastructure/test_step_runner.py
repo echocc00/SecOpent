@@ -257,6 +257,70 @@ def test_checkov_invocation_scans_the_mounted_iac_dir() -> None:
     assert call["mounts"] == {"/templates": "/host/iac"}  # IaC dir mounted
 
 
+def test_nmap_invocation_scans_in_scope_ports() -> None:
+    scanner = FakeScanner(observations=())
+    runner = AdapterStepRunner(
+        scanner,  # type: ignore[arg-type]
+        ScanContext(targets=("host.docker.internal",), ports=(8080, 3000)),
+    )
+    step = PlanStep(
+        key="net:ports", runner="nmap", risk=RiskClass.PASSIVE, parameters={}, dependencies=()
+    )
+    runner.run(step)
+    call = scanner.calls[0]
+    assert call["adapter_key"] == "nmap"
+    assert "-p" in call["args"] and "8080,3000" in call["args"]
+    assert "-oX" in call["args"] and "host.docker.internal" in call["args"]
+
+
+def test_naabu_invocation_targets_host_and_ports() -> None:
+    scanner = FakeScanner(observations=())
+    runner = AdapterStepRunner(
+        scanner,  # type: ignore[arg-type]
+        ScanContext(targets=("host.docker.internal",), ports=(8080,)),
+    )
+    step = PlanStep(
+        key="net:naabu", runner="naabu", risk=RiskClass.PASSIVE, parameters={}, dependencies=()
+    )
+    runner.run(step)
+    call = scanner.calls[0]
+    assert call["adapter_key"] == "naabu"
+    assert "-host" in call["args"] and "host.docker.internal" in call["args"]
+    assert "-p" in call["args"] and "8080" in call["args"]
+
+
+def test_httpx_invocation_probes_url() -> None:
+    scanner = FakeScanner(observations=())
+    runner = AdapterStepRunner(
+        scanner,  # type: ignore[arg-type]
+        ScanContext(targets=("http://host.docker.internal:8080",)),
+    )
+    step = PlanStep(
+        key="asset:probe", runner="httpx", risk=RiskClass.PASSIVE, parameters={}, dependencies=()
+    )
+    runner.run(step)
+    call = scanner.calls[0]
+    assert call["adapter_key"] == "httpx"
+    assert "-u" in call["args"] and "http://host.docker.internal:8080" in call["args"]
+
+
+def test_dalfox_invocation_leads_with_binary_name() -> None:
+    scanner = FakeScanner(observations=())
+    runner = AdapterStepRunner(
+        scanner,  # type: ignore[arg-type]
+        ScanContext(targets=("http://host.docker.internal:3000/?q=test",)),
+    )
+    step = PlanStep(
+        key="web:xss", runner="dalfox", risk=RiskClass.ACTIVE, parameters={}, dependencies=()
+    )
+    runner.run(step)
+    call = scanner.calls[0]
+    assert call["adapter_key"] == "dalfox"
+    # The dalfox image has no ENTRYPOINT, so the binary name must lead.
+    assert call["args"][0] == "dalfox" and call["args"][1] == "url"
+    assert "http://host.docker.internal:3000/?q=test" in call["args"]
+
+
 # --- Protocol conformance ----------------------------------------------------
 
 

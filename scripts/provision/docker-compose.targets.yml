@@ -32,6 +32,22 @@ services:
       - secopent-targets
     restart: unless-stopped
 
+  # crAPI (completely ridiculous API) - deliberately vulnerable API for BOLA/BFLA
+  # E2E (P2-F / T6). Opt-in via its own profile so the default juice-shop+httpbin
+  # range stays lightweight:
+  #   docker compose -f scripts/provision/docker-compose.targets.yml --profile crapi up -d
+  # The all-in-one image bundles web+api+auth+db; verify the tag against the
+  # upstream crAPI release before first use. Web UI/API on :8888.
+  crapi:
+    image: crapi/crapi-all-in-one:latest
+    container_name: secopent-crapi
+    profiles: ["crapi"]
+    ports:
+      - "8888:8888"
+    networks:
+      - secopent-targets
+    restart: unless-stopped
+
 networks:
   secopent-targets:
     name: secopent-targets

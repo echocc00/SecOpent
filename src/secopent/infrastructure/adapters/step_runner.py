@@ -66,6 +66,9 @@ class ScanContext:
     template_host_dir: str | None = None
     template_container_path: str = _DEFAULT_TEMPLATE_MOUNT
     extra_mounts: tuple[tuple[str, str], ...] = ()
+    # Ports in scope for port scanners (nmap/naabu); empty means the tool's own
+    # default (e.g. nmap top-100). Engagement-scoped, like ScopeSnapshot.ports.
+    ports: tuple[int, ...] = ()
 
 
 class AdapterStepRunner:
@@ -137,7 +140,19 @@ class AdapterStepRunner:
             return args, mounts
         if adapter_key == "nmap":
             # XML to stdout so the nmap parser can read it from the stream.
-            return ["-oX", "-", target], mounts
+            if self._context.ports:
+                return ["-p", self._ports_arg(), "--open", "-oX", "-", target], mounts
+            return ["--open", "-oX", "-", target], mounts
+        if adapter_key == "naabu":
+            if self._context.ports:
+                return ["-host", target, "-p", self._ports_arg(), "-json", "-silent"], mounts
+            return ["-host", target, "-json", "-silent"], mounts
+        if adapter_key == "httpx":
+            return ["-u", target, "-json", "-silent"], mounts
+        if adapter_key == "dalfox":
+            # The dalfox image has no ENTRYPOINT, so the binary name leads the
+            # command. `target` is the URL (with a query string) to fuzz for XSS.
+            return ["dalfox", "url", target, "-o", "json", "--silence"], mounts
         if adapter_key == "trivy":
             # `target` is the scan ref (image name / filesystem path).
             return ["image", "--format", "json", "--quiet", target], mounts
@@ -158,6 +173,10 @@ class AdapterStepRunner:
             return ["--output", "json", "--quiet"], mounts
         # Conservative default: the target as the sole positional argument.
         return [target], mounts
+
+    def _ports_arg(self) -> str:
+        """Comma-separated in-scope ports for port scanners (nmap/naabu)."""
+        return ",".join(str(port) for port in self._context.ports)
 
     @staticmethod
     def _digest(observations: tuple[Observation, ...]) -> str:
