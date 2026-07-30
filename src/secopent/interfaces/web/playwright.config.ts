@@ -24,8 +24,9 @@ export default defineConfig({
   webServer: [
     {
       // Backend API (temp SQLite per uvicorn start -> isolated per run).
-      command:
-        "py -3.12 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000",
+      // PYTHON_BIN lets CI (ubuntu, which has no `py` launcher) override the
+      // interpreter; locally it defaults to the Windows `py -3.12` launcher.
+      command: `${process.env.PYTHON_BIN ?? "py -3.12"} -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000`,
       url: "http://localhost:8000/health",
       cwd: repoRoot,
       reuseExistingServer: !process.env.CI,

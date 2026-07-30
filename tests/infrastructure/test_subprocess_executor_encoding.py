@@ -48,3 +48,16 @@ def test_executor_pins_utf8_decoding(monkeypatch: Any) -> None:
         assert kwargs.get("encoding") == "utf-8"
         assert kwargs.get("errors") == "replace"
         assert "text" not in kwargs  # never fall back to the locale codec
+
+
+def test_build_args_maps_host_docker_internal_for_linux_ci() -> None:
+    """Adapter containers must reach host-mapped targets via host.docker.internal.
+
+    Docker Desktop defines it already; Linux runners/CI need the explicit
+    ``host-gateway`` entry, so the executor always adds it (T7 - enables the
+    e2e_real jobs on ubuntu CI without changing local behaviour).
+    """
+    executor = SubprocessContainerExecutor()
+    args = executor._build_args("img", ["scan"], {}, "bridge", {})
+    assert "--add-host" in args
+    assert "host.docker.internal:host-gateway" in args

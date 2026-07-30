@@ -150,6 +150,12 @@ class SubprocessContainerExecutor:
             self._docker,
             "run",
             "--rm",
+            # Let the tool container reach host-mapped targets (Juice Shop,
+            # httpbin, ...) via host.docker.internal. Docker Desktop defines it
+            # already (harmless re-map); Linux runners/CI need the explicit
+            # host-gateway entry (T7 - enables e2e_real on ubuntu CI).
+            "--add-host",
+            "host.docker.internal:host-gateway",
             "--user",
             "65532:65532",
             "--cap-drop",
