@@ -1,7 +1,19 @@
-# STRIDE 威胁模型（归档）
+# STRIDE 威胁模型
 
-> 状态：M5 归档。覆盖 SecOpent V1 Beta 全组件。每类威胁映射到设计组件与缓解措施。
+> 状态：**v1.1.0-stable**（T13 复审更新）。覆盖 SecOpent 全组件。**每次发布复审更新**
+> （`scripts/release.sh`），并在新增能力/适配器/安全事件后补充对应 STRIDE 行。
 > 参考：主设计 §12（安全）/§16.2（14 安全条件）；`tests/security/test_security_conditions.py` 全绿。
+
+## 持续安全验证门禁
+
+| 门禁 | 类型 | 触发 | 位置 |
+|---|---|---|---|
+| bandit（`-ll`） | 静态 SAST | CI `sast` job | T1（dd97e85） |
+| gitleaks | 密钥扫描 | CI `sast` job | `.gitleaks.toml` |
+| pip-audit / npm audit | 依赖 CVE | CI `deps` job | T1 |
+| 运行态自渗透 | 动态（nuclei 扫自身 API，0 critical/high） | `SECOPTENT_SELF_PENTEST=1`，CI security job | `tests/security/test_self_pentest.py`（T13） |
+| 架构边界守卫 | 框架无关性（domain/application 禁 fastapi/sqlalchemy） | 默认套件 | `tests/test_architecture_boundaries.py` |
+| 14 安全条件 | 确定性脊柱 + LLM 边界 | 默认套件 | `tests/security/test_security_conditions.py` |
 
 ## 资产与信任边界
 
@@ -41,7 +53,9 @@
 | Secret 泄露到日志/Evidence/MCP/Prompt | SecretStore 引用制，明文不入库/日志/证据/报告（条件 7） |
 | 报告泄露 secret/PII | RedactionEngine 在渲染层再过（M2/M4） |
 | 远程 LLM 泄露敏感数据 | RemoteModelGateway 分级 + 脱敏 + Secret 永不发送（条件 10） |
-| 工具访问云 Metadata/DB | EgressGuard 必阻 169.254.169.254/loopback/DB/Docker host（条件 6） |
+| 工具访问云 Metadata/DB | 应用层 EgressGuard + 网络层 nftables scoped egress（T11）双阻 169.254.0.0/16、127.0.0.0/8（条件 6） |
+| API 错误泄露内部细节 | 运行态自渗透检测 5xx/traceback 泄露，0 critical/high 才通过（T13） |
+| 备份泄露机密 | 备份仅含密文；Fernet 主密钥不进备份、线下托管（T8 runbook） |
 
 ### D — Denial of Service（拒绝服务）
 | 威胁 | 缓解 |
@@ -50,7 +64,7 @@
 | 资源耗尽 | 容器资源限制（cpu/mem/pids/timeout）+ 预算门 |
 | LLM 预算耗尽 | RemoteModelGateway 日预算/限速/超限降级本地（§12.11） |
 | 失控任务 | EmergencyStop 全局停止 + 撤销 permit + 终止容器（条件 11） |
-| DNS rebinding 到内网 | ScopeEnforcer/EgressGuard 解析后二次校验（条件 2） |
+| DNS rebinding 到内网 | ScopeEnforcer/EgressGuard 解析后二次校验 + NftScopeEnforcer 解析双检（T11），网络层默认 DROP（条件 2） |
 
 ### E — Elevation of Privilege（提权）
 | 威胁 | 缓解 |
@@ -66,9 +80,16 @@
 14 条强制安全条件（§16.2）全部由 `tests/security/test_security_conditions.py` 覆盖并通过。
 确定性脊柱与 LLM 边界由 `tests/test_architecture_boundaries.py`（框架守卫）+ 各领域测试保证。
 
-## Open Items（V2 跟进）
+## Open Items（后续跟进）
 
-- 远程 Worker 分布式的竞态/角色逻辑测试（§22.4）
-- 多租户隔离与客户门户
-- K8s 调度下的网络策略（NetworkPolicy 替代 netns）
-- 真实靶场（Juice Shop/crAPI/vulhub）docker-compose 回归（需 Docker 环境）
+- 远程 Worker 分布式的竞态/角色逻辑测试（§22.4，T18 Tier 1 设计已就绪）
+- 多租户隔离与客户门户（T19；T16 遥测已含 tenant 标签）
+- 网络层强制目前仅 Linux（nftables，T11 已在 Linux CI 验证）；Windows/macOS 开发机依赖应用层 EgressGuard + Docker 默认不路由 link-local
+- 自渗透当前为针对性模板（5xx/错误泄露）；后续引入更广的离线 nuclei-templates 集
+- trivy 镜像扫描依赖漏洞库下载（受限网络不可用）；云域以 checkov 离线规则兜底
+
+### 已解决（v1.1.0-stable）
+
+- 真实靶场（Juice Shop/httpbin/crAPI）docker-compose 编排回归 — T5/T6 已落地（`tests/e2e_real/`）
+- nftables scoped egress 网络层强制 — T11 已落地（`scripts/provision/egress.nft` + `NftScopeEnforcer`）
+- 静态 SAST 门禁（bandit/gitleaks/pip-audit/npm audit）— T1 已入 CI

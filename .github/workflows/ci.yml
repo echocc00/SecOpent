@@ -177,6 +177,15 @@ jobs:
           # Required by gitleaks-action (free for public repos; configure the
           # secret for private repos). Config: .gitleaks.toml.
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      # T13: runtime self-pentest - nuclei scans our own API; the gate is zero
+      # critical/high findings. The nuclei container reaches the host-side
+      # uvicorn via host.docker.internal:host-gateway (added by the executor).
+      - name: Pull nuclei (runtime self-pentest)
+        run: docker pull projectdiscovery/nuclei:latest
+      - name: Runtime self-pentest (0 critical/high)
+        env:
+          SECOPTENT_SELF_PENTEST: "1"
+        run: pytest -m integration tests/security/test_self_pentest.py -v
 
   deps:
     runs-on: ubuntu-latest
