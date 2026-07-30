@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { PlusCircle, ShieldCheck } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useAssessments, useFindings, usePendingApprovals } from "@/api/hooks";
 import type { components } from "@/api/generated";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ function StatCard({ label, value }: { label: string; value: number }) {
 }
 
 export function Dashboard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const assessments = useAssessments();
   const pending = usePendingApprovals();
@@ -48,7 +50,7 @@ export function Dashboard() {
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("pages.dashboard.title")}</h1>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => navigate("/approvals")}>
             <ShieldCheck className="mr-2 h-4 w-4" />

@@ -13,7 +13,7 @@ tamper-evident audit chain.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from ....application.assessments import AssessmentPermissionError, AssessmentService
 from ....application.audit import AuditService
@@ -26,6 +26,7 @@ from ....infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyScopeRepository,
 )
 from ..deps import DbSession
+from ..messages import get_locale, localize
 from ..schemas import (
     ApprovalCreate,
     ApprovalDecisionOut,
@@ -122,17 +123,19 @@ def approval_history(session: DbSession) -> list[ApprovalDecisionOut]:
 
 
 @router.post("", status_code=201, response_model=ApprovalOut)
-def create_approval(payload: ApprovalCreate, session: DbSession) -> ApprovalOut:
+def create_approval(
+    payload: ApprovalCreate, session: DbSession, locale: str = Depends(get_locale)
+) -> ApprovalOut:
     assessment_repo = SqlAlchemyAssessmentRepository(session)
     assessment = assessment_repo.get(payload.assessment_id)
     if assessment is None:
-        raise HTTPException(status_code=404, detail="assessment not found")
+        raise HTTPException(status_code=404, detail=localize("assessment.not_found", locale))
 
     snapshot = SqlAlchemyScopeRepository(session).get_snapshot(
         assessment.scope_snapshot_id
     )
     if snapshot is None:
-        raise HTTPException(status_code=404, detail="scope snapshot not found")
+        raise HTTPException(status_code=404, detail=localize("scope.not_found", locale))
 
     try:
         approved_risks = frozenset(RiskClass(r) for r in payload.approved_risks)

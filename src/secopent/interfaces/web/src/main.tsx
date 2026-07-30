@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { router } from "./router";
+import "./lib/i18n";
 import "./index.css";
 
 const queryClient = new QueryClient({

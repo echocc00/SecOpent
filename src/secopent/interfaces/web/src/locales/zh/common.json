@@ -1,0 +1,96 @@
+{
+  "nav": {
+    "dashboard": "仪表盘",
+    "newAssessment": "新建评估",
+    "approvals": "审批中心",
+    "findings": "发现",
+    "caseStudio": "案例工坊",
+    "updates": "更新"
+  },
+  "header": {
+    "project": "项目",
+    "selectProject": "选择项目",
+    "emergencyStop": "紧急停止",
+    "language": "语言"
+  },
+  "common": {
+    "loading": "加载中…",
+    "error": "出错了",
+    "empty": "暂无数据",
+    "search": "搜索",
+    "refresh": "刷新",
+    "create": "创建",
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "submit": "提交",
+    "approve": "批准",
+    "reject": "拒绝",
+    "retry": "重试",
+    "back": "返回",
+    "actions": "操作",
+    "status": "状态",
+    "severity": "严重程度",
+    "asset": "资产",
+    "title": "标题",
+    "description": "描述",
+    "details": "详情",
+    "close": "关闭"
+  },
+  "severity": {
+    "info": "信息",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "critical": "严重"
+  },
+  "status": {
+    "pending": "待处理",
+    "draft": "草稿",
+    "queued": "排队中",
+    "running": "运行中",
+    "leased": "已租用",
+    "ready": "就绪",
+    "blocked": "阻塞",
+    "completed": "已完成",
+    "succeeded": "成功",
+    "validated": "已验证",
+    "confirmed": "已确认",
+    "approved": "已批准",
+    "signed": "已签名",
+    "published": "已发布",
+    "awaiting_approval": "待审批",
+    "skipped": "已跳过",
+    "inconclusive": "无结论",
+    "partial": "部分完成",
+    "failed": "失败",
+    "rejected": "已拒绝",
+    "refuted": "已驳回",
+    "policy_denied": "策略拒绝",
+    "cancelled": "已取消"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "仪表盘",
+      "subtitle": "评估运行概览"
+    },
+    "newAssessment": {
+      "title": "新建评估"
+    },
+    "assessmentDetail": {
+      "title": "评估详情"
+    },
+    "approvals": {
+      "title": "审批中心"
+    },
+    "findings": {
+      "title": "发现"
+    },
+    "caseStudio": {
+      "title": "案例工坊"
+    },
+    "updates": {
+      "title": "更新"
+    }
+  }
+}

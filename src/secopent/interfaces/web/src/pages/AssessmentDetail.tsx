@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAssessment, useJobs, usePlan, useReports } from "@/api/hooks";
 import type { components } from "@/api/generated";
@@ -13,6 +14,7 @@ import { StatusBadge } from "@/components/shared/StatusBadge";
 type Job = components["schemas"]["JobOut"];
 
 export function AssessmentDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const assessment = useAssessment(id ?? "");
@@ -62,7 +64,7 @@ export function AssessmentDetail() {
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Assessment</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("pages.assessmentDetail.title")}</h1>
           <span className="font-mono text-sm text-muted-foreground">{id}</span>
           {a && <StatusBadge status={a.status} />}
         </div>

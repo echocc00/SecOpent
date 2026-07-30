@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 
 const STYLES: Record<string, string> = {
@@ -9,7 +10,10 @@ const STYLES: Record<string, string> = {
 };
 
 export function SeverityBadge({ severity }: { severity: string }) {
+  const { t } = useTranslation();
   return (
-    <Badge className={STYLES[severity] ?? "bg-gray-300 text-black"}>{severity}</Badge>
+    <Badge className={STYLES[severity] ?? "bg-gray-300 text-black"}>
+      {t(`severity.${severity}`, { defaultValue: severity })}
+    </Badge>
   );
 }

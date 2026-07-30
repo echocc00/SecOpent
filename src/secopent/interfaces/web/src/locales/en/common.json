@@ -1,0 +1,96 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "newAssessment": "New Assessment",
+    "approvals": "Approvals",
+    "findings": "Findings",
+    "caseStudio": "Case Studio",
+    "updates": "Updates"
+  },
+  "header": {
+    "project": "Project",
+    "selectProject": "Select a project",
+    "emergencyStop": "Emergency Stop",
+    "language": "Language"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "empty": "No data",
+    "search": "Search",
+    "refresh": "Refresh",
+    "create": "Create",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "submit": "Submit",
+    "approve": "Approve",
+    "reject": "Reject",
+    "retry": "Retry",
+    "back": "Back",
+    "actions": "Actions",
+    "status": "Status",
+    "severity": "Severity",
+    "asset": "Asset",
+    "title": "Title",
+    "description": "Description",
+    "details": "Details",
+    "close": "Close"
+  },
+  "severity": {
+    "info": "Info",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "critical": "Critical"
+  },
+  "status": {
+    "pending": "Pending",
+    "draft": "Draft",
+    "queued": "Queued",
+    "running": "Running",
+    "leased": "Leased",
+    "ready": "Ready",
+    "blocked": "Blocked",
+    "completed": "Completed",
+    "succeeded": "Succeeded",
+    "validated": "Validated",
+    "confirmed": "Confirmed",
+    "approved": "Approved",
+    "signed": "Signed",
+    "published": "Published",
+    "awaiting_approval": "Awaiting Approval",
+    "skipped": "Skipped",
+    "inconclusive": "Inconclusive",
+    "partial": "Partial",
+    "failed": "Failed",
+    "rejected": "Rejected",
+    "refuted": "Refuted",
+    "policy_denied": "Policy Denied",
+    "cancelled": "Cancelled"
+  },
+  "pages": {
+    "dashboard": {
+      "title": "Dashboard",
+      "subtitle": "Assessment run overview"
+    },
+    "newAssessment": {
+      "title": "New Assessment"
+    },
+    "assessmentDetail": {
+      "title": "Assessment Detail"
+    },
+    "approvals": {
+      "title": "Approval Center"
+    },
+    "findings": {
+      "title": "Findings"
+    },
+    "caseStudio": {
+      "title": "Case Studio"
+    },
+    "updates": {
+      "title": "Updates"
+    }
+  }
+}

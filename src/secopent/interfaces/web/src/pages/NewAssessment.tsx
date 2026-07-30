@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import {
   useCreateAssessment,
   useCreateApproval,
@@ -33,6 +34,7 @@ const MODES = [
 ];
 
 export function NewAssessment() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const projects = useProjects();
   const createProject = useCreateProject();
@@ -147,7 +149,7 @@ export function NewAssessment() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">New Assessment</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("pages.newAssessment.title")}</h1>
 
       <Stepper step={step} />
 

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useActiveBundle, useAuditVerify } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ const DETECTORS = [
 ];
 
 export function Updates() {
+  const { t } = useTranslation();
   const active = useActiveBundle();
   const verify = useAuditVerify();
   const bundle = active.data?.data?.bundle ?? null;
@@ -21,7 +23,7 @@ export function Updates() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Updates</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("pages.updates.title")}</h1>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 
 // Lifecycle/status colour coding shared across pages (assessments, jobs, cases).
@@ -32,9 +33,10 @@ const STYLES: Record<string, string> = {
 };
 
 export function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   return (
     <Badge variant="outline" className={STYLES[status] ?? "bg-gray-200 text-black"}>
-      {status}
+      {t(`status.${status}`, { defaultValue: status })}
     </Badge>
   );
 }

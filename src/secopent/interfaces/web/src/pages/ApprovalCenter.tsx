@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   useApprovalHistory,
   useCreateApproval,
@@ -26,6 +27,7 @@ type Decision = components["schemas"]["ApprovalDecisionOut"];
 const RISK_CLASSES = ["passive", "low", "active", "intrusive", "destructive"];
 
 export function ApprovalCenter() {
+  const { t } = useTranslation();
   const pending = usePendingApprovals();
   const history = useApprovalHistory();
   const approve = useCreateApproval();
@@ -100,7 +102,7 @@ export function ApprovalCenter() {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Approval Center</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("pages.approvals.title")}</h1>
 
       <Tabs defaultValue="pending">
         <TabsList>

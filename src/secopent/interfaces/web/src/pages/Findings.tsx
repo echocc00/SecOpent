@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useFindings } from "@/api/hooks";
 import type { components } from "@/api/generated";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,7 @@ const SEVERITIES = ["info", "low", "medium", "high", "critical"];
 const VERDICTS = ["pending", "confirmed", "refuted", "inconclusive"];
 
 export function Findings() {
+  const { t } = useTranslation();
   const [severity, setSeverity] = useState("");
   const [verdict, setVerdict] = useState("");
   const [assetQuery, setAssetQuery] = useState("");
@@ -63,7 +65,7 @@ export function Findings() {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Findings</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("pages.findings.title")}</h1>
 
       <div className="flex flex-wrap gap-3">
         <Select value={severity} onValueChange={(v) => setSeverity(v ?? "")}>
