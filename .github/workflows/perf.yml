@@ -1,0 +1,45 @@
+name: perf
+
+# T12 / cross-cutting §⑧: continuous performance regression protection.
+#  - backend-benchmarks: runs the pytest perf suite and compares against the
+#    committed baseline (benchmarks/baseline.json), warning on > 20% regression.
+#  - lighthouse: scores the 7 SPA pages against a perf/a11y budget (best-effort;
+#    needs verification on a real run, so it does not fail the build).
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  backend-benchmarks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Perf benchmarks vs baseline (warn on > 20% regression)
+        run: python scripts/check_perf.py --threshold 0.20
+
+  lighthouse:
+    runs-on: ubuntu-latest
+    # Best-effort: Lighthouse needs a real browser + verified SPA routing; keep it
+    # non-blocking until the routes are confirmed to render under the static server.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build frontend + run Lighthouse CI
+        working-directory: src/secopent/interfaces/web
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build
+          npm install -g @lhci/cli
+          lhci autorun
