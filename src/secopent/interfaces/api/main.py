@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -43,6 +43,9 @@ from ...infrastructure.evidence_store.redaction import RedactionEngine
 from ...infrastructure.llm.null_backend import NullModelBackend
 from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
 from ...infrastructure.logging_setup import configure_logging
+from ...infrastructure.observability.context import install_request_context
+from ...infrastructure.observability.metrics import render_metrics
+from ...infrastructure.observability.tracing import setup_tracing
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -103,6 +106,14 @@ def _register_api(app: FastAPI) -> None:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/metrics", include_in_schema=False)
+    def metrics() -> Response:
+        """Prometheus metrics (T16) in the text exposition format."""
+        return Response(
+            content=render_metrics(),
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @app.get("/assessments/{assessment_id}/events")
     async def assessment_events(
@@ -229,5 +240,11 @@ def create_app(engine: Engine | None = None) -> FastAPI:
             @app.get("/{full_path:path}", include_in_schema=False)
             def spa_fallback(full_path: str) -> FileResponse:
                 return FileResponse(web_dist / "index.html")
+
+    # Observability (T16): bind request_id/tenant into structured logs for every
+    # request, and enable best-effort OpenTelemetry tracing. /metrics lives in
+    # _register_api so it is served at both the root and the /api sub-app.
+    install_request_context(app)
+    setup_tracing(app)
 
     return app

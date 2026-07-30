@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import create_engine, pool
 
+from alembic import context
 from secopent.infrastructure.db.engine import configured_database_url
 from secopent.infrastructure.db.session import CoreBase
 

@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from secopent.domain.adapters.contracts import AdapterSource, Observation
+from secopent.infrastructure.observability.metrics import time_adapter_run
 from secopent.integrations.adapters import (
     checkov,
     dalfox,
@@ -113,17 +114,18 @@ class RealScanRunner:
         parser = _ADAPTER_PARSERS.get(adapter_key)
         if parser is None:
             raise ValueError(f"no parser registered for adapter {adapter_key!r}")
-        result = self._executor.run(
-            image_digest=self.image_ref(adapter_key),
-            command=list(args),
-            mounts=dict(mounts or {}),
-            network_policy="bridge",
-            resource_limits=dict(resource_limits or _DEFAULT_RESOURCE_LIMITS),
-        )
-        scan_source = source or AdapterSource(
-            name=adapter_key, version="1.0.0", template_version="1.0.0"
-        )
-        observations = parser(stdout=result.stdout, source=scan_source, artifacts={})
+        with time_adapter_run(adapter_key):
+            result = self._executor.run(
+                image_digest=self.image_ref(adapter_key),
+                command=list(args),
+                mounts=dict(mounts or {}),
+                network_policy="bridge",
+                resource_limits=dict(resource_limits or _DEFAULT_RESOURCE_LIMITS),
+            )
+            scan_source = source or AdapterSource(
+                name=adapter_key, version="1.0.0", template_version="1.0.0"
+            )
+            observations = parser(stdout=result.stdout, source=scan_source, artifacts={})
         return RealScanResult(
             adapter_key=adapter_key,
             observations=observations,
