@@ -1,0 +1,31 @@
+name: egress
+
+# P2-G / M5: network-layer scoped-egress enforcement, verified on a Linux runner
+# (nftables is Linux-only; the Windows/macOS dev hosts cannot run it). Loads the
+# egress ruleset and runs the live NftScopeEnforcer integration test, which
+# asserts a malicious scope (cloud-metadata IP) is dropped and an in-scope IP is
+# allowed at the packet-filter level.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  egress-nftables:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: nftables available
+        run: sudo nft --version
+      # The integration test loads scripts/provision/egress.nft itself and needs
+      # CAP_NET_ADMIN; run it as root (PATH preserved so the right pytest is used).
+      - name: Scoped egress integration test
+        run: sudo -E env "PATH=$PATH" pytest -m integration tests/integration/test_nft_scope.py -v

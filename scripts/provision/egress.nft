@@ -1,0 +1,48 @@
+# SecOpent scoped-egress nftables ruleset (P2-G / M5).
+#
+# Network-layer egress enforcement: the output chain DEFAULT-DROPS and only
+# permits established/related return traffic, DNS, and destinations in the
+# scoped allow-set. A separate block-set is checked BEFORE the allow-set so
+# sensitive ranges (cloud metadata 169.254.0.0/16, loopback 127.0.0.0/8) are
+# dropped even if mistakenly whitelisted (defence in depth).
+#
+# NftScopeEnforcer (infrastructure/egress/nft_scope.py) populates the two sets
+# per assessment and flushes them on revoke. Load once as root:
+#   sudo nft -f scripts/provision/egress.nft
+# Inspect:  sudo nft list table inet secopent_egress
+# Tear down: sudo nft delete table inet secopent_egress
+
+flush ruleset
+
+table inet secopent_egress {
+    # Scoped, in-scope destinations (single IPs and/or CIDRs; interval set).
+    set allowed_targets {
+        type ipv4_addr
+        flags interval
+    }
+    # Always-denied destinations (cloud metadata / loopback / control plane).
+    set blocked_targets {
+        type ipv4_addr
+        flags interval
+        elements = { 169.254.0.0/16, 127.0.0.0/8 }
+    }
+    chain output {
+        type filter hook output priority 0; policy drop;
+
+        # Return traffic for connections the host already established.
+        ct state established,related accept
+
+        # DNS (resolver lookups for scope resolution + tool name resolution).
+        udp dport 53 accept
+        tcp dport 53 accept
+
+        # Sensitive ranges are dropped (and logged) BEFORE the allow-set check.
+        ip daddr @blocked_targets log prefix "SECOPTENT_EGRESS_DROP " drop
+
+        # Scoped targets are permitted.
+        ip daddr @allowed_targets accept
+
+        # Everything else: log + drop (default-deny).
+        log prefix "SECOPTENT_EGRESS_DROP " drop
+    }
+}
