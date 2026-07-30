@@ -1,0 +1,29 @@
+# GitHub Release configuration (T9 / §②).
+# When a tag (v*) is pushed, GitHub auto-generates release notes; this template
+# organizes them by PR label. The authoritative release notes are the CHANGELOG
+# section that scripts/release.sh attaches via `gh release create --notes`.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - skip-changelog
+  categories:
+    - title: Added
+      labels:
+        - feature
+        - enhancement
+    - title: Fixed
+      labels:
+        - fix
+        - bugfix
+        - bug
+    - title: Security
+      labels:
+        - security
+    - title: Operations
+      labels:
+        - ops
+        - ci
+    - title: Other Changes
+      labels:
+        - "*"

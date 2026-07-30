@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import sys
 
-__version__ = "0.1.0-dev"
+from secopent.__version__ import __version__
+
+__all__ = ["build_parser", "main", "__version__"]
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "secopent"
-version = "0.1.0-dev"
+dynamic = ["version"]
 description = "Catalog-driven Agent-native authorized pentest workbench"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -33,6 +33,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Version single source of truth (T9): src/secopent/__version__.py.
+[tool.setuptools.dynamic]
+version = { attr = "secopent.__version__.__version__" }
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
