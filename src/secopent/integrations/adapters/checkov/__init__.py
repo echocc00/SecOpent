@@ -134,15 +134,21 @@ def _map_check_id(check_id: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return (), ()
 
 
-def _load_checkov_json(stdout: str) -> dict[str, Any] | None:
-    """Parse checkov JSON stdout. Returns None on any parse failure."""
+def _load_checkov_json(stdout: str) -> dict[str, Any] | list[Any] | None:
+    """Parse checkov JSON stdout. Returns None on any parse failure.
+
+    checkov emits a single object when one framework is scanned, or a JSON array
+    of per-framework objects when several are (e.g. a directory holding both a
+    Dockerfile and Kubernetes manifests). Both shapes are accepted here and
+    normalized by ``parse``.
+    """
     if not stdout or not stdout.strip():
         return None
     try:
         obj = json.loads(stdout)
     except json.JSONDecodeError:
         return None
-    if not isinstance(obj, dict):
+    if not isinstance(obj, dict | list):
         return None
     return obj
 
@@ -206,11 +212,20 @@ def parse(
     obj = _load_checkov_json(stdout)
     if obj is None:
         return ()
-    results = obj.get("results")
-    if not isinstance(results, dict):
-        return ()
-    failed = results.get("failed_checks")
-    if not isinstance(failed, list):
+    # checkov emits one object per scanned framework; a multi-framework directory
+    # yields a JSON array. Normalize both shapes into a single failed-check list.
+    blocks = obj if isinstance(obj, list) else [obj]
+    failed: list[Any] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        results = block.get("results")
+        if not isinstance(results, dict):
+            continue
+        checks = results.get("failed_checks")
+        if isinstance(checks, list):
+            failed.extend(checks)
+    if not failed:
         return ()
     observations: list[Observation] = []
     seen: set[str] = set()

@@ -32,6 +32,7 @@ Prowler/Trivy/kube-bench/checkov are Apache/MIT and need no such marker.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -441,6 +442,49 @@ def test_checkov_malformed_parse_returns_empty() -> None:
     raw = _fixture_path("checkov", "malformed.json").read_text(encoding="utf-8")
     observations = checkov.parse(stdout=raw, source=_ADAPTER_SOURCE, artifacts={})
     assert observations == ()
+
+
+def test_checkov_array_output_flattens_across_frameworks() -> None:
+    """Real checkov (>=3.x) emits a JSON ARRAY of per-framework result objects
+    when a directory holds several IaC kinds (e.g. a Dockerfile plus Kubernetes
+    manifests). The parser must flatten ``failed_checks`` across EVERY block,
+    not just treat the array as a single object (regression: array output used
+    to yield zero observations). Surfaced by the T5 §3.2 cloud e2e scenario.
+    """
+    payload = [
+        {
+            "check_type": "kubernetes",
+            "results": {
+                "failed_checks": [
+                    {
+                        "check_id": "CKV_K8S_16",
+                        "check_name": "privileged container",
+                        "file_path": "/pod.yaml",
+                        "resource": "Pod.insecure",
+                    }
+                ]
+            },
+        },
+        {
+            "check_type": "dockerfile",
+            "results": {
+                "failed_checks": [
+                    {
+                        "check_id": "CKV_DOCKER_3",
+                        "check_name": "no USER created",
+                        "file_path": "/Dockerfile",
+                        "resource": "Dockerfile",
+                    }
+                ]
+            },
+        },
+    ]
+    observations = checkov.parse(
+        stdout=json.dumps(payload), source=_ADAPTER_SOURCE, artifacts={}
+    )
+    assert len(observations) == 2  # one finding flattened from each framework block
+    assert all(o.coverage_domain is CoverageDomain.CLOUD for o in observations)
+    assert {o.rule_id for o in observations} == {"CKV_K8S_16", "CKV_DOCKER_3"}
 
 
 # ---------------------------------------------------------------------------

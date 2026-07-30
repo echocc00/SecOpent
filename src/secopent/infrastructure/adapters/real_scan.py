@@ -26,12 +26,18 @@ from typing import Any
 
 from secopent.domain.adapters.contracts import AdapterSource, Observation
 from secopent.integrations.adapters import (
+    checkov,
     dalfox,
     katana,
+    kube_bench,
     naabu,
     nmap,
     nuclei,
+    prowler,
+    schemathesis,
+    scoutsuite,
     subfinder,
+    trivy,
 )
 from secopent.integrations.adapters import (
     httpx as httpx_adapter,
@@ -42,6 +48,7 @@ from .subprocess_executor import SubprocessContainerExecutor
 
 # adapter_key -> parse(stdout=, source=, artifacts=) -> tuple[Observation, ...]
 _ADAPTER_PARSERS: dict[str, Any] = {
+    # Asset mapping + web/API + network (Phase A3).
     "nuclei": nuclei.parse,
     "subfinder": subfinder.parse,
     "httpx": httpx_adapter.parse,
@@ -49,6 +56,14 @@ _ADAPTER_PARSERS: dict[str, Any] = {
     "nmap": nmap.parse,
     "dalfox": dalfox.parse,
     "katana": katana.parse,
+    # API fuzzing.
+    "schemathesis": schemathesis.parse,
+    # Cloud / container (P3 §3.2 / T5 - completes the four-domain coverage).
+    "trivy": trivy.parse,
+    "prowler": prowler.parse,
+    "kube_bench": kube_bench.parse,
+    "checkov": checkov.parse,
+    "scoutsuite": scoutsuite.parse,
 }
 
 _DEFAULT_RESOURCE_LIMITS: dict[str, Any] = {"memory": "512m", "cpus": "0.5"}

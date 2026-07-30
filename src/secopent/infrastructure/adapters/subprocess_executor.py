@@ -95,7 +95,11 @@ class SubprocessContainerExecutor:
             proc = subprocess.run(  # noqa: S603 - args are constructed, not shell
                 args,
                 capture_output=True,
-                text=True,
+                # Tool output is UTF-8; never let the platform locale (e.g.
+                # gbk/cp936 on zh-CN Windows) fail the decode and lose stdout
+                # (T5 §3.2 - trivy JSON carries non-ASCII descriptions).
+                encoding="utf-8",
+                errors="replace",
                 timeout=self._timeout,
                 check=False,
             )
@@ -124,7 +128,8 @@ class SubprocessContainerExecutor:
         result = subprocess.run(  # noqa: S603
             [self._docker, "image", "inspect", image_digest],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=self._inspect_timeout,
             check=False,
         )
