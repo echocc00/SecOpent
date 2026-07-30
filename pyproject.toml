@@ -30,6 +30,8 @@ dev = [
     "types-PyYAML>=6.0",
     "bandit>=1.7",
     "pip-audit>=2.7",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
 ]
 
 [tool.setuptools.packages.find]

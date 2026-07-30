@@ -33,6 +33,10 @@ from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
 from ...domain.common.canonical import utc_now
 from ...infrastructure.catalog.default_catalog import build_default_catalog
+from ...infrastructure.db.engine import (
+    configured_database_url,
+    create_engine_from_url,
+)
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
 from ...infrastructure.evidence_store.redaction import RedactionEngine
@@ -148,12 +152,17 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # sensitive-field redaction. Idempotent across calls.
     configure_logging(json_format=os.environ.get("SECOPTENT_LOG_FORMAT") == "json")
     if engine is None:
-        # mkstemp (not mktemp) creates the temp file securely with no
-        # predictable-name race (bandit B306). Lightweight default for
-        # tests/dev; production injects a persistent engine (docs/deployment.md).
-        fd, db_path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        engine = create_sqlite_engine(Path(db_path))
+        configured = configured_database_url()
+        if configured is not None:
+            # SECOPTENT_DB_URL selects the backend (sqlite:/// or postgresql://).
+            engine = create_engine_from_url(configured)
+        else:
+            # mkstemp (not mktemp) creates the temp file securely with no
+            # predictable-name race (bandit B306). Lightweight default for
+            # tests/dev; production sets SECOPTENT_DB_URL or injects an engine.
+            fd, db_path = tempfile.mkstemp(suffix=".db")
+            os.close(fd)
+            engine = create_sqlite_engine(Path(db_path))
     app.state.db = Database(engine)
     app.state.idempotency = {}
 
