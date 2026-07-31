@@ -112,7 +112,7 @@ parser 内应**去重**（如 nuclei 按 `template_id|host`），避免同目标
 4. **契约测试**：在对应域 `tests/adapter_contract/test_<domain>_adapters.py` 加 5 类 fixture 用例 + manifest 断言。
 5. **登记**：parser 入口字符串（`manifest().parser`）加入 runner 的 `parser_registry`；adapter 模块经 `secopent.integrations.adapters.<name>` 导入发现。
 6. **GPL 工具**：以独立子进程调用，manifest `permissions` 带 `independent_process`（保持聚合层许可证干净）。
-7. 跑 `py -3.12 -m pytest tests/adapter_contract -q` + `ruff` + `mypy` 全绿。
+7. 跑 `python3 -m pytest tests/adapter_contract -q` + `ruff` + `mypy` 全绿。
 
 ## 8. 现有 17 adapter 参考
 

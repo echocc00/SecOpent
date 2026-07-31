@@ -7,11 +7,11 @@ Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend +
 ## Quick start
 
 ```bash
-py -3.12 -m pip install -e ".[dev]"
-py -3.12 -m pytest -q                 # full suite (should be green)
+python3 -m pip install -e ".[dev]"
+python3 -m pytest -q                 # full suite (should be green)
 
 # API (dev) on :8000
-py -3.12 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000
+python3 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000
 
 # Web Case Studio (dev) on :5173, proxies /api -> :8000
 cd src/secopent/interfaces/web && npm install && npm run dev
@@ -21,6 +21,8 @@ bash scripts/build_web.sh
 ```
 
 A default TestCatalog (OWASP WSTG + CIS baseline) is seeded at startup, so plan generation works out of the box.
+
+> **Windows**: replace `python3` with `py -3.12` in the commands above.
 
 ## Guides (start here)
 

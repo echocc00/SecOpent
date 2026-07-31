@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [0.1.1] - 2026-07-31
+
+Linux deployment adaptation. No behavioral changes; the app is platform-agnostic
+(Python code has no Windows paths/imports/platform branches, CI already runs on
+ubuntu-latest). This release makes Linux first-class.
+
+### Added
+- Application `Dockerfile` (multi-stage: node builds the frontend, python:3.12-slim
+  runs the app; installs docker CLI so the app can drive the host daemon via the
+  mounted socket) + `.dockerignore`.
+- `docs/deployment/linux.md`: Linux production deployment guide (venv + systemd
+  service, containerized deployment with docker socket mount, nftables scoped
+  egress, backup cron, journalctl logging, nginx reverse proxy, verification
+  checklist).
+
+### Changed
+- `scripts/build_web.sh` and `scripts/verify_env.py`: replaced the Windows-only
+  `py -3.12` launcher with `${PYTHON:-python3}` / `python3` (defaults to Linux;
+  Windows users set `PYTHON=py` or use `py -3.12` per the README note).
+- Docs (README, user-manual, environment-setup, adapter-guide): `py -3.12` ->
+  `python3` throughout, with a one-line Windows note in README. Removed a
+  hardcoded `F:\claudepc\SecOpent` path from environment-setup.
+
+### Notes
+- No file-permission changes were needed: `EncryptedFileBackend` and
+  `Ed25519KeyProvider` keep secrets in memory (no on-disk secret file). The
+  Linux deployment doc covers DB-file `chmod 600` at the ops layer.
+- nftables scoped egress (T11) is runtime-usable on Linux for the first time
+  (Windows could only unit-test it).
+
+
 ## [0.1.0] - 2026-07-31
 
 First public release. Catalog-driven, agent-native **authorized** pentest

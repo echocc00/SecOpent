@@ -6,8 +6,8 @@
 ## 1. 安装
 
 ```bash
-py -3.12 -m pip install -e ".[dev]"
-py -3.12 -m pytest -q          # 验证安装（应全绿）
+python3 -m pip install -e ".[dev]"
+python3 -m pytest -q          # 验证安装（应全绿）
 ```
 
 前端（可选，Web Case Studio）：
@@ -22,7 +22,7 @@ cd src/secopent/interfaces/web && npm install
 
 ```bash
 # 终端 1：API
-py -3.12 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000
+python3 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000
 # 终端 2：前端
 cd src/secopent/interfaces/web && npm run dev    # http://localhost:5173
 ```

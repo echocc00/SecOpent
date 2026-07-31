@@ -39,9 +39,9 @@ docker pull projectdiscovery/nuclei:latest   # should succeed via mirror
 ## 2. SecOpent repo + Python deps
 
 ```bash
-cd F:\claudepc\SecOpent
-py -3.12 -m pip install -e ".[dev]"
-py -3.12 -m pytest -q                 # 806 tests should pass (V1 Beta)
+cd SecOpent   # your clone path
+python3 -m pip install -e ".[dev]"
+python3 -m pytest -q                 # 806 tests should pass (V1 Beta)
 ```
 
 ## 3. Tool images (17 adapters)
@@ -71,7 +71,7 @@ docker images --digests | grep projectdiscovery/nuclei
 ## 4. E2E target ranges
 
 ```bash
-cd F:\claudepc\SecOpent
+cd SecOpent   # your clone path
 docker compose -f scripts/provision/docker-compose.targets.yml up -d
 ```
 
@@ -123,7 +123,7 @@ Local model (Ollama) is reserved as an interface for later (Phase B+); not confi
 ## 7. Verify everything
 
 ```bash
-py -3.12 scripts/verify_env.py
+python3 scripts/verify_env.py
 ```
 
 Expected: all PASS (Docker / images / targets / interactsh / llm).
@@ -151,5 +151,5 @@ is tested in Phase A Task A6.
 - Network → `curl https://api.minimax.chat/v1/models -H "Authorization: Bearer $MINIMAX_API_KEY"`
 
 ### Tests fail after env change
-- `py -3.12 -m pytest -q` should stay 806 passed
+- `python3 -m pytest -q` should stay 806 passed
 - If new failures, check architecture boundaries (`tests/test_architecture_boundaries.py`)

@@ -15,4 +15,4 @@ echo "==> Building frontend (vite)..."
 echo "==> Serving SPA + API at http://localhost:8000 (SECOPTENT_WEB_DIST=$WEB_DIR/dist)"
 export SECOPTENT_WEB_DIST="$WEB_DIR/dist"
 cd "$ROOT"
-exec py -3.12 -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000
+exec "${PYTHON:-python3}" -m uvicorn secopent.interfaces.api.main:create_app --factory --port 8000

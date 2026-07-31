@@ -1,6 +1,6 @@
 """SecOpent environment verification (Phase A Task A1, Step 6).
 
-Run:  py -3.12 scripts/verify_env.py
+Run:  python3 scripts/verify_env.py   (Windows: py -3.12)
 
 Checks all Phase A dependencies:
 1. Docker daemon running + compose available

@@ -1,0 +1,35 @@
+# Build artifacts
+node_modules/
+**/__pycache__/
+**/*.pyc
+*.pyo
+.git/
+.gitignore
+
+# Local runtime state (never bake into the image)
+*.db
+*.db-*
+secrets/
+.env
+minimax-key.txt
+云主机.txt
+
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Playwright artifacts
+src/secopent/interfaces/web/test-results/
+src/secopent/interfaces/web/playwright-report/
+
+# Specs / docs (keep README + docs/, skip sepcs to slim the context)
+sepcs/
