@@ -8,4 +8,4 @@ stamped by ``scripts/release.sh``) never drift.
 """
 from __future__ import annotations
 
-__version__ = "1.1.0-stable"
+__version__ = "0.1.0"
