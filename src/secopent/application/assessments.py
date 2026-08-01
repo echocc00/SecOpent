@@ -132,3 +132,67 @@ class AssessmentService:
             )
         if actor_role != "human":
             raise AssessmentPermissionError(f"unknown actor role: {actor_role!r}")
+
+    def start(self, assessment_id: str, *, actor_role: str = "human") -> Assessment:
+        """Human-only: APPROVED -> QUEUED, triggering real execution.
+
+        Requires an approved plan + approval; the actual scan runs in a
+        background executor (see ``application.execution``). Start is a human
+        decision - never the LLM.
+        """
+        self._require_human(actor_role)
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        if assessment.status is not AssessmentStatus.APPROVED:
+            raise DomainValidationError(
+                f"assessment {assessment_id} cannot start from {assessment.status.value}"
+            )
+        if not assessment.active_plan_id:
+            raise DomainValidationError("assessment has no plan to execute")
+        if not assessment.approval_id:
+            raise DomainValidationError("assessment has no approval")
+        updated = assessment.start(
+            plan_id=assessment.active_plan_id, approval_id=assessment.approval_id
+        )
+        self._repo.add(updated)
+        return updated
+
+    def mark_running(self, assessment_id: str) -> Assessment:
+        """QUEUED -> RUNNING (called by the background executor)."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        if assessment.status is not AssessmentStatus.QUEUED:
+            raise DomainValidationError(
+                f"assessment {assessment_id} cannot run from {assessment.status.value}"
+            )
+        updated = replace(assessment, status=AssessmentStatus.RUNNING)
+        self._repo.add(updated)
+        return updated
+
+    def complete(self, assessment_id: str) -> Assessment:
+        """RUNNING -> COMPLETED (called by the background executor on success)."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        if assessment.status is not AssessmentStatus.RUNNING:
+            raise DomainValidationError(
+                f"assessment {assessment_id} cannot complete from {assessment.status.value}"
+            )
+        updated = replace(assessment, status=AssessmentStatus.COMPLETED)
+        self._repo.add(updated)
+        return updated
+
+    def fail(self, assessment_id: str, reason: str) -> Assessment:
+        """RUNNING -> FAILED (called by the background executor on failure)."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        if assessment.status is not AssessmentStatus.RUNNING:
+            raise DomainValidationError(
+                f"assessment {assessment_id} cannot fail from {assessment.status.value}"
+            )
+        updated = replace(assessment, status=AssessmentStatus.FAILED)
+        self._repo.add(updated)
+        return updated

@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [0.1.2] - 2026-07-31
+
+P0 blocker fix: the execution layer was not wired to the API. Approving an
+assessment left it stuck at APPROVED with no path to trigger scans. This release
+connects `POST /assessments/{id}/start` to the existing Orchestrator, closing
+the core user journey (scope -> plan -> approve -> **execute** -> findings).
+
+### Added
+- `POST /assessments/{id}/start` endpoint: APPROVED -> QUEUED, spawns a daemon
+  thread that runs `Orchestrator.dispatch` + `run_to_completion`, correlates
+  observations into findings (tagged with `assessment_id`), and transitions
+  RUNNING -> COMPLETED (or FAILED on exception). Human-only (agent -> 403).
+- `AssessmentService.start/mark_running/complete/fail` state-transition methods
+  with status guards (start only from APPROVED, etc.).
+- `application/execution.py`: the API -> Orchestrator bridge (background
+  executor, audit-recorded start/completed/failed).
+- Frontend: `Start` button on AssessmentDetail (visible when APPROVED) + the
+  `Emergency Stop` button is now enabled while RUNNING/QUEUED (was disabled
+  with "lands with execution layer (P2)" placeholder).
+- `useStartAssessment` / `useStopAssessment` hooks.
+
+### Fixed
+- Emergency stop works through container termination: `POST /stop` kills active
+  adapter containers -> the step's subprocess fails -> `run_to_completion` raises
+  -> the executor records FAILED. No separate stop-flag polling needed.
+- User manual §3 step 5 updated to reflect the now-wired execution trigger
+  (was aspirational "lands with execution layer (P2)").
+
+### Notes
+- SSE already polled `assessment.status`; it now emits the real QUEUED ->
+  RUNNING -> COMPLETED transitions during execution. Per-step (job-level) SSE
+  is a future enhancement (DAG nodes color at assessment granularity today).
+- Findings are persisted after `run_to_completion` (not incrementally per step);
+  incremental findings are a future enhancement.
+
+
 ## [0.1.1] - 2026-07-31
 
 Linux deployment adaptation. No behavioral changes; the app is platform-agnostic

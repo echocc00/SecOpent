@@ -133,6 +133,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assessments/{assessment_id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Assessment
+         * @description Trigger assessment execution: APPROVED -> QUEUED, then run in background.
+         *
+         *     Human-only (triggers real scans). The Orchestrator runs in a daemon thread
+         *     (``application.execution.execute_assessment``); this endpoint returns
+         *     immediately with status=QUEUED. Progress streams via the SSE endpoint
+         *     (``GET /assessments/{id}/events``) which polls ``assessment.status``.
+         *     Findings are persisted with ``assessment_id`` as they are correlated.
+         */
+        post: operations["start_assessment_assessments__assessment_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assessments/{assessment_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Emergency Stop
+         * @description Trigger the emergency stop for an assessment (human-only, §12).
+         *
+         *     Revokes unused permits, terminates active execution containers, preserves
+         *     evidence, and writes a high-priority audit event. Agent callers are
+         *     rejected (403) - the kill switch is a human-only action (LLM boundary).
+         */
+        post: operations["emergency_stop_assessments__assessment_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tools": {
         parameters: {
             query?: never;
@@ -238,6 +288,83 @@ export interface paths {
         get: operations["get_vulnerability_intel__canonical_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Updates Health
+         * @description Run the §7.3 knowledge-health detectors and return active alerts.
+         *
+         *     All four detectors are real (P3 §3.4): OSV reachability is an HTTP probe;
+         *     git freshness reads a local nuclei-templates clone (stale when absent);
+         *     curation lag counts upstream nuclei tags with no TestCatalog mapping;
+         *     signature state reflects the most recent intel-bundle verification.
+         */
+        get: operations["updates_health_updates_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish Intel Bundle
+         * @description Sign + activate a real intel update bundle (§3.4-3).
+         *
+         *     Builds a payload from live intel/catalog state, signs its digest with a
+         *     server-held Ed25519 key (§3.8), verifies the signature, then stages and
+         *     activates the bundle (audited). Human-only: ``actor_role="agent"`` -> 403
+         *     (publishing is a human admin action; LLM boundary).
+         */
+        post: operations["publish_intel_bundle_updates_publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync Bundle
+         * @description Fetch, verify, and activate an update bundle from a registry (§⑨).
+         *
+         *     Resolves ``body.source`` (e.g. ``github:secopent/bundles:v2026.07``) via the
+         *     ``BundleFetcher`` (GitHub Releases by default; overridable via
+         *     ``app.state.bundle_fetcher`` for tests/mirrors), then runs the full
+         *     ``UpdateManager`` pipeline: stage -> Ed25519 verify -> schema check -> atomic
+         *     activate -> audit. Human-only (``actor_role="agent"`` -> 403). A revoked
+         *     bundle -> 409; an unfetchable bundle -> 502; a bad signature/schema -> 422.
+         */
+        post: operations["sync_bundle_updates_sync_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -465,6 +592,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Job
+         * @description Retry a FAILED job: reset it to READY (clears the lease) for re-leasing.
+         */
+        post: operations["retry_job_jobs__job_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assets": {
         parameters: {
             query?: never;
@@ -526,7 +673,11 @@ export interface paths {
         /** List Reports */
         get: operations["list_reports_reports_get"];
         put?: never;
-        post?: never;
+        /**
+         * Generate Report
+         * @description Render + persist a data-driven report for an assessment.
+         */
+        post: operations["generate_report_reports_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -624,8 +775,9 @@ export interface paths {
          *
          *     Runs the RiskAnalyzer over the case and reports the declared-vs-computed
          *     risk so the CaseStudio editor can preview risk and block publish on a
-         *     mismatch. This is static analysis - nothing is executed, and the LLM is
-         *     never involved.
+         *     mismatch. This is static analysis - nothing is executed. With ``use_llm``,
+         *     the LLM additionally DRAFTS a risk suggestion (``llm_risk``); it is advisory
+         *     only and never overrides the computed risk (LLM boundary).
          */
         post: operations["analyze_case_cases__case_id__analyze_post"];
         delete?: never;
@@ -697,6 +849,32 @@ export interface paths {
         put?: never;
         /** Create App Model */
         post: operations["create_app_model_appmodels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/appmodels/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import App Model
+         * @description Import an AppModel from an OpenAPI/Postman/traffic spec (§3.3).
+         *
+         *     The importer builds a deterministic DRAFT. With ``use_llm``, the governed
+         *     LLM gateway PROPOSES business states/invariants which are merged in and the
+         *     model is registered as LLM_PROPOSED for human validation (the LLM never
+         *     validates or signs - LLM boundary). Without an LLM the draft stays as the
+         *     deterministic draft (LLM_PROPOSED, awaiting the same human validation).
+         */
+        post: operations["import_app_model_appmodels_import_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -803,6 +981,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/appmodels/{app_id}/{version}/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Drift
+         * @description Diff a re-imported model against the stored one (endpoint-level drift).
+         *
+         *     The client submits the re-imported states/transitions (e.g. from a fresh
+         *     OpenAPI/Postman import); the DriftDetector reports added/removed/changed
+         *     endpoints so the UI can prompt regeneration of affected logic tests.
+         */
+        post: operations["check_drift_appmodels__app_id___version__drift_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/signing-keys": {
         parameters: {
             query?: never;
@@ -815,6 +1017,80 @@ export interface paths {
         put?: never;
         /** Create Signing Key */
         post: operations["create_signing_key_signing_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/signing-keys/{key_id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate Signing Key
+         * @description Rotate a signing key (§3.8): create a new key, archive the old one.
+         *
+         *     Human-only (LLM boundary). The archived key is retained so signatures made
+         *     before rotation can still be verified; new signatures use the new key.
+         */
+        post: operations["rotate_signing_key_signing_keys__key_id__rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Catalog */
+        post: operations["create_catalog_catalog_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Latest Catalog */
+        get: operations["get_latest_catalog_catalog_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/catalog/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Catalog */
+        get: operations["get_catalog_catalog__version__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -847,7 +1123,11 @@ export interface paths {
         };
         /**
          * Assessment Events
-         * @description Stream assessment status as server-sent events (long task).
+         * @description Stream assessment status as SSE with bounded backpressure (P3 §3.5).
+         *
+         *     Polls the assessment's live status each tick, emits only on change
+         *     (signature de-dup), bounds memory via a 64-slot queue (a slow client is
+         *     dropped, never OOM), and stops on client disconnect or a terminal status.
          */
         get: operations["assessment_events_assessments__assessment_id__events_get"];
         put?: never;
@@ -921,6 +1201,20 @@ export interface components {
              * @default false
              */
             llm_proposed: boolean;
+        };
+        /** AppModelImport */
+        AppModelImport: {
+            /** Source Type */
+            source_type: string;
+            /** Spec */
+            spec: {
+                [key: string]: unknown;
+            };
+            /**
+             * Use Llm
+             * @default false
+             */
+            use_llm: boolean;
         };
         /** AppModelOut */
         AppModelOut: {
@@ -1201,7 +1495,9 @@ export interface components {
          *
          *     Computed by the deterministic RiskAnalyzer (never the LLM): ``computed_risk``
          *     is None when a deny-listed pattern is present; ``risk_ok`` is True when the
-         *     declared risk is >= the computed risk.
+         *     declared risk is >= the computed risk. ``llm_risk`` is an optional LLM DRAFT
+         *     suggestion (§3.3 dual channel) - advisory only, NEVER overrides the computed
+         *     risk (LLM boundary).
          */
         CaseAnalysisOut: {
             /** Case Id */
@@ -1218,6 +1514,8 @@ export interface components {
             schema_ok: boolean;
             /** Errors */
             errors: string[];
+            /** Llm Risk */
+            llm_risk?: string | null;
         };
         /** CaseCreate */
         CaseCreate: {
@@ -1322,6 +1620,26 @@ export interface components {
             /** Yaml */
             yaml: string;
         };
+        /** CatalogCreate */
+        CatalogCreate: {
+            /** Version */
+            version: string;
+            /** Mappings */
+            mappings: {
+                [key: string]: components["schemas"]["RequiredTestClassIn"][];
+            };
+        };
+        /** CatalogOut */
+        CatalogOut: {
+            /** Version */
+            version: string;
+            /** Digest */
+            digest: string;
+            /** Mappings */
+            mappings: {
+                [key: string]: components["schemas"]["RequiredTestClassIn"][];
+            };
+        };
         /** CreateSigningKey */
         CreateSigningKey: {
             /** Name */
@@ -1331,6 +1649,41 @@ export interface components {
              * @default human
              */
             actor_role: string;
+        };
+        /** DriftReportOut */
+        DriftReportOut: {
+            /** App Id */
+            app_id: string;
+            /** Added */
+            added: string[];
+            /** Removed */
+            removed: string[];
+            /** Changed */
+            changed: string[];
+            /** Has Drift */
+            has_drift: boolean;
+        };
+        /** DriftRequest */
+        DriftRequest: {
+            /** States */
+            states: string[];
+            /** Transitions */
+            transitions: components["schemas"]["TransitionIn"][];
+        };
+        /** EmergencyReportOut */
+        EmergencyReportOut: {
+            /** Triggered */
+            triggered: boolean;
+            /** Revoked Permits */
+            revoked_permits: number;
+            /** Terminated Containers */
+            terminated_containers: number;
+            /** Evidence Preserved */
+            evidence_preserved: boolean;
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
         };
         /** EvidenceOut */
         EvidenceOut: {
@@ -1447,6 +1800,22 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HealthAlertOut */
+        HealthAlertOut: {
+            /** Kind */
+            kind: string;
+            /** Source */
+            source: string;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+        };
+        /** HealthReportOut */
+        HealthReportOut: {
+            /** Alerts */
+            alerts: components["schemas"]["HealthAlertOut"][];
+        };
         /** InvariantIn */
         InvariantIn: {
             /** Id */
@@ -1559,6 +1928,21 @@ export interface components {
              */
             created_at: string;
         };
+        /** ReportGenerate */
+        ReportGenerate: {
+            /** Assessment Id */
+            assessment_id: string;
+            /**
+             * Title
+             * @default Security Assessment Report
+             */
+            title: string;
+            /**
+             * Polish
+             * @default false
+             */
+            polish: boolean;
+        };
         /** ReportOut */
         ReportOut: {
             /** Id */
@@ -1586,6 +1970,23 @@ export interface components {
             name: string;
             /** Content */
             content: string;
+        };
+        /** RequiredTestClassIn */
+        RequiredTestClassIn: {
+            /** Id */
+            id: string;
+            /**
+             * Cwe
+             * @default []
+             */
+            cwe: string[];
+            /**
+             * Owasp
+             * @default []
+             */
+            owasp: string[];
+            /** Risk */
+            risk: string;
         };
         /** RoleIn */
         RoleIn: {
@@ -1686,6 +2087,57 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
+        };
+        /**
+         * StartRequest
+         * @description Trigger assessment execution (POST /assessments/{id}/start, v0.1.2 P0).
+         */
+        StartRequest: {
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+        };
+        /** StopRequest */
+        StopRequest: {
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+        };
+        /** SyncBundleBody */
+        SyncBundleBody: {
+            /** Source */
+            source: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+            /** Key Id */
+            key_id?: string | null;
+        };
+        /** SyncResultOut */
+        SyncResultOut: {
+            /** Bundle Id */
+            bundle_id: string;
+            /** Version */
+            version: string;
+            /** Digest */
+            digest: string;
+            /** Previous Bundle Id */
+            previous_bundle_id: string | null;
         };
         /** ToolOut */
         ToolOut: {
@@ -2068,6 +2520,76 @@ export interface operations {
             };
         };
     };
+    start_assessment_assessments__assessment_id__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    emergency_stop_assessments__assessment_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmergencyReportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_tools_tools_get: {
         parameters: {
             query?: never;
@@ -2273,6 +2795,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VulnerabilityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updates_health_updates_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealthReportOut"];
+                };
+            };
+        };
+    };
+    publish_intel_bundle_updates_publish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseAction"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateBundleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_bundle_updates_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncBundleBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncResultOut"];
                 };
             };
             /** @description Validation Error */
@@ -2629,6 +3237,37 @@ export interface operations {
             };
         };
     };
+    retry_job_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_asset_graph_assets_get: {
         parameters: {
             query?: never;
@@ -2729,6 +3368,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReportOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_report_reports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportGenerate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportOut"];
                 };
             };
             /** @description Validation Error */
@@ -2925,7 +3597,9 @@ export interface operations {
     };
     analyze_case_cases__case_id__analyze_post: {
         parameters: {
-            query?: never;
+            query?: {
+                use_llm?: boolean;
+            };
             header?: never;
             path: {
                 case_id: string;
@@ -3089,6 +3763,39 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AppModelCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppModelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_app_model_appmodels_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppModelImport"];
             };
         };
         responses: {
@@ -3320,6 +4027,42 @@ export interface operations {
             };
         };
     };
+    check_drift_appmodels__app_id___version__drift_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                app_id: string;
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftReportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_signing_keys_signing_keys_get: {
         parameters: {
             query?: never;
@@ -3360,6 +4103,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SigningKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_signing_key_signing_keys__key_id__rotate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaseAction"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SigningKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_catalog_catalog_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CatalogCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_catalog_catalog_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogOut"];
+                };
+            };
+        };
+    };
+    get_catalog_catalog__version__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                version: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogOut"];
                 };
             };
             /** @description Validation Error */

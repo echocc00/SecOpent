@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAssessment, useJobs, usePlan, useReports } from "@/api/hooks";
+import { useAssessment, useJobs, usePlan, useReports, useStartAssessment, useStopAssessment } from "@/api/hooks";
 import type { components } from "@/api/generated";
 import { subscribeAssessmentEvents, type AssessmentEvent } from "@/lib/sse";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,11 @@ export function AssessmentDetail() {
 
   const reportList = reports.data?.data ?? [];
 
+  const startMut = useStartAssessment();
+  const stopMut = useStopAssessment();
+  const canStart = a?.status === "approved";
+  const canStop = a?.status === "queued" || a?.status === "running";
+
   return (
     <div className="flex flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
@@ -68,9 +73,26 @@ export function AssessmentDetail() {
           <span className="font-mono text-sm text-muted-foreground">{id}</span>
           {a && <StatusBadge status={a.status} />}
         </div>
-        <Button variant="destructive" disabled title="Wired with the execution layer (P2)">
-          Emergency Stop
-        </Button>
+        <div className="flex items-center gap-2">
+          {canStart && (
+            <Button
+              onClick={() => id && startMut.mutate(id)}
+              disabled={startMut.isPending}
+            >
+              {startMut.isPending ? "Starting..." : "Start"}
+            </Button>
+          )}
+          <Button
+            variant="destructive"
+            disabled={!canStop || stopMut.isPending}
+            title={canStop ? "Halt execution" : "Available while running"}
+            onClick={() =>
+              id && stopMut.mutate({ assessmentId: id, actor: "operator", reason: "manual stop" })
+            }
+          >
+            Emergency Stop
+          </Button>
+        </div>
       </div>
 
       {a && (

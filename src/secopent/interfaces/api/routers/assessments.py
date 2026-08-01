@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import ipaddress
+import threading
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
-from ....application.assessments import AssessmentService
+from ....application.assessments import AssessmentPermissionError, AssessmentService
 from ....application.audit import AuditService
 from ....application.emergency_stop import EmergencyStop
+from ....application.execution import execute_assessment
 from ....application.planner import Planner
 from ....domain.assessments.models import Assessment, ExecutionPlan
 from ....domain.catalog.models import AssetType
 from ....domain.common.errors import DomainValidationError
 from ....domain.policy.models import ExecutionMode
 from ....domain.scope.models import ScopeSnapshot
+from ....infrastructure.adapters.real_scan import RealScanRunner
+from ....infrastructure.adapters.step_runner import AdapterStepRunner, ScanContext
 from ....infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -23,6 +27,9 @@ from ....infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyAssessmentRepository,
     SqlAlchemyAuditRepository,
     SqlAlchemyScopeRepository,
+)
+from ....infrastructure.repositories.sqlalchemy_findings import (
+    SqlAlchemyFindingRepository,
 )
 from ....infrastructure.safety.emergency_infra import (
     DockerContainerTerminator,
@@ -35,6 +42,7 @@ from ..schemas import (
     EmergencyReportOut,
     PlanOut,
     PlanStepOut,
+    StartRequest,
     StopRequest,
 )
 
@@ -185,6 +193,59 @@ def generate_plan(
     if created is None:  # pragma: no cover - attach_plan always sets active_plan_id
         raise HTTPException(status_code=500, detail="plan was not persisted")
     return _plan_to_out(created)
+
+
+def _production_step_runner(scope: ScopeSnapshot) -> AdapterStepRunner:
+    """Build the real AdapterStepRunner over RealScanRunner for an engagement."""
+    return AdapterStepRunner(
+        RealScanRunner(default_timeout=180),
+        ScanContext(targets=scope.include),
+    )
+
+
+@router.post("/{assessment_id}/start", response_model=AssessmentOut)
+def start_assessment(
+    assessment_id: str, payload: StartRequest, request: Request, session: DbSession
+) -> AssessmentOut:
+    """Trigger assessment execution: APPROVED -> QUEUED, then run in background.
+
+    Human-only (triggers real scans). The Orchestrator runs in a daemon thread
+    (``application.execution.execute_assessment``); this endpoint returns
+    immediately with status=QUEUED. Progress streams via the SSE endpoint
+    (``GET /assessments/{id}/events``) which polls ``assessment.status``.
+    Findings are persisted with ``assessment_id`` as they are correlated.
+    """
+    assessment_repo = SqlAlchemyAssessmentRepository(session)
+    service = AssessmentService(assessment_repo)
+    try:
+        assessment = service.start(assessment_id, actor_role=payload.actor_role)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DomainValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except AssessmentPermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    # The background thread owns its own session; the request session is closed
+    # after the response, so we reconstruct repos against app.state.db there.
+    db = request.app.state.db
+
+    def _run() -> None:
+        bg_session = db.open_session()
+        try:
+            execute_assessment(
+                assessment_id=assessment_id,
+                assessment_repo=SqlAlchemyAssessmentRepository(bg_session),
+                scope_repo=SqlAlchemyScopeRepository(bg_session),
+                finding_repo=SqlAlchemyFindingRepository(bg_session),
+                audit_repo=SqlAlchemyAuditRepository(bg_session),
+                step_runner_factory=_production_step_runner,
+            )
+        finally:
+            bg_session.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return _to_out(assessment)
 
 
 @router.post("/{assessment_id}/stop", response_model=EmergencyReportOut)

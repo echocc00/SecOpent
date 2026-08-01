@@ -71,6 +71,30 @@ export const useGeneratePlan = () => {
   });
 };
 
+export const useStartAssessment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (assessmentId: string) =>
+      api.POST("/assessments/{assessment_id}/start", {
+        params: { path: { assessment_id: assessmentId } },
+        body: { actor_role: "human" },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["assessments"] }),
+  });
+};
+
+export const useStopAssessment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { assessmentId: string; actor: string; reason: string }) =>
+      api.POST("/assessments/{assessment_id}/stop", {
+        params: { path: { assessment_id: args.assessmentId } },
+        body: { actor: args.actor, reason: args.reason, actor_role: "human" },
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["assessments"] }),
+  });
+};
+
 // --- Tools ---
 export const useTools = () =>
   useQuery({ queryKey: ["tools"], queryFn: () => api.GET("/tools") });

@@ -41,7 +41,7 @@ bash scripts/build_web.sh    # 见 docs/deployment.md
 2. **定义并冻结 scope**：填 include（目标 URL/IP/域名，一行一个）、exclude、ports、限速（rps/concurrency/max_requests）→ Freeze（生成不可变 scope 快照 + digest）。
 3. **生成计划**：选模式（Approval / Scope Autopilot）→ 生成计划（Planner 按 catalog 生成风险分层 DAG：recon → active → intrusive）。
 4. **审批**：ApprovalCenter 看到待审批项 → 批准（选风险类 + 能力）或拒绝（填理由）。**审批是人专属**（LLM 边界）。
-5. **执行**：批准后评估进入执行（编排器按计划跑适配器容器）。
+5. **执行**：批准后，AssessmentDetail 页出现 **Start** 按钮 -> 点击触发 `POST /assessments/{id}/start`（human-only，LLM 边界）-> 评估进入 QUEUED -> RUNNING，编排器在后台按计划跑适配器容器。SSE 实时推送状态变化。运行中可点 **Emergency Stop** 中断（杀容器 + 审计）。
 6. **查看结果**：Findings 页（筛选 + 证据三层）、AssessmentDetail（DAG + 事件流 + Job）。
 
 ## 4. 审批

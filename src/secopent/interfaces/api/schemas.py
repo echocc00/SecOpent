@@ -202,6 +202,11 @@ class StopRequest(BaseModel):
     actor_role: str = "human"
 
 
+class StartRequest(BaseModel):
+    """Trigger assessment execution (POST /assessments/{id}/start, v0.1.2 P0)."""
+    actor_role: str = "human"
+
+
 class EmergencyReportOut(BaseModel):
     triggered: bool
     revoked_permits: int
