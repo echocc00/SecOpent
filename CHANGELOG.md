@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [0.1.3] - 2026-07-31
+
+`Schema: no | Deps: no | Breaking: no` — upgrade tooling + runbook (no behavioral
+change to the app). Closes the upgrade-path design gap: a single command +
+documented procedure to move between versions on a Linux install.
+
+### Added
+- **`secopent upgrade`** CLI command: locates the repo root from the editable
+  install, then runs `git pull` -> `pip install -e ".[dev]"` -> `npm install &&
+  npm run build` -> `alembic upgrade head` -> `doctor`, with a restart reminder.
+  Flags: `--dry-run`, `--no-frontend`, `--no-migrate`.
+- **`docs/deployment/upgrade.md`**: full upgrade runbook (venv + container),
+  per-version-type steps (patch/minor/major), rollback, Docker environment
+  separation (app vs targets/images), verification checklist.
+- **CHANGELOG convention**: each release now carries a `Schema | Deps | Breaking`
+  marker so operators know whether a backup/migration is needed before upgrading.
+  Prior releases (0.1.0-0.1.2) annotated retroactively.
+- **Dockerfile auto-migration**: CMD now runs `alembic upgrade head` before
+  uvicorn, so containerized deployments auto-migrate on startup (idempotent).
+  `alembic.ini` + `alembic/` are now copied into the image.
+
+### Notes
+- App upgrades do **not** require updating Docker targets/images (those are
+  independent infrastructure; see upgrade.md §5). Adapter images are
+  digest-pinned and only change when `image_catalog.py` changes.
+- `secopent upgrade` does not auto-restart the service (it cannot restart
+  systemd); it prints the `systemctl restart` reminder.
+
+
 ## [0.1.2] - 2026-07-31
+
+`Schema: no | Deps: no | Breaking: no`
 
 P0 blocker fix: the execution layer was not wired to the API. Approving an
 assessment left it stuck at APPROVED with no path to trigger scans. This release
@@ -45,7 +76,7 @@ the core user journey (scope -> plan -> approve -> **execute** -> findings).
 
 ## [0.1.1] - 2026-07-31
 
-Linux deployment adaptation. No behavioral changes; the app is platform-agnostic
+`Schema: no | Deps: no | Breaking: no` - Linux deployment adaptation. No behavioral changes; the app is platform-agnostic
 (Python code has no Windows paths/imports/platform branches, CI already runs on
 ubuntu-latest). This release makes Linux first-class.
 
@@ -76,7 +107,7 @@ ubuntu-latest). This release makes Linux first-class.
 
 ## [0.1.0] - 2026-07-31
 
-First public release. Catalog-driven, agent-native **authorized** pentest
+`Schema: n/a (first release) | Deps: n/a | Breaking: no` - First public release. Catalog-driven, agent-native **authorized** pentest
 workbench: a deterministic spine (Planner, PolicyEngine, CoverageMatrix, oracle)
 with an LLM that only ever *proposes* — humans and the deterministic layer
 decide scope, approval, signing, findings, and publish.

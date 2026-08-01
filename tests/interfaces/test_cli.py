@@ -24,3 +24,19 @@ def test_runs_from_any_cwd(tmp_path, monkeypatch, capsys) -> None:  # type: igno
     monkeypatch.chdir(tmp_path)
     assert main(["doctor"]) == 0
     assert "ok" in capsys.readouterr().out
+
+
+def test_upgrade_dry_run_lists_steps(capsys) -> None:  # type: ignore[no-untyped-def]
+    """--dry-run prints the upgrade steps without executing them."""
+    assert main(["upgrade", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "git pull" in out
+    assert "alembic upgrade head" in out
+    assert "restart" in out.lower()
+
+
+def test_upgrade_no_frontend_no_migrate_dry_run(capsys) -> None:  # type: ignore[no-untyped-def]
+    assert main(["upgrade", "--dry-run", "--no-frontend", "--no-migrate"]) == 0
+    out = capsys.readouterr().out
+    assert "frontend: skipped" in out
+    assert "migration: skipped" in out

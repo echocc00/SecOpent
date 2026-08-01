@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir -e ".[dev]"
 
 # Copy the source + the built frontend
 COPY src/ ./src/
+COPY alembic.ini alembic/ ./
 COPY --from=web-builder /web/dist ./src/secopent/interfaces/web/dist
 
 # Serve the SPA + API from one port
@@ -41,5 +42,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/health || exit 1
 
-CMD ["python3", "-m", "uvicorn", "secopent.interfaces.api.main:create_app", \
-     "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# Run DB migrations on every start, then serve. The alembic.ini + alembic/
+# dir are copied with src/; SECOPTENT_DB_URL (set at runtime) selects the DB.
+# Migrations are idempotent (alembic stamps the current revision), so re-running
+# on an up-to-date DB is a no-op.
+CMD ["sh", "-c", "alembic upgrade head && exec python3 -m uvicorn secopent.interfaces.api.main:create_app --factory --host 0.0.0.0 --port 8000"]

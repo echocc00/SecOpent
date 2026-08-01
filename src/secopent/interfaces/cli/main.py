@@ -51,6 +51,19 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument(
         "--from", dest="from_backup", required=True, help="Path to the backup file to restore."
     )
+    upgrade = subparsers.add_parser(
+        "upgrade",
+        help="Pull code + reinstall deps + rebuild frontend + migrate DB (run in the repo).",
+    )
+    upgrade.add_argument(
+        "--no-frontend", action="store_true", help="Skip the npm install + build step."
+    )
+    upgrade.add_argument(
+        "--no-migrate", action="store_true", help="Skip `alembic upgrade head`."
+    )
+    upgrade.add_argument(
+        "--dry-run", action="store_true", help="Print the steps without running them."
+    )
     return parser
 
 
@@ -165,6 +178,80 @@ def _cmd_restore(db_path: str, from_backup: str) -> int:
     return 0
 
 
+def _cmd_upgrade(
+    *, no_frontend: bool = False, no_migrate: bool = False, dry_run: bool = False
+) -> int:
+    """Pull code + reinstall deps + rebuild frontend + migrate DB.
+
+    Locates the repo root from the editable install (``secopent.__file__``),
+    then runs: ``git pull`` -> ``pip install -e ".[dev]"`` -> (frontend)
+    ``npm install && npm run build`` -> (DB) ``alembic upgrade head`` -> ``doctor``.
+    Each step's output is streamed; a failing step is reported but does not abort
+    subsequent independent steps (so a frontend-only change still migrates DB).
+
+    Always back up the DB before upgrading (see docs/deployment/upgrade.md).
+    The service must be restarted after a successful upgrade (the CLI prints a
+    reminder; it cannot restart systemd itself).
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    import secopent
+
+    pkg_file = getattr(secopent, "__file__", None)
+    if pkg_file is None:
+        print("error: cannot locate secopent package source (editable install required)")
+        return 1
+    root = Path(pkg_file).resolve().parents[2]
+    if not (root / ".git").exists():
+        print(f"error: {root} is not a git repo (editable install required for `upgrade`)")
+        return 1
+    web_dir = root / "src" / "secopent" / "interfaces" / "web"
+
+    def _run(step: str, cmd: list[str], cwd: Path) -> int:
+        print(f"\n==> {step}")
+        print(f"    cwd: {cwd}")
+        print(f"    cmd: {' '.join(cmd)}")
+        if dry_run:
+            return 0
+        return subprocess.call(cmd, cwd=str(cwd))
+
+    print(f"SecOpent upgrade (repo: {root})")
+    print("WARNING: back up the DB first (secopent backup --db ... --out ...).")
+
+    py = shutil.which("python3") or shutil.which("python") or "python"
+    npm = shutil.which("npm")
+    alembic = shutil.which("alembic") or f"{py} -m alembic"
+
+    rc = _run("git pull", ["git", "pull", "--ff-only"], root)
+    if rc != 0:
+        print("error: git pull failed (resolve local changes / merge conflicts, then re-run)")
+        return rc
+    _run("pip install (deps)", [py, "-m", "pip", "install", "-e", ".[dev]"], root)
+
+    if not no_frontend and npm and web_dir.exists():
+        _run("npm install", [npm, "ci", "--legacy-peer-deps"], web_dir)
+        _run("npm run build", [npm, "run", "build"], web_dir)
+    elif no_frontend:
+        print("\n==> frontend: skipped (--no-frontend)")
+
+    if not no_migrate and (root / "alembic.ini").exists():
+        alembic_cmd = alembic.split() if isinstance(alembic, str) else [alembic]
+        _run("alembic upgrade head", [*alembic_cmd, "upgrade", "head"], root)
+    elif no_migrate:
+        print("\n==> migration: skipped (--no-migrate)")
+
+    if not dry_run:
+        print("\n==> doctor")
+        _cmd_doctor()
+
+    print("\nUpgrade complete. Restart the service:")
+    print("    sudo systemctl restart secopent")
+    print("(or `docker restart secopent` for container deployments)")
+    return 0
+
+
 def _cmd_doctor() -> int:
     """Verify the deterministic core imports and basic invariants hold."""
     try:
@@ -197,6 +284,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "restore":
         return _cmd_restore(args.db, args.from_backup)
+    if args.command == "upgrade":
+        return _cmd_upgrade(
+            no_frontend=args.no_frontend,
+            no_migrate=args.no_migrate,
+            dry_run=args.dry_run,
+        )
     parser.print_help()
     return 1
 
