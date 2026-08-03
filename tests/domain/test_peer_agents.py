@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from secopent.domain.adapters.contracts import CoverageDomain, Severity
+from secopent.domain.catalog.models import AssetType, RequiredTestClass, TestCatalog
 from secopent.domain.common.errors import DomainValidationError
 from secopent.domain.peer_agents.models import (
     PeerAgentBudget,
@@ -15,11 +17,17 @@ from secopent.domain.peer_agents.models import (
     PeerRunStatus,
     RejectionReason,
 )
+from secopent.domain.peer_agents.normalize import (
+    finding_in_scope,
+    hits_required_catalog,
+    normalize_finding,
+)
 from secopent.domain.peer_agents.registry import (
     PeerAgentAlreadyRegistered,
     PeerAgentRegistry,
     default_registry,
 )
+from secopent.domain.scope.models import ScopeSnapshot
 
 
 def _budget() -> PeerAgentBudget:
@@ -152,3 +160,111 @@ class TestPeerAgentRegistry:
         registry = PeerAgentRegistry()
         registry.register(_descriptor())
         assert len(registry.all()) == 1
+
+
+def _scope() -> ScopeSnapshot:
+    """构造方式与 tests/domain/test_scope.py::_snapshot 同款。"""
+    from datetime import UTC, datetime
+
+    from secopent.domain.scope.models import ScopeLimits
+
+    return ScopeSnapshot(
+        id="snap",
+        project_id="proj",
+        include=("host.docker.internal", "http://host.docker.internal:3000"),
+        exclude=(),
+        ports=(3000,),
+        limits=ScopeLimits(requests_per_second=5.0, concurrency=3, max_requests=1000),
+        approved_by="analyst",
+        approved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        digest="sha256:" + "0" * 64,
+    )
+
+
+def _catalog() -> TestCatalog:
+    from secopent.domain.policy.models import RiskClass
+
+    return TestCatalog(
+        version="test-1",
+        mappings={
+            AssetType.WEB_APP: (
+                RequiredTestClass(
+                    id="sql-injection",
+                    cwe=("CWE-89",),
+                    owasp=("WSTG-INPV-05",),
+                    risk=RiskClass.ACTIVE,
+                ),
+            ),
+        },
+    )
+
+
+def _finding(**overrides: object) -> PeerAgentFinding:
+    base: dict[str, object] = dict(
+        id="f-1", run_id="run-1", agent_name="strix",
+        title="SQLi in /login",
+        asset="http://host.docker.internal:3000",
+        severity_hint="high", cwe=("CWE-89",), owasp=("WSTG-INPV-05",),
+    )
+    base.update(overrides)
+    return PeerAgentFinding(**base)  # type: ignore[arg-type]
+
+
+class TestScopeGate:
+    def test_url_asset_in_scope(self) -> None:
+        assert finding_in_scope(_finding(), _scope()) is True
+
+    def test_foreign_asset_out_of_scope(self) -> None:
+        foreign = _finding(asset="http://evil.example.com")
+        assert finding_in_scope(foreign, _scope()) is False
+
+    def test_bare_hostname_checked_as_domain(self) -> None:
+        bare = _finding(asset="host.docker.internal")
+        assert finding_in_scope(bare, _scope()) is True
+
+
+class TestCatalogGate:
+    def test_finding_with_matching_cwe_hits_catalog(self) -> None:
+        assert hits_required_catalog(_finding(), _catalog(), AssetType.WEB_APP) is True
+
+    def test_finding_without_matching_class_misses_catalog(self) -> None:
+        off = _finding(cwe=("CWE-79",), owasp=())
+        assert hits_required_catalog(off, _catalog(), AssetType.WEB_APP) is False
+
+
+class TestNormalizeFinding:
+    def test_maps_to_observation_with_peer_source(self) -> None:
+        run = PeerAgentRun(
+            id="run-1", agent_name="strix", agent_version="1.4.1",
+            assessment_id="asmt-1",
+            targets=("http://host.docker.internal:3000",),
+            budget=_budget(), permit_id="permit-1",
+        )
+        observation = normalize_finding(_finding(), run)
+        assert observation.source.name == "peer:strix"
+        assert observation.source.version == "1.4.1"
+        assert observation.external_id == "f-1"
+        assert observation.coverage_domain is CoverageDomain.WEB
+        assert observation.confidence == 0.5
+        assert observation.raw["peer_run_id"] == "run-1"
+
+    def test_known_severity_hint_maps_to_enum(self) -> None:
+        run = PeerAgentRun(
+            id="run-1", agent_name="strix", agent_version="1.4.1",
+            assessment_id="asmt-1", targets=("http://t",),
+            budget=_budget(), permit_id="p",
+        )
+        observation = normalize_finding(_finding(severity_hint="CRITICAL"), run)
+        assert observation.severity is Severity.CRITICAL
+
+    def test_unknown_severity_hint_downgrades_to_info_and_records(self) -> None:
+        run = PeerAgentRun(
+            id="run-1", agent_name="strix", agent_version="1.4.1",
+            assessment_id="asmt-1", targets=("http://t",),
+            budget=_budget(), permit_id="p",
+        )
+        observation = normalize_finding(
+            _finding(severity_hint="apocalyptic"), run
+        )
+        assert observation.severity is Severity.INFO
+        assert observation.raw["severity_hint_unmapped"] == "apocalyptic"
