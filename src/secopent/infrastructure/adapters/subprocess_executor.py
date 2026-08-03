@@ -95,16 +95,21 @@ class SubprocessContainerExecutor:
         network_policy: str,
         resource_limits: Mapping[str, Any],
         capabilities: Sequence[str] = (),
+        extra_labels: Mapping[str, str] | None = None,
     ) -> ContainerResult:
         """Verify the digest, run the container, and capture its output.
 
         ``capabilities``: Linux capabilities to ADD back after ``--cap-drop ALL``
         (e.g. ``("NET_RAW",)`` for nmap/naabu SYN scanning). Empty by default.
+
+        ``extra_labels``: additional ``--label key=value`` pairs appended after
+        the mandatory ``secopent=execution`` label. Used by peer-agent harness
+        to tag containers with ``secopent.peer_run=<run_id>`` for targeted stop.
         """
         self._verify_digest(image_digest)
         args = self._build_args(
             image_digest, command, mounts, network_policy, resource_limits,
-            capabilities,
+            capabilities, extra_labels or {},
         )
         artifacts_dir = self._artifacts_dir(mounts)
         try:
@@ -162,6 +167,7 @@ class SubprocessContainerExecutor:
         network_policy: str,
         resource_limits: Mapping[str, Any],
         capabilities: Sequence[str] = (),
+        extra_labels: Mapping[str, str] | None = None,
     ) -> list[str]:
         args = [
             self._docker,
@@ -171,6 +177,13 @@ class SubprocessContainerExecutor:
             # (DockerContainerTerminator) can find and kill them (§12).
             "--label",
             "secopent=execution",
+        ]
+        # Append peer-run or other caller-supplied labels after the mandatory
+        # secopent=execution label. Used by ContainerPeerAgentHarness to tag
+        # containers for targeted stop via ``docker ps --filter label=...``.
+        for key, value in (extra_labels or {}).items():
+            args += ["--label", f"{key}={value}"]
+        args += [
             # Let the tool container reach host-mapped targets (Juice Shop,
             # httpbin, ...) via host.docker.internal. Docker Desktop defines it
             # already (harmless re-map); Linux runners/CI need the explicit
