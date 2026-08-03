@@ -82,6 +82,9 @@ _ADAPTER_RESOURCE_LIMITS: dict[str, dict[str, Any]] = {
     "restler": {"memory": "1g", "cpus": "1.0"},
     "checkov": {"memory": "1g", "cpus": "1.0"},
     "kube_bench": {"memory": "1g", "cpus": "1.0"},
+    # nuclei loads the full 13k-template directory into memory (~1.5GB) at
+    # startup; the 512m default OOMs the container before any scan runs.
+    "nuclei": {"memory": "2g", "cpus": "1.0"},
 }
 
 # Adapter-specific Linux capabilities: network scanners need NET_RAW for SYN

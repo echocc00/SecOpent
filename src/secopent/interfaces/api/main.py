@@ -16,7 +16,6 @@ Serving modes:
 from __future__ import annotations
 
 import os
-import tempfile
 import threading
 import time
 from collections.abc import AsyncIterator, Sequence
@@ -253,12 +252,14 @@ def create_app(engine: Engine | None = None) -> FastAPI:
             # SECOPTENT_DB_URL selects the backend (sqlite:/// or postgresql://).
             engine = create_engine_from_url(configured)
         else:
-            # mkstemp (not mktemp) creates the temp file securely with no
-            # predictable-name race (bandit B306). Lightweight default for
-            # tests/dev; production sets SECOPTENT_DB_URL or injects an engine.
-            fd, db_path = tempfile.mkstemp(suffix=".db")
-            os.close(fd)
-            engine = create_sqlite_engine(Path(db_path))
+            # Default to a stable on-disk path (NOT mkstemp) so data survives
+            # restart when SECOPTENT_DB_URL is unset (NAS/long-lived deployments
+            # - the prior mkstemp created a fresh /tmp/tmp*.db each start,
+            # silently losing all data). Production should still set
+            # SECOPTENT_DB_URL explicitly (see docs/deployment/linux.md); tests
+            # isolate via SECOPTENT_DB_URL in conftest.
+            db_path = Path.cwd() / "secopent.db"
+            engine = create_sqlite_engine(db_path)
     app.state.db = Database(engine)
     app.state.idempotency = {}
     # Execution-tracking state for graceful shutdown (v0.1.5): in-flight

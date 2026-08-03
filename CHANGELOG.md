@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [0.1.6] - 2026-08-03
+
+`Schema: no | Deps: no | Breaking: no` - end-to-end 0-findings root-cause fix.
+Real-machine deployment (NAS + Docker + Juice Shop) surfaced that v0.1.5
+assessments completed with 0 findings despite the orchestrator running all 9
+nuclei steps. Systematic isolation testing (4 container tests + direct
+subprocess vs executor comparison) located the root cause; this release fixes
+it plus 5 related deployment gaps found in the same audit.
+
+### Root cause (end-to-end 0 findings)
+Three independent causes, all required to fix:
+1. **`_production_step_runner` did not pass `template_host_dir`** - nuclei ran
+   with built-in templates (needs network; fails offline/GFW). [A1]
+2. **nuclei 3.11 rejects single-file `-t`** with "no templates provided" - the
+   scan needs a directory mount. (nuclei v3 `-silent`/`-o`/stdout capture were
+   all verified NOT at fault via 4 isolation tests.)
+3. **default_timeout 180s too short** - 13k HTTP templates need 6-10 min; the
+   scan was killed mid-run. [A3]
+4. **nuclei OOM at 512m default** - loading 13k templates takes ~1.5GB. [C1]
+
+### Fixed
+- **A1**: `_production_step_runner` injects `template_host_dir` from
+  `SECOPTENT_NUCLEI_TEMPLATE_DIR` env (offline/NAS deployments supply the
+  downloaded template dir). [assessments.py]
+- **A2**: URL adapters (nuclei/httpx/katana/dalfox) strip trailing slash from
+  targets - `http://host:3000/` + `/api-docs` no longer produces `//api-docs`.
+  [step_runner.py]
+- **A3**: scan timeout is now `SECOPTENT_SCAN_TIMEOUT` env (default 1800s/30min,
+  was 180s) - covers the full 13k-template HTTP set on a weak NAS. [assessments.py]
+- **A4**: orchestrator exceptions now log via structlog (`assessment
+  started/completed` info, `failed` warning with exc_info) - daemon-thread
+  failures are no longer invisible in the API log. [execution.py]
+- **A5**: `create_app` default DB is now `cwd/secopent.db` (stable, persists
+  across restarts) instead of `tempfile.mkstemp` (fresh /tmp/tmp*.db each start
+  = silent data loss). `tests/conftest.py` autouse fixture isolates tests via
+  `SECOPTENT_DB_URL` -> tmp_path. [main.py, tests/conftest.py]
+- **A6**: `step_runner` mounts single-file `template_host_dir` by name (not as
+  a directory) - correct for adapters that accept a file; nuclei still requires
+  a directory (3.11 limitation), so production uses a directory (A1). [step_runner.py]
+- **C1**: nuclei added to `_ADAPTER_RESOURCE_LIMITS` at 2g/1cpu (13k templates
+  load ~1.5GB; 512m default OOMed the container before any scan ran). [real_scan.py]
+
+### Verified (real-machine)
+- NAS deployment: end-to-end assessment `asm-9e1059d0b458` ran 9 nuclei steps
+  (6+ min), audit chain complete, **1 finding** (Public Swagger API - Detect,
+  severity info). v0.1.5 produced 0 findings.
+- Data persists across API restart (SECOPTENT_DB_URL + A5 default).
+- `@reboot` auto-start via `start-api.sh` with 3 env vars (DB_URL,
+  NUCLEI_TEMPLATE_DIR, SCAN_TIMEOUT).
+
+### Verified (CI)
+- ruff + mypy clean on all changed source files.
+- 1014 unit tests pass (2 platform skips), 59s.
+
+### Notes
+- Operators must set `SECOPTENT_NUCLEI_TEMPLATE_DIR` (path to the unpacked
+  nuclei-templates dir) and optionally `SECOPTENT_SCAN_TIMEOUT` (default 1800).
+  See docs/deployment/linux.md.
+- `test_runs_nuclei_against_httpbin` (integration) still fails: its single-file
+  fixture hits nuclei 3.11's "no templates provided" rejection. Fixing it needs
+  a directory fixture (tracked separately; needs Docker to validate).
+- The 3 Hermes local patches (template_host_dir injection, nuclei 2g resource,
+  scan_timeout env) are superseded by this release - remove them after upgrade.
+
+
 ## [0.1.5] - 2026-08-03
 
 `Schema: no | Deps: no | Breaking: no` - Linux/NAS deployment hardening pass.

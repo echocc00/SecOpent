@@ -20,6 +20,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Protocol
 
+import structlog
+
 from ..domain.common.canonical import utc_now
 from ..domain.findings.models import Finding
 from ..domain.scope.models import ScopeSnapshot
@@ -29,6 +31,8 @@ from .finding_correlation import FindingCorrelation
 from .jobs import JobService
 from .orchestrator import Orchestrator, StepRunner
 from .ports.repositories import AssessmentRepository, ScopeRepository
+
+_logger = structlog.get_logger(__name__)
 
 
 class _FindingRepository(Protocol):
@@ -89,6 +93,7 @@ def execute_assessment(
             actor="system", action="assessment.started",
             resource_type="assessment", resource_id=assessment_id, payload={},
         )
+        _logger.info("assessment started", assessment_id=assessment_id)
 
         assessment = assessment_repo.get(assessment_id)
         assert assessment is not None and assessment.active_plan_id is not None
@@ -119,7 +124,16 @@ def execute_assessment(
                 "uncovered_classes": list(uncovered),
             },
         )
+        _logger.info(
+            "assessment completed",
+            assessment_id=assessment_id, findings=len(findings),
+            coverage_rate=coverage_rate,
+        )
     except Exception as exc:  # noqa: BLE001 - executor must never leak
+        _logger.warning(
+            "assessment failed", assessment_id=assessment_id,
+            error=str(exc), exc_info=True,
+        )
         with contextlib.suppress(Exception):
             service.fail(assessment_id, str(exc))
         audit.record(

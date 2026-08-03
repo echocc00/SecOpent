@@ -31,6 +31,7 @@ non-retryable FAILED job rather than the worker crashing.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from secopent.application.orchestrator import StepFailure, StepResult
 from secopent.domain.adapters.contracts import Observation
@@ -45,6 +46,11 @@ _TEMPLATE_ADAPTERS = frozenset({"nuclei", "nuclei_tcp"})
 
 # Default container mount point for the rule/template directory.
 _DEFAULT_TEMPLATE_MOUNT = "/templates"
+
+# Adapters whose target is a URL: strip a trailing slash so nuclei/httpx/katana
+# don't produce double-slash paths (http://host:3000/ + /api-docs ->
+# http://host:3000//api-docs). Hosts/IPs (nmap/naabu) are unaffected.
+_URL_ADAPTERS = frozenset({"nuclei", "nuclei_tcp", "httpx", "katana", "dalfox"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +131,9 @@ class AdapterStepRunner:
 
     def _invocation(self, adapter_key: str, target: str) -> tuple[list[str], dict[str, str]]:
         """Map (adapter, target) + context onto tool CLI args and mounts."""
+        # URL adapters: strip trailing slash (see _URL_ADAPTERS rationale).
+        if adapter_key in _URL_ADAPTERS:
+            target = target.rstrip("/")
         # Engagement-wide bind mounts (e.g. the docker socket for cloud scanners)
         # apply to every adapter; adapter-specific mounts are added below.
         mounts: dict[str, str] = {
@@ -133,10 +142,20 @@ class AdapterStepRunner:
         if adapter_key in _TEMPLATE_ADAPTERS:
             args = ["-u", target, "-jsonl", "-silent", "-duc"]
             if self._context.template_host_dir:
-                args = ["-t", f"{self._context.template_container_path}/", *args]
-                mounts[self._context.template_container_path] = (
-                    self._context.template_host_dir
-                )
+                host_path = Path(self._context.template_host_dir)
+                if host_path.is_file():
+                    # Single template file: mount it by name, -t points at the
+                    # file (no trailing slash, which would imply a directory).
+                    file_dest = (
+                        f"{self._context.template_container_path}/{host_path.name}"
+                    )
+                    args = ["-t", file_dest, *args]
+                    mounts[file_dest] = str(host_path)
+                else:
+                    args = ["-t", f"{self._context.template_container_path}/", *args]
+                    mounts[self._context.template_container_path] = (
+                        self._context.template_host_dir
+                    )
             return args, mounts
         if adapter_key == "nmap":
             # XML to stdout so the nmap parser can read it from the stream.

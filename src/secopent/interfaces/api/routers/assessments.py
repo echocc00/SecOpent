@@ -198,9 +198,23 @@ def generate_plan(
 
 def _production_step_runner(scope: ScopeSnapshot) -> AdapterStepRunner:
     """Build the real AdapterStepRunner over RealScanRunner for an engagement."""
+    # nuclei templates: mount the operator-downloaded template dir so scans use
+    # curated templates instead of the built-in set (which needs network to
+    # fetch). Offline/NAS deployments set SECOPTENT_NUCLEI_TEMPLATE_DIR.
+    template_dir = os.environ.get("SECOPTENT_NUCLEI_TEMPLATE_DIR", "").strip()
+    # Full HTTP template set (13k templates) needs 6-10 min on a weak NAS; the
+    # prior 180s cut scans short and even 600s was insufficient. Default 1800s
+    # (30 min) covers it; override via SECOPTENT_SCAN_TIMEOUT for slower hosts.
+    try:
+        scan_timeout = int(os.environ.get("SECOPTENT_SCAN_TIMEOUT", "1800"))
+    except ValueError:
+        scan_timeout = 1800
     return AdapterStepRunner(
-        RealScanRunner(default_timeout=180),
-        ScanContext(targets=scope.include),
+        RealScanRunner(default_timeout=scan_timeout),
+        ScanContext(
+            targets=scope.include,
+            template_host_dir=template_dir or None,
+        ),
     )
 
 
