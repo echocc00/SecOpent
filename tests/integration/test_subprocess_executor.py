@@ -53,11 +53,11 @@ def _mounts(tmp_path: Path) -> dict[str, str]:
 
 
 @pytest.mark.integration
-def test_runs_nuclei_against_httpbin(tmp_path: Path) -> None:
-    templates = tmp_path / "templates"
-    templates.mkdir()
+def test_runs_nuclei_against_httpbin(docker_mount_dir: Path) -> None:
+    templates = docker_mount_dir / "templates"
+    templates.mkdir(exist_ok=True)
     (templates / "httpbin-status.yaml").write_text(_NUCLEI_TEMPLATE, encoding="utf-8")
-    mounts = _mounts(tmp_path)
+    mounts = _mounts(docker_mount_dir)
     mounts["/templates"] = str(templates)
 
     nuclei = IMAGE_CATALOG["nuclei"]
@@ -83,13 +83,13 @@ def test_runs_nuclei_against_httpbin(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_enforces_security_flags_nonroot(tmp_path: Path) -> None:
+def test_enforces_security_flags_nonroot(docker_mount_dir: Path) -> None:
     alpine = IMAGE_CATALOG["alpine"]
     executor = SubprocessContainerExecutor()
     result = executor.run(
         image_digest=f"{alpine.name}@{alpine.digest}",
         command=["id"],
-        mounts=_mounts(tmp_path),
+        mounts=_mounts(docker_mount_dir),
         network_policy="bridge",
         resource_limits={"memory": "64m", "cpus": "0.1"},
     )
@@ -98,21 +98,21 @@ def test_enforces_security_flags_nonroot(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_digest_mismatch_rejected(tmp_path: Path) -> None:
+def test_digest_mismatch_rejected(docker_mount_dir: Path) -> None:
     executor = SubprocessContainerExecutor()
     bad_ref = "alpine@sha256:" + "0" * 64
     with pytest.raises(ImageDigestMismatch):
         executor.run(
             image_digest=bad_ref,
             command=["echo", "should-not-run"],
-            mounts=_mounts(tmp_path),
+            mounts=_mounts(docker_mount_dir),
             network_policy="bridge",
             resource_limits={"memory": "64m", "cpus": "0.1"},
         )
 
 
 @pytest.mark.integration
-def test_scoped_egress_blocks_metadata(tmp_path: Path) -> None:
+def test_scoped_egress_blocks_metadata(docker_mount_dir: Path) -> None:
     """Cloud metadata 169.254.169.254 is not routable from the bridge network.
 
     Docker's bridge does not route link-local (169.254.0.0/16), so the request
@@ -128,7 +128,7 @@ def test_scoped_egress_blocks_metadata(tmp_path: Path) -> None:
             "-c",
             "wget -T 3 -q http://169.254.169.254/ && echo REACHABLE || echo BLOCKED",
         ],
-        mounts=_mounts(tmp_path),
+        mounts=_mounts(docker_mount_dir),
         network_policy="bridge",
         resource_limits={"memory": "64m", "cpus": "0.1"},
     )

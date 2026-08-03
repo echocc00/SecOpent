@@ -95,17 +95,17 @@ class _NullAudit:
         return None
 
 
-def _write_template(tmp_path: Path, body: str) -> str:
-    tpl_dir = tmp_path / "templates"
+def _write_template(base_dir: Path, body: str) -> str:
+    tpl_dir = base_dir / "templates"
     tpl_dir.mkdir(exist_ok=True)
     (tpl_dir / "t.yaml").write_text(body, encoding="utf-8")
     return str(tpl_dir)
 
 
 @pytest.mark.e2e_real
-def test_juice_shop_real_sqli_full_chain(require_target, tmp_path: Path) -> None:
+def test_juice_shop_real_sqli_full_chain(require_target, docker_mount_dir: Path) -> None:
     require_target("juice_shop")
-    tpl_dir = _write_template(tmp_path, JUICE_SQLI_TEMPLATE)
+    tpl_dir = _write_template(docker_mount_dir, JUICE_SQLI_TEMPLATE)
     runner = RealScanRunner(default_timeout=180)
     scan_kwargs = {
         "adapter_key": "nuclei",
@@ -192,9 +192,9 @@ def test_juice_shop_real_sqli_full_chain(require_target, tmp_path: Path) -> None
 
 
 @pytest.mark.e2e_real
-def test_httpbin_real_scan_produces_observations(require_target, tmp_path: Path) -> None:
+def test_httpbin_real_scan_produces_observations(require_target, docker_mount_dir: Path) -> None:
     require_target("httpbin")
-    tpl_dir = _write_template(tmp_path, HTTPBIN_STATUS_TEMPLATE)
+    tpl_dir = _write_template(docker_mount_dir, HTTPBIN_STATUS_TEMPLATE)
     runner = RealScanRunner(default_timeout=180)
     result = runner.scan(
         adapter_key="nuclei",

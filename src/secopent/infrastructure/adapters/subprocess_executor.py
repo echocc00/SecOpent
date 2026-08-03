@@ -41,6 +41,16 @@ class ImageDigestMismatch(DomainError):
     """The image is not present at the pinned digest (supply-chain guard)."""
 
 
+class MountNotVisibleError(DomainError):
+    """A bind-mounted host directory is empty inside the container.
+
+    Raised when the host filesystem backing a mount source is not visible to
+    Docker bind mounts (e.g. tmpfs + overlay on some NAS kernels). The caller
+    should relocate the source directory to a plain filesystem (ext4/btrfs/xfs)
+    and retry.
+    """
+
+
 class SubprocessContainerExecutor:
     """Run digest-pinned tool containers via ``docker run``.
 

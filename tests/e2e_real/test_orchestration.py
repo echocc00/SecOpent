@@ -108,18 +108,18 @@ class _NullAudit:
         return None
 
 
-def _write_template(tmp_path: Path, body: str) -> str:
-    tpl_dir = tmp_path / "templates"
+def _write_template(base_dir: Path, body: str) -> str:
+    tpl_dir = base_dir / "templates"
     tpl_dir.mkdir(exist_ok=True)
     (tpl_dir / "t.yaml").write_text(body, encoding="utf-8")
     return str(tpl_dir)
 
 
 @pytest.mark.e2e_real
-def test_web_orchestration_juice_shop_full_chain(require_target, tmp_path: Path) -> None:
+def test_web_orchestration_juice_shop_full_chain(require_target, docker_mount_dir: Path) -> None:
     """Web domain: Planner -> Orchestrator -> real nuclei -> oracle -> gate -> report."""
     require_target("juice_shop")
-    tpl_dir = _write_template(tmp_path, JUICE_SQLI_TEMPLATE)
+    tpl_dir = _write_template(docker_mount_dir, JUICE_SQLI_TEMPLATE)
 
     # 1. Planner emits a real DAG from the pinned catalog (single required class
     #    so the coverage gate legitimately closes at 100%).
@@ -226,10 +226,10 @@ def test_web_orchestration_juice_shop_full_chain(require_target, tmp_path: Path)
 
 
 @pytest.mark.e2e_real
-def test_api_orchestration_httpbin_full_chain(require_target, tmp_path: Path) -> None:
+def test_api_orchestration_httpbin_full_chain(require_target, docker_mount_dir: Path) -> None:
     """API domain: the same orchestration chain against an API target (httpbin)."""
     require_target("httpbin")
-    tpl_dir = _write_template(tmp_path, HTTPBIN_STATUS_TEMPLATE)
+    tpl_dir = _write_template(docker_mount_dir, HTTPBIN_STATUS_TEMPLATE)
 
     catalog = TestCatalog(
         version="2026.07",
