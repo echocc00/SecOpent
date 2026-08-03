@@ -2,6 +2,8 @@
 """Application tests for PeerAgentService (integration spec §5 P0)."""
 from __future__ import annotations
 
+import pytest
+
 from secopent.application.audit import AuditService
 from secopent.application.peer_agents import (
     PeerAgentService,
@@ -13,9 +15,12 @@ from secopent.domain.peer_agents.models import (
     PeerAgentBudget,
     PeerAgentDescriptor,
     PeerAgentFinding,
+    PeerAgentNotRegistered,
     PeerAgentReport,
     PeerAgentRun,
+    PeerAgentTrustDenied,
     PeerAgentTrustLevel,
+    PeerRunScopeViolation,
     PeerRunStatus,
 )
 from secopent.domain.peer_agents.registry import PeerAgentRegistry
@@ -211,3 +216,178 @@ class TestLaunchHappyPath:
         )
         assert service._runs.get(outcome.run.id) is not None  # noqa: SLF001
         assert harness.executed == [outcome.run.id]
+
+
+class TestLaunchDenials:
+    def test_unregistered_agent_rejected(self) -> None:
+        service = _service(FakeHarness(_report_with_sqli()))
+        with pytest.raises(PeerAgentNotRegistered):
+            service.launch(
+                assessment_id="asmt-1",
+                agent_name="unknown-agent",
+                targets=("http://host.docker.internal:3000",),
+                scope=_scope(),
+                catalog=_catalog(),
+                asset_type=AssetType.WEB_APP,
+                actor="op",
+                permit_id="p",
+            )
+
+    def test_untrusted_agent_rejected(self) -> None:
+        registry = PeerAgentRegistry()
+        registry.register(
+            PeerAgentDescriptor(
+                name="sketchy",
+                version="0.1",
+                license="unknown",
+                trust_level=PeerAgentTrustLevel.UNTRUSTED,
+                capabilities=(),
+                cost_class="llm_tokens",
+                default_budget=PeerAgentBudget(
+                    max_wall_seconds=60, max_cost_units=1
+                ),
+            )
+        )
+        service = PeerAgentService(
+            registry=registry,
+            harness=FakeHarness(_report_with_sqli()),
+            audit=AuditService(repo=_in_memory_audit_repo()),
+            runs=InMemoryPeerRunRepository(),
+        )
+        with pytest.raises(PeerAgentTrustDenied):
+            service.launch(
+                assessment_id="asmt-1",
+                agent_name="sketchy",
+                targets=("http://host.docker.internal:3000",),
+                scope=_scope(),
+                catalog=_catalog(),
+                asset_type=AssetType.WEB_APP,
+                actor="op",
+                permit_id="p",
+            )
+
+    def test_out_of_scope_launch_target_rejected(self) -> None:
+        service = _service(FakeHarness(_report_with_sqli()))
+        with pytest.raises(PeerRunScopeViolation):
+            service.launch(
+                assessment_id="asmt-1",
+                agent_name="strix",
+                targets=("http://evil.example.com",),
+                scope=_scope(),
+                catalog=_catalog(),
+                asset_type=AssetType.WEB_APP,
+                actor="op",
+                permit_id="p",
+            )
+
+
+class TestFindingGates:
+    def test_out_of_scope_finding_rejected_not_normalized(self) -> None:
+        foreign = PeerAgentReport(
+            run_id="run-1",
+            findings=(
+                PeerAgentFinding(
+                    id="f-9",
+                    run_id="run-1",
+                    agent_name="strix",
+                    title="SQLi",
+                    asset="http://evil.example.com",
+                    severity_hint="high",
+                    cwe=("CWE-89",),
+                ),
+            ),
+            wall_seconds=1.0,
+            cost_units=0.1,
+            exit_code=0,
+        )
+        outcome = _service(FakeHarness(foreign)).launch(
+            assessment_id="asmt-1",
+            agent_name="strix",
+            targets=("http://host.docker.internal:3000",),
+            scope=_scope(),
+            catalog=_catalog(),
+            asset_type=AssetType.WEB_APP,
+            actor="op",
+            permit_id="p",
+        )
+        assert outcome.observations == ()
+        assert len(outcome.rejected) == 1
+        assert outcome.rejected[0].reason.value == "out_of_scope"
+
+    def test_off_catalog_finding_rejected(self) -> None:
+        noise = PeerAgentReport(
+            run_id="run-1",
+            findings=(
+                PeerAgentFinding(
+                    id="f-8",
+                    run_id="run-1",
+                    agent_name="strix",
+                    title="info leak",
+                    asset="http://host.docker.internal:3000",
+                    severity_hint="info",
+                    cwe=("CWE-200",),
+                    owasp=(),
+                ),
+            ),
+            wall_seconds=1.0,
+            cost_units=0.1,
+            exit_code=0,
+        )
+        outcome = _service(FakeHarness(noise)).launch(
+            assessment_id="asmt-1",
+            agent_name="strix",
+            targets=("http://host.docker.internal:3000",),
+            scope=_scope(),
+            catalog=_catalog(),
+            asset_type=AssetType.WEB_APP,
+            actor="op",
+            permit_id="p",
+        )
+        assert outcome.observations == ()
+        assert outcome.rejected[0].reason.value == "out_of_catalog"
+
+    def test_budget_exceed_marks_status_but_keeps_findings(self) -> None:
+        over = PeerAgentReport(
+            run_id="run-1",
+            findings=_report_with_sqli().findings,
+            wall_seconds=10_000.0,
+            cost_units=0.0,
+            exit_code=0,
+        )
+        outcome = _service(FakeHarness(over)).launch(
+            assessment_id="asmt-1",
+            agent_name="strix",
+            targets=("http://host.docker.internal:3000",),
+            scope=_scope(),
+            catalog=_catalog(),
+            asset_type=AssetType.WEB_APP,
+            actor="op",
+            permit_id="p",
+        )
+        assert outcome.run.status is PeerRunStatus.BUDGET_EXCEEDED
+        assert len(outcome.observations) == 1  # evidence preserved
+
+
+class TestStop:
+    def test_stop_terminates_and_records(self) -> None:
+        harness = FakeHarness(_report_with_sqli())
+        service = _service(harness)
+        outcome = service.launch(
+            assessment_id="asmt-1",
+            agent_name="strix",
+            targets=("http://host.docker.internal:3000",),
+            scope=_scope(),
+            catalog=_catalog(),
+            asset_type=AssetType.WEB_APP,
+            actor="op",
+            permit_id="p",
+        )
+        assert (
+            service.stop(run_id=outcome.run.id, actor="op", reason="emergency")
+            is True
+        )
+        assert harness.terminated == [outcome.run.id]
+
+    def test_stop_unknown_run_returns_false(self) -> None:
+        service = _service(FakeHarness(_report_with_sqli()))
+        assert service.stop(run_id="nope", actor="op", reason="x") is False
