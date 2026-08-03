@@ -12,7 +12,9 @@ from secopent.infrastructure.peer_agents.strix_report import (
     parse_vulnerabilities_json,
 )
 
-FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "peer_reports" / "strix_vulnerabilities.json"
+FIXTURE = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "peer_reports" / "strix_vulnerabilities.json"
+)
 
 
 class TestNormalizeCwe:

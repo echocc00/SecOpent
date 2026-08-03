@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from secopent.domain.peer_agents.models import (
-    PeerAgentBudget, PeerAgentDescriptor, PeerAgentRun, PeerAgentTrustLevel,
+    PeerAgentBudget,
+    PeerAgentDescriptor,
+    PeerAgentRun,
+    PeerAgentTrustLevel,
 )
 from secopent.infrastructure.adapters.base import ContainerResult
 from secopent.infrastructure.peer_agents.strix_backend import StrixBackend

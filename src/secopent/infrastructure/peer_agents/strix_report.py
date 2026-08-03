@@ -60,7 +60,7 @@ def parse_vulnerabilities_json(
     run_id: str,
     agent: str,
     with_problems: bool = False,
-):
+) -> tuple[PeerAgentFinding, ...] | tuple[tuple[PeerAgentFinding, ...], int]:
     try:
         data = json.loads(content)
     except json.JSONDecodeError as exc:

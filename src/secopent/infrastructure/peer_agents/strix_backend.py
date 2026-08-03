@@ -12,11 +12,12 @@ pulls them from the injected secret_lookup at invocation time.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from ...domain.peer_agents.models import (
     PeerAgentDescriptor,
+    PeerAgentFinding,
     PeerAgentReport,
     PeerAgentRun,
 )
@@ -82,9 +83,9 @@ class StrixBackend:
     ) -> PeerAgentReport:
         out_dir = workdir / "exchange" / "out"
         vuln_path = out_dir / "vulnerabilities.json"
-        findings: tuple = ()
+        findings: tuple[PeerAgentFinding, ...] = ()
         if vuln_path.exists():
-            findings = parse_vulnerabilities_json(
+            findings = parse_vulnerabilities_json(  # type: ignore[assignment]
                 vuln_path.read_text(encoding="utf-8"),
                 run_id=self._run_id_from_input(workdir),
                 agent="strix",
@@ -116,4 +117,4 @@ class StrixBackend:
             return 0.0
         usage = data.get("llm_usage") or {}
         value = usage.get("total_cost_usd", 0.0)
-        return float(value) if isinstance(value, (int, float)) else 0.0
+        return float(value) if isinstance(value, int | float) else 0.0
