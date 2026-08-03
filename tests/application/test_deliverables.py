@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from secopent.application.deliverables import (
-    DeliverableValidationError,
     DeliverablesLayout,
+    DeliverableValidationError,
     read_deliverable,
     validate_layout,
     write_deliverable,
@@ -18,7 +18,8 @@ from secopent.application.deliverables import (
 class TestLayout:
     def test_phase_paths_are_deterministic(self, tmp_path: Path) -> None:
         layout = DeliverablesLayout(root=tmp_path)
-        assert layout.deliverable_path("recon") == tmp_path / "deliverables" / "recon_deliverable.md"
+        expected = tmp_path / "deliverables" / "recon_deliverable.md"
+        assert layout.deliverable_path("recon") == expected
         assert layout.scratchpad_dir() == tmp_path / "scratchpad"
 
     def test_write_then_read_roundtrip(self, tmp_path: Path) -> None:
