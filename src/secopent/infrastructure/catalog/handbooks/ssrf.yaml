@@ -1,0 +1,30 @@
+id: ssrf
+title: Server-Side Request Forgery
+cwe: ["CWE-918"]
+owasp: ["A10:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/ssrf.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "Outbound HTTP/HTTPS fetchers (proxies, previewers, importers, webhook testers)"
+  - "Non-HTTP protocol handlers (gopher, dict, file, ftp, smb wrappers)"
+  - "Cloud and platform metadata endpoints (AWS IMDS, GCP metadata, Azure IMDS)"
+  - "Service-to-service hops through gateways and sidecars"
+  - "Indirect sources: OG/link previews, PDF/image renderers, analytics trackers"
+recon_endpoints:
+  - "/proxy?url="
+  - "/fetch?link="
+  - "/webhook?url="
+  - "/avatar?src="
+  - "/image?url="
+  - "/import?source="
+payload_classes:
+  - name: "internal-network"
+    description: "requests to RFC1918 / loopback addresses"
+  - name: "cloud-metadata"
+    description: "IMDS / metadata service endpoints for credential disclosure"
+  - name: "protocol-smuggling"
+    description: "gopher/dict/file schemes to reach non-HTTP services"
+  - name: "redirect-abuse"
+    description: "open redirects chained to internal targets"
+verification_hint: "oob-callback"

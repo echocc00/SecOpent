@@ -1,0 +1,30 @@
+id: idor
+title: Insecure Direct Object Reference (BOLA)
+cwe: ["CWE-639"]
+owasp: ["A01:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/idor.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "Object references (IDs, UUIDs, slugs) in paths, query params, bodies, headers, cookies"
+  - "Horizontal access: swapping IDs to reach another subject's same-type objects"
+  - "Vertical access: lower-privilege tokens accessing admin/staff-only resources"
+  - "Cross-tenant boundary violations via org/tenant ID manipulation"
+  - "Expansion/projection knobs (fields, include, expand) bypassing resolver-level auth"
+recon_endpoints:
+  - "/api/users/{id}/profile"
+  - "/api/orders/{id}"
+  - "/api/documents/{id}/download"
+  - "/graphql (node/user queries)"
+  - "/export/{jobId}"
+  - "/files/{objectId}"
+payload_classes:
+  - name: "horizontal-swap"
+    description: "replace own object ID with another user's to read/modify"
+  - name: "batch-bypass"
+    description: "bulk/batch endpoints validating only first element"
+  - name: "secondary-idor"
+    description: "harvest IDs from list/search/export then fetch directly"
+  - name: "multi-tenant-cross"
+    description: "mix token org with resource from another org"
+verification_hint: "diff-reproduce"

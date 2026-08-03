@@ -1,0 +1,28 @@
+id: http-request-smuggling
+title: HTTP Request Smuggling
+cwe: ["CWE-444"]
+owasp: ["A03:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/http_request_smuggling.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "Front-end/back-end parser disagreement on Content-Length vs Transfer-Encoding"
+  - "HTTP/2 to HTTP/1.1 downgrade injecting conflicting content-length or TE headers"
+  - "CDN/load-balancer/reverse-proxy chains with inconsistent header normalization"
+  - "Duplicate or obfuscated Transfer-Encoding values (xchunked, tab/space prefix, duplicate headers)"
+  - "Connection reuse amplifying socket poisoning across users"
+recon_endpoints:
+  - "/search (reflective endpoint for capture)"
+  - "/admin (front-end restricted, back-end accessible via smuggle)"
+  - "/api/* (shared high-traffic endpoints)"
+  - "/login (auth callback for session hijack)"
+payload_classes:
+  - name: "cl-te"
+    description: "front-end uses Content-Length, back-end uses Transfer-Encoding"
+  - name: "te-cl"
+    description: "front-end uses Transfer-Encoding, back-end uses Content-Length"
+  - name: "h2-cl"
+    description: "HTTP/2 downgrade injects conflicting Content-Length to HTTP/1.1 back-end"
+  - name: "response-queue-poison"
+    description: "misaligned responses delivered to wrong user on pipelined connections"
+verification_hint: "time-delay"

@@ -78,7 +78,7 @@ class HandbookRegistry:
         self._by_id = {h.id: h for h in handbooks}
 
     @classmethod
-    def load(cls, directory: Path) -> "HandbookRegistry":
+    def load(cls, directory: Path) -> HandbookRegistry:
         handbooks: list[Handbook] = []
         for path in sorted(Path(directory).glob("*.yaml")):
             data = yaml.safe_load(path.read_text(encoding="utf-8"))

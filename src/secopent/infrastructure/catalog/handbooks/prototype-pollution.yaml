@@ -1,0 +1,29 @@
+id: prototype-pollution
+title: Prototype Pollution
+cwe: ["CWE-1321"]
+owasp: ["A03:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/prototype_pollution.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "Deep merge/extend of user-controlled JSON into objects (lodash.merge, jQuery.extend, custom assign loops)"
+  - "Query parsers accepting nested bracket notation (__proto__[key]=value)"
+  - "Server-side config merges and template engine option objects"
+  - "Client-side state hydration and analytics SDK config merges"
+  - "YAML load (not safeLoad) preserving __proto__/constructor keys"
+recon_endpoints:
+  - "/api/settings"
+  - "/api/config"
+  - "/merge?__proto__[key]=value"
+  - "/import (JSON body)"
+  - "/graphql (variables merge)"
+payload_classes:
+  - name: "proto-key-injection"
+    description: "__proto__ or constructor.prototype keys polluting shared prototypes"
+  - name: "client-gadget"
+    description: "polluted properties consumed by DOM sinks (innerHTML, script loaders)"
+  - name: "server-rce-gadget"
+    description: "Node.js child_process/template-engine sinks (shell, NODE_OPTIONS, outputFunctionName)"
+  - name: "filter-bypass"
+    description: "unicode normalization, array notation, constructor.prototype variants"
+verification_hint: "diff-reproduce"

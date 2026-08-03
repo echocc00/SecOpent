@@ -1,0 +1,31 @@
+id: path-traversal
+title: Path Traversal / LFI / RFI
+cwe: ["CWE-22", "CWE-98"]
+owasp: ["A01:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/path_traversal_lfi_rfi.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "User-influenced file paths joined without canonicalization or allowlist"
+  - "Dynamic include/require/template resolution from request parameters"
+  - "Archive extraction (zip/tar/7z) writing outside target directory (Zip Slip)"
+  - "Normalization mismatches between proxy and backend (nginx alias/root, upstream decoders)"
+  - "OS-specific path quirks: Windows separators, device names, UNC, alternate data streams"
+recon_endpoints:
+  - "/download?file="
+  - "/view?path="
+  - "/template?name="
+  - "/include?page="
+  - "/export?report="
+  - "/log?dir="
+  - "/theme?lang="
+payload_classes:
+  - name: "dot-dot-slash"
+    description: "../ sequences with encoding variants (%2e%2e%2f, double-encode, UTF-8 overlong)"
+  - name: "absolute-path-injection"
+    description: "rooted paths bypassing join logic (/etc/passwd, C:\\Windows\\win.ini)"
+  - name: "wrapper-abuse"
+    description: "php://filter, zip://, data://, expect:// stream wrappers"
+  - name: "archive-extraction"
+    description: "Zip Slip via ../ entries in uploaded archives"
+verification_hint: "echo-reproduce"

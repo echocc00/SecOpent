@@ -1,0 +1,31 @@
+id: authentication-jwt
+title: Authentication / JWT / OIDC
+cwe: ["CWE-287", "CWE-347"]
+owasp: ["A07:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/authentication_jwt.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "JWT signature verification accepting algorithm confusion (RS256->HS256) or 'none' algorithm"
+  - "Header manipulation: kid injection, jku/x5u/jwk pointing to attacker-controlled keys"
+  - "Claims validation gaps: iss/aud/azp/exp not enforced, token confusion (ID vs access)"
+  - "JWKS caching and key rollover races accepting retired or cross-tenant keys"
+  - "OIDC flow weaknesses: PKCE downgrade, state/nonce absence, redirect_uri poisoning"
+recon_endpoints:
+  - "/.well-known/openid-configuration"
+  - "/jwks.json"
+  - "/oauth2/token"
+  - "/authorize"
+  - "/callback"
+  - "/refresh"
+  - "/me"
+payload_classes:
+  - name: "algorithm-confusion"
+    description: "RS256->HS256 or alg=none to forge signatures"
+  - name: "header-key-control"
+    description: "kid/jku/x5u/jwk injection to select attacker-controlled keys"
+  - name: "token-confusion"
+    description: "ID token accepted as access token or cross-service reuse"
+  - name: "claims-manipulation"
+    description: "scope/role inflation when signature checks are weak"
+verification_hint: "diff-reproduce"

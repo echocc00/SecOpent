@@ -1,0 +1,29 @@
+id: insecure-deserialization
+title: Insecure Deserialization
+cwe: ["CWE-502"]
+owasp: ["A08:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/insecure_deserialization.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "Language-native unmarshal on attacker-controlled byte streams (pickle, unserialize, BinaryFormatter, Marshal.load)"
+  - "Session tokens, cookies, and hidden form fields carrying serialized objects"
+  - "API parameters accepting base64-encoded object blobs"
+  - "Message queues and WebSocket binary frames deserializing untrusted payloads"
+  - "Cache entries and database columns storing serialized state"
+recon_endpoints:
+  - "/session"
+  - "/api/state"
+  - "/login (cookie-based sessions)"
+  - "/import?data="
+  - "/upload (binary object payloads)"
+payload_classes:
+  - name: "gadget-chain"
+    description: "class-path-dependent chains (CommonsCollections, Spring, Laravel POP)"
+  - name: "type-confusion"
+    description: "JSON/YAML type-tag injection selecting dangerous classes"
+  - name: "signed-blob-bypass"
+    description: "HMAC weakness or algorithm confusion enabling forged payloads"
+  - name: "second-order"
+    description: "stored blob triggered later by admin export or batch job"
+verification_hint: "oob-callback"

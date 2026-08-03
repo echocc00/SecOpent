@@ -1,0 +1,30 @@
+id: race-conditions
+title: Race Conditions
+cwe: ["CWE-362", "CWE-367"]
+owasp: ["A04:2021"]
+provenance:
+  derived_from: "usestrix/strix skills/vulnerabilities/race_conditions.md"
+  license: "Apache-2.0"
+attack_surface:
+  - "Read-modify-write sequences without atomicity or locking"
+  - "Multi-step check-then-act workflows (balance check then deduct, coupon verify then apply)"
+  - "Cross-service sagas and async jobs with eventual consistency gaps"
+  - "Rate limits and quotas enforced at the edge only, not atomically in storage"
+  - "Idempotency keys with inadequate scope or cache-before-commit windows"
+recon_endpoints:
+  - "/payment/auth"
+  - "/coupon/redeem"
+  - "/inventory/reserve"
+  - "/password/reset"
+  - "/otp/verify"
+  - "/upload/finalize"
+payload_classes:
+  - name: "double-spend"
+    description: "parallel requests consuming single-use resources (credits, coupons, tokens)"
+  - name: "lost-update"
+    description: "read-modify-write increments without atomic DB statements"
+  - name: "idempotency-bypass"
+    description: "reusing keys across principals or hitting before store commit"
+  - name: "cross-service-gap"
+    description: "acting in Service B before Service A's write is visible"
+verification_hint: "diff-reproduce"
