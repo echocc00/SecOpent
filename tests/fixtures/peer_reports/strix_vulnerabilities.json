@@ -1,0 +1,52 @@
+[
+  {
+    "title": "SQL Injection in login endpoint",
+    "description": "The /rest/login endpoint is vulnerable to SQL injection via the email parameter.",
+    "impact": "An attacker can bypass authentication or extract database contents.",
+    "target": "http://host.docker.internal:3000/rest/login",
+    "technical_analysis": "The email field is concatenated into a SQL query without parameterization.",
+    "poc_description": "Send POST to /rest/login with email=admin' OR '1'='1 and any password to bypass authentication.",
+    "poc_script_code": "curl -X POST http://host.docker.internal:3000/rest/login -d \"email=admin' OR '1'='1&password=x\"",
+    "remediation_steps": "Use parameterized queries or an ORM. Validate and sanitize all user inputs.",
+    "evidence": "HTTP 200 with admin token returned for invalid credentials.",
+    "assumptions": "Backend uses SQLite or MySQL with string concatenation.",
+    "severity": "high",
+    "cwe": "CWE-89",
+    "cve": null,
+    "cvss_breakdown": {"attack_vector": "network", "complexity": "low"},
+    "agent_name": "strix"
+  },
+  {
+    "title": "Server-Side Request Forgery in profile image upload",
+    "description": "The profile image URL parameter allows arbitrary internal HTTP requests.",
+    "impact": "Attacker can access internal services and metadata endpoints.",
+    "target": "http://host.docker.internal:3000/profile/image",
+    "technical_analysis": "URL parameter is fetched server-side without allowlist validation.",
+    "poc_description": "Set image URL to http://169.254.169.254/latest/meta-data/ to reach cloud metadata.",
+    "poc_script_code": "curl -X POST http://host.docker.internal:3000/profile/image -d 'url=http://169.254.169.254/'",
+    "remediation_steps": "Allowlist permitted domains. Block private IP ranges and link-local addresses.",
+    "evidence": "Response body contains cloud instance metadata JSON.",
+    "assumptions": "Application runs in a cloud environment with metadata service available.",
+    "severity": "critical",
+    "cwe": "cwe: 918",
+    "cve": "CVE-2024-99999",
+    "cvss_breakdown": {"attack_vector": "network", "complexity": "low"},
+    "agent_name": "strix"
+  },
+  {
+    "title": "Information disclosure via debug endpoint",
+    "description": "The /debug/config endpoint exposes internal configuration including database credentials.",
+    "impact": "Sensitive configuration data leaked to unauthenticated users.",
+    "target": "http://host.docker.internal:3000/debug/config",
+    "technical_analysis": "Debug endpoint left enabled in production build.",
+    "poc_description": "GET /debug/config returns JSON with DB connection strings and API keys.",
+    "poc_script_code": "curl http://host.docker.internal:3000/debug/config",
+    "remediation_steps": "Disable debug endpoints in production. Use environment-specific configs.",
+    "evidence": "JSON response includes db_password and api_key fields.",
+    "assumptions": "Endpoint is accessible without authentication.",
+    "severity": "info",
+    "cve": null,
+    "cvss_breakdown": {},
+    "agent_name": "strix"
+  }
+]
