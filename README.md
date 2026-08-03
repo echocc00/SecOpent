@@ -37,7 +37,7 @@ Environment prep (Docker, tool images, target ranges, Interactsh OOB, LLM key): 
 
 ## Reference docs
 
-- [Core boundaries](docs/architecture/core-boundaries.md) · [Knowledge layer](docs/architecture/knowledge-layer.md) · [Verification / oracle](docs/architecture/verification.md) · [Peer agents](docs/architecture/peer-agents.md)
+- [Core boundaries](docs/architecture/core-boundaries.md) · [Knowledge layer](docs/architecture/knowledge-layer.md) · [Verification / oracle](docs/architecture/verification.md) · [Peer agents](docs/architecture/peer-agents.md) · [Attack chain](docs/architecture/attack-chain.md)
 - [Adapter pack (four domains)](docs/adapters/README.md) · [Subprocess executor](docs/architecture/subprocess-executor.md)
 - [AppModel schema](docs/appmodel/schema.md) · [Model-driven logic](docs/architecture/model-driven-logic.md) · [Web Case Studio](docs/web/case-studio.md)
 - [YAML case DSL](docs/cases/yaml-dsl.md) · [Interfaces (MCP/CLI/API/Web)](docs/architecture/interfaces.md) · [API (OpenAPI)](docs/api/openapi.yaml)
