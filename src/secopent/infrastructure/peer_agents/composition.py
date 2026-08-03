@@ -23,7 +23,7 @@ from ...domain.peer_agents.models import (
 )
 from ...domain.peer_agents.registry import PeerAgentRegistry
 from ..adapters.subprocess_executor import SubprocessContainerExecutor
-from .harness import ContainerPeerAgentHarness
+from .harness import ContainerPeerAgentHarness, PeerAgentBackend
 from .image_catalog import PEER_IMAGE_CATALOG
 from .shannon_backend import ShannonBackend
 from .strix_backend import StrixBackend
@@ -91,7 +91,7 @@ def create_peer_agent_service(
     registry = PeerAgentRegistry()
     registry.register(strix_descriptor())
 
-    backends: dict[str, object] = {
+    backends: dict[str, PeerAgentBackend] = {
         "strix": StrixBackend(
             llm_provider=llm_provider,
             secret_lookup=secret_lookup,

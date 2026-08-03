@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ...domain.peer_agents.models import (
     PeerAgentDescriptor,
+    PeerAgentFinding,
     PeerAgentReport,
     PeerAgentRun,
 )
@@ -70,7 +71,7 @@ class ShannonBackend:
         self, result: ContainerResult, workdir: Path
     ) -> PeerAgentReport:
         deliverables = Path(workdir) / "repo-copy" / ".shannon" / "deliverables"
-        findings: list = []
+        findings: list[PeerAgentFinding] = []
         problems = 0
         if deliverables.exists():
             for md_file in sorted(deliverables.glob("*.md")):

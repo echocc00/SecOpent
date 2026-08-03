@@ -2,13 +2,13 @@
 """ShannonBackend: invocation + repo working-copy isolation (P3 Task 2)."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
-
 from secopent.domain.peer_agents.models import (
-    PeerAgentBudget, PeerAgentDescriptor, PeerAgentRun, PeerAgentTrustLevel,
+    PeerAgentBudget,
+    PeerAgentDescriptor,
+    PeerAgentRun,
+    PeerAgentTrustLevel,
 )
 from secopent.infrastructure.adapters.base import ContainerResult
 from secopent.infrastructure.peer_agents.shannon_backend import ShannonBackend
@@ -99,6 +99,8 @@ class TestParseReport:
         backend = ShannonBackend(
             repo_path=tmp_path, llm_key_name="K", secret_lookup={"K": "v"},
         )
-        result = ContainerResult(stdout="", stderr="", exit_code=1, artifacts_dir=work / "repo-copy")
+        result = ContainerResult(
+            stdout="", stderr="", exit_code=1, artifacts_dir=work / "repo-copy",
+        )
         report = backend.parse_report(result, work)
         assert report.findings == ()

@@ -62,7 +62,7 @@ def _split_blocks(text: str) -> tuple[str, ...]:
     if not positions:
         return (text,)
     blocks: list[str] = []
-    for start, end in zip(positions, positions[1:] + [len(text)]):
+    for start, end in zip(positions, positions[1:] + [len(text)], strict=False):
         chunk = text[start:end].strip()
         if chunk:
             blocks.append(chunk)
