@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from secopent.application.preflight import (
-    AuthDriver,
     PreflightOutcome,
     PreflightService,
 )
