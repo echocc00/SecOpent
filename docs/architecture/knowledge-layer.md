@@ -18,6 +18,7 @@
 |   +- Tool Registry（工具 manifest/schema/parser）
 |   +- LogicTestGenerator 策略库（测试生成算法）
 |   +- VerificationMethodRegistry（漏洞类型 -> 验证方法）
+|   +- 攻击手册（Handbooks）——结构化攻击知识（attack_surface / recon_endpoints / payload_classes / verification_hint）；来源：Strix skills（Apache-2.0，见 LICENSE-THIRD-PARTY.md）；消费方：planner 上下文、case 编写、P2b 链模板；治理：HandbookRegistry schema 校验 + provenance 必填
 +-- 社区/用户子层（Community）
 |   +- Custom POC Registry（签名、审核、版本化）
 |   +- AppModel Registry（per-app，用户签名）
@@ -43,6 +44,7 @@
 | NVD | nvd.nist.gov（国内代理） | REST 增量 | 6-12h | 公共 | NIST |
 | CWE / GHSA | mitre / github | 下载/git | 每月/每日 | 公共/CC-BY | 上游 |
 | TestCatalog / CoverageMatrix 映射 | 产品策展 | 内部 | 月评审 | 产品 IP | 产品+社区 |
+| Handbooks（攻击手册） | usestrix/strix skills | 人工转译 | 季评审 | Apache-2.0（归属见 LICENSE-THIRD-PARTY.md） | 产品策展（Strix 上游著述原始素材） |
 
 开源分层（决策 O4=B）：**聚合层 + CoverageMatrix** MIT 开源；**TestCatalog / AppModel / OracleEngine** 为产品 IP。
 
