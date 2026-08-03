@@ -15,6 +15,11 @@ from secopent.domain.peer_agents.models import (
     PeerRunStatus,
     RejectionReason,
 )
+from secopent.domain.peer_agents.registry import (
+    PeerAgentAlreadyRegistered,
+    PeerAgentRegistry,
+    default_registry,
+)
 
 
 def _budget() -> PeerAgentBudget:
@@ -122,3 +127,28 @@ class TestEnums:
         assert {r.value for r in RejectionReason} == {
             "out_of_scope", "out_of_catalog", "parse_error",
         }
+
+
+class TestPeerAgentRegistry:
+    def test_default_registry_is_empty(self) -> None:
+        assert default_registry().all() == ()
+
+    def test_register_then_get(self) -> None:
+        registry = PeerAgentRegistry()
+        descriptor = _descriptor()
+        registry.register(descriptor)
+        assert registry.get("strix") == descriptor
+
+    def test_get_unknown_returns_none(self) -> None:
+        assert PeerAgentRegistry().get("nope") is None
+
+    def test_duplicate_registration_rejected(self) -> None:
+        registry = PeerAgentRegistry()
+        registry.register(_descriptor())
+        with pytest.raises(PeerAgentAlreadyRegistered):
+            registry.register(_descriptor())
+
+    def test_all_returns_registered_descriptors(self) -> None:
+        registry = PeerAgentRegistry()
+        registry.register(_descriptor())
+        assert len(registry.all()) == 1
