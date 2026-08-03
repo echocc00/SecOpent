@@ -11,6 +11,7 @@ from __future__ import annotations
 from ..adapters.image_catalog import ImageRef
 
 PEER_IMAGE_CATALOG: dict[str, ImageRef] = {
-    # P2: "strix": ImageRef("usestrix/strix", "<tag>", ""),
+    # Digest pinned after first build; verify with `docker images --digests`.
+    "strix": ImageRef("secopent/peer-worker-strix", "1.4.1", ""),
     # P3: "shannon": ImageRef("keygraph/shannon", "<tag>", ""),
 }
