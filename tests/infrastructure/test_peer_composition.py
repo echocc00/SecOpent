@@ -61,12 +61,13 @@ class TestCreatePeerAgentService:
 
     def test_unregistered_agent_raises(self, tmp_path: Path) -> None:
         """Launching an unknown agent name raises PeerAgentNotRegistered."""
-        from secopent.domain.catalog.models import AssetType, TestCatalog
-        from secopent.domain.peer_agents.models import PeerAgentNotRegistered
-        from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
         from datetime import UTC, datetime
 
         import pytest
+
+        from secopent.domain.catalog.models import AssetType, TestCatalog
+        from secopent.domain.peer_agents.models import PeerAgentNotRegistered
+        from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
 
         service = self._make_service(tmp_path)
         scope = ScopeSnapshot(
