@@ -42,6 +42,7 @@ Environment prep (Docker, tool images, target ranges, Interactsh OOB, LLM key): 
 - [AppModel schema](docs/appmodel/schema.md) · [Model-driven logic](docs/architecture/model-driven-logic.md) · [Web Case Studio](docs/web/case-studio.md)
 - [YAML case DSL](docs/cases/yaml-dsl.md) · [Interfaces (MCP/CLI/API/Web)](docs/architecture/interfaces.md) · [API (OpenAPI)](docs/api/openapi.yaml)
 - [STRIDE threat model](docs/security/threat-model.md)
+- [Checkpoint / Preflight / Deliverables](docs/architecture/checkpoint-preflight.md)
 
 ## Milestones
 
