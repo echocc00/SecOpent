@@ -66,7 +66,7 @@ def test_runs_nuclei_against_httpbin(tmp_path: Path) -> None:
         image_digest=f"{nuclei.name}@{nuclei.digest}",
         command=[
             "-t",
-            "/templates/httpbin-status.yaml",
+            "/templates/",
             "-u",
             "http://host.docker.internal:8080",
             "-jsonl",

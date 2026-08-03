@@ -177,7 +177,7 @@ def test_web_orchestration_juice_shop_full_chain(require_target, tmp_path: Path)
                 "adapter_key": "nuclei",
                 "args": [
                     "-t",
-                    "/templates/t.yaml",
+                    "/templates/",
                     "-u",
                     _JUICE_CONTAINER_URL,
                     "-jsonl",

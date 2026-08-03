@@ -13,7 +13,7 @@ Example::
     runner = RealScanRunner()
     result = runner.scan(
         "nuclei",
-        args=["-t", "/templates/t.yaml", "-u", "http://host.docker.internal:3000",
+        args=["-t", "/templates/", "-u", "http://host.docker.internal:3000",
               "-jsonl", "-silent", "-duc"],
         mounts={"/templates": host_template_dir},
     )

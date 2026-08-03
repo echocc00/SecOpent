@@ -111,7 +111,7 @@ def test_juice_shop_real_sqli_full_chain(require_target, tmp_path: Path) -> None
         "adapter_key": "nuclei",
         "args": [
             "-t",
-            "/templates/t.yaml",
+            "/templates/",
             "-u",
             "http://host.docker.internal:3000",
             "-jsonl",
@@ -200,7 +200,7 @@ def test_httpbin_real_scan_produces_observations(require_target, tmp_path: Path)
         adapter_key="nuclei",
         args=[
             "-t",
-            "/templates/t.yaml",
+            "/templates/",
             "-u",
             "http://host.docker.internal:8080",
             "-jsonl",
