@@ -25,8 +25,12 @@ def _docker_available() -> bool:
 
 
 def _target_up(url: str) -> bool:
+    # Force direct connection: urllib respects HTTP_PROXY by default, which
+    # would route localhost traffic through a proxy that can't reach it,
+    # causing false "target down" and silent test skipping.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(url, timeout=5) as resp:
+        with opener.open(url, timeout=5) as resp:
             return resp.status == 200
     except Exception:  # noqa: BLE001 - any failure means the target is down
         return False

@@ -94,6 +94,56 @@ def check_interactsh() -> dict:
         return {"pass": False, "reason": str(exc)[:80]}
 
 
+def check_filesystem() -> dict:
+    """Check whether /tmp (pytest tmp_path) is on a filesystem Docker can bind-mount.
+
+    On NAS appliances where /tmp is tmpfs with overlay subvolumes, Docker bind
+    mounts from those paths appear empty inside containers. This check warns
+    early so the user knows integration tests may need docker_mount_dir fallback.
+    """
+    import platform
+    if platform.system() != "Linux":
+        return {"pass": True, "note": "non-Linux; bind-mount safety assumed"}
+    try:
+        mounts = Path("/proc/mounts").read_text()
+    except OSError:
+        return {"pass": True, "note": "/proc/mounts unreadable; assuming safe"}
+    import tempfile
+    tmp = str(Path(tempfile.gettempdir()).resolve())
+    best_match = ""
+    best_fs = ""
+    for line in mounts.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mount_point, fs_type = parts[1], parts[2]
+        if tmp.startswith(mount_point) and len(mount_point) > len(best_match):
+            best_match = mount_point
+            best_fs = fs_type
+    if best_fs in ("tmpfs", "overlay"):
+        return {"pass": True, "warning": True,
+                "note": f"/tmp is {best_fs}; docker_mount_dir fixture will use /var/tmp fallback"}
+    return {"pass": True, "fs_type": best_fs or "unknown"}
+
+
+def check_host_gateway() -> dict:
+    """Verify host.docker.internal resolves inside a container.
+
+    The executor adds --add-host host.docker.internal:host-gateway, but this
+    check confirms the mechanism actually works on this Docker setup.
+    """
+    rc, out, err = run(
+        ["docker", "run", "--rm", "--add-host", "host.docker.internal:host-gateway",
+         "library/alpine:latest", "ping", "-c", "1", "-W", "2", "host.docker.internal"],
+        timeout=30,
+    )
+    if rc == 127:
+        return {"pass": False, "reason": "alpine image not available locally"}
+    if rc == 124:
+        return {"pass": False, "reason": "ping timed out (host-gateway not routable?)"}
+    return {"pass": rc == 0, "note": out.strip()[:80] if rc == 0 else err.strip()[:80]}
+
+
 def check_llm() -> dict:
     # Check config exists + API key env var set (skip actual call if no key)
     llm_yaml = REPO_ROOT / "config" / "llm.yaml"
@@ -124,6 +174,8 @@ def main() -> int:
         "images": check_images(),
         "targets": check_targets(),
         "interactsh": check_interactsh(),
+        "filesystem": check_filesystem(),
+        "host_gateway": check_host_gateway(),
         "llm": check_llm(),
     }
     all_pass = all(c.get("pass", False) for c in checks.values())

@@ -45,5 +45,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Run DB migrations on every start, then serve. The alembic.ini + alembic/
 # dir are copied with src/; SECOPTENT_DB_URL (set at runtime) selects the DB.
 # Migrations are idempotent (alembic stamps the current revision), so re-running
-# on an up-to-date DB is a no-op.
-CMD ["sh", "-c", "alembic upgrade head && exec python3 -m uvicorn secopent.interfaces.api.main:create_app --factory --host 0.0.0.0 --port 8000"]
+# on an up-to-date DB is a no-op. A 60s timeout prevents infinite hang when the
+# DB is locked by a stale process (avoids restart loops).
+CMD ["sh", "-c", "timeout 60 alembic upgrade head && exec python3 -m uvicorn secopent.interfaces.api.main:create_app --factory --host 0.0.0.0 --port 8000"]

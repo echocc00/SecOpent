@@ -68,7 +68,9 @@ def _load_json_records(stdout: str) -> list[dict[str, Any]]:
     """Parse dalfox JSON output.
 
     dalfox may emit either a JSON array of findings or newline-delimited
-    JSON objects. Returns `[]` on any parse failure.
+    JSON objects. Non-JSON lines (progress bars, status messages) are skipped
+    rather than aborting the entire parse — a trailing status line must not
+    discard valid findings already parsed.
     """
     if not stdout or not stdout.strip():
         return []
@@ -82,7 +84,7 @@ def _load_json_records(stdout: str) -> list[dict[str, Any]]:
         try:
             obj = json.loads(line)
         except json.JSONDecodeError:
-            return []
+            continue  # skip non-JSON lines (progress/status), keep valid records
         if isinstance(obj, dict):
             records.append(obj)
         elif isinstance(obj, list):

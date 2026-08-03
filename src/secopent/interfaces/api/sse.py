@@ -28,6 +28,10 @@ from ...domain.common.canonical import canonical_digest
 
 DEFAULT_QUEUE_SIZE = 64
 DEFAULT_POLL_INTERVAL = 1.0
+# Safety cap: behind reverse proxies (nginx, Caddy) the ASGI disconnect signal
+# may not propagate promptly, causing ghost SSE loops to poll indefinitely.
+# 3600 iterations at 1s interval = 1 hour max per stream.
+DEFAULT_MAX_ITERATIONS = 3600
 
 Snapshot = Callable[[], Awaitable[Sequence[dict[str, Any]]]]
 DisconnectCheck = Callable[[], Awaitable[bool]]
@@ -51,7 +55,7 @@ async def event_stream(
     poll_interval: float = DEFAULT_POLL_INTERVAL,
     is_disconnected: DisconnectCheck | None = None,
     stop_when: StopWhen | None = None,
-    max_iterations: int | None = None,
+    max_iterations: int | None = DEFAULT_MAX_ITERATIONS,
 ) -> AsyncIterator[str]:
     """Yield SSE frames from polled snapshots with bounded backpressure.
 
