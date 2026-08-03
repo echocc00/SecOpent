@@ -22,6 +22,7 @@ from ..domain.findings.attack_chain import (
 )
 from ..domain.findings.chain_templates import AttackChainTemplate
 from ..domain.findings.models import Finding, FindingStatus
+from .ports.chain_proposals import ChainProposal
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,64 @@ class ChainEngine:
         for chain in chains:
             tasks.extend(self._tasks_for(chain))
         return tuple(tasks)
+
+    def hypothesize_from_proposals(
+        self,
+        proposals: Iterable[ChainProposal],
+        findings: Iterable[Finding],
+    ) -> tuple[AttackChain, ...]:
+        """Source ②③: proposals bind ONLY to VALIDATED findings; every other
+        referenced id becomes a pending link - claims never confirm."""
+        validated_by_id = {
+            f.id: f for f in findings if f.status is FindingStatus.VALIDATED
+        }
+        chains: list[AttackChain] = []
+        for proposal in proposals:
+            links = tuple(
+                ChainLink(confirmed_finding_id=finding_id)
+                if finding_id in validated_by_id
+                else ChainLink(
+                    pending_verification_key=f"pv-{uuid.uuid4().hex[:10]}",
+                    note=f"proposed by {proposal.proposer}",
+                )
+                for finding_id in proposal.finding_ids
+            )
+            if len(links) < 2:
+                continue
+            all_confirmed = all(link.is_confirmed for link in links)
+            status = (
+                ChainStatus.CONFIRMED
+                if all_confirmed
+                else (
+                    ChainStatus.PARTIALLY_VERIFIED
+                    if links and links[0].is_confirmed
+                    else ChainStatus.HYPOTHESIS
+                )
+            )
+            severity = composite_severity(
+                tuple(
+                    validated_by_id[link.confirmed_finding_id].severity
+                    for link in links
+                    if link.is_confirmed
+                ),
+                asset_critical=False,
+            )
+            source = (
+                "peer_claim"
+                if proposal.proposer.startswith("peer:")
+                else "llm_proposal"
+            )
+            chains.append(
+                AttackChain(
+                    id=f"chain-{uuid.uuid4().hex[:12]}",
+                    template_id=proposal.template_hint,
+                    hypothesis_source=source,
+                    links=links,
+                    status=status,
+                    severity=severity,
+                )
+            )
+        return tuple(chains)
 
     # -- internals ---------------------------------------------------------
 
