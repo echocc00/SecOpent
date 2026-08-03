@@ -1,0 +1,42 @@
+# tests/fixtures/cases/seed/race-double-spend.yaml
+# TODO(P2b+): requires concurrent-request verb for proper race condition testing.
+# This seed is a skeleton with preconditions and design-gap annotation; the
+# steps below express the sequential fallback only. The full race test needs
+# parallel HTTP requests to the same endpoint within a sub-second window.
+id: seed-race-double-spend
+version: "0.1.0"
+author: "p1a-knowledge-port"
+risk: active
+target_type: web_app
+schema: secopent.case/v1
+origin: manual
+cwe: ["CWE-362", "CWE-367"]
+owasp: ["A04:2021"]
+preconditions:
+  - "target endpoint performs balance deduction or coupon redemption"
+  - "account has sufficient balance / valid coupon for exactly one use"
+  - "concurrent-request verb available (P2b+) to send N parallel requests"
+steps:
+  - id: first-redemption
+    action: http.request
+    spec:
+      method: POST
+      url: "{{base_url}}/api/redeem"
+      body: '{"coupon": "{{test_coupon}}"}'
+      headers:
+        Content-Type: application/json
+  - id: second-redemption
+    action: http.request
+    spec:
+      method: POST
+      url: "{{base_url}}/api/redeem"
+      body: '{"coupon": "{{test_coupon}}"}'
+      headers:
+        Content-Type: application/json
+assertions:
+  - id: only-one-succeeds
+    expression: "sum(1 for s in [steps['first-redemption'], steps['second-redemption']] if s.status == 200) <= 1"
+evidence_req: ["response-body", "status-code"]
+verification:
+  method: race-condition
+  reproduce: 5

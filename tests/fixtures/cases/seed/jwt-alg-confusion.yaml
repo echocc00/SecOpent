@@ -1,0 +1,36 @@
+# tests/fixtures/cases/seed/jwt-alg-confusion.yaml
+id: seed-jwt-alg-confusion
+version: "0.1.0"
+author: "p1a-knowledge-port"
+risk: active
+target_type: web_app
+schema: secopent.case/v1
+origin: manual
+cwe: ["CWE-287", "CWE-347"]
+owasp: ["A07:2021"]
+preconditions:
+  - "valid JWT token available from authenticated session"
+  - "target endpoint accepts JWT bearer token"
+steps:
+  - id: obtain-valid-token
+    action: http.request
+    spec:
+      method: POST
+      url: "{{base_url}}/api/auth/login"
+      body: '{"username": "{{test_user}}", "password": "{{test_pass}}"}'
+      headers:
+        Content-Type: application/json
+  - id: send-alg-none-token
+    action: http.request
+    spec:
+      method: GET
+      url: "{{base_url}}/api/profile/me"
+      headers:
+        Authorization: "Bearer {{alg_none_token}}"
+assertions:
+  - id: alg-none-rejected
+    expression: "steps['send-alg-none-token'].status in (401, 403)"
+evidence_req: ["response-body", "status-code", "request-headers"]
+verification:
+  method: jwt
+  reproduce: 2

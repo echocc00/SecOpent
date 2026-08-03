@@ -1,0 +1,32 @@
+# tests/fixtures/cases/seed/idor-horizontal.yaml
+id: seed-idor-horizontal
+version: "0.1.0"
+author: "p1a-knowledge-port"
+risk: active
+target_type: web_app
+schema: secopent.case/v1
+origin: manual
+cwe: ["CWE-639"]
+owasp: ["API1:2023"]
+preconditions:
+  - "two distinct user sessions (user_a, user_b) available via secret store refs"
+steps:
+  - id: fetch-own-resource
+    action: http.request
+    spec:
+      method: GET
+      url: "{{base_url}}/api/profile/{{user_a_id}}"
+      session: user_a
+  - id: fetch-other-resource
+    action: http.request
+    spec:
+      method: GET
+      url: "{{base_url}}/api/profile/{{user_b_id}}"
+      session: user_a
+assertions:
+  - id: other-resource-denied
+    expression: "steps['fetch-other-resource'].status in (401, 403)"
+evidence_req: ["response-body", "status-code"]
+verification:
+  method: idor
+  reproduce: 3
