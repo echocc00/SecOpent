@@ -4,6 +4,7 @@ from typing import Protocol
 
 from ...domain.assessments.models import Approval, Assessment, ExecutionPlan
 from ...domain.audit.models import AuditEvent
+from ...domain.peer_agents.models import PeerAgentRun
 from ...domain.projects.models import Project
 from ...domain.scope.models import ScopeSnapshot
 from ...domain.updates.models import UpdateBundle
@@ -112,3 +113,12 @@ class BundleRepository(Protocol):
         """Atomically restore the previous active bundle id. Returns the
         restored (now-active) bundle id. Raises if no previous exists."""
         ...
+
+
+class PeerRunRepository(Protocol):
+    """Persistence port for peer agent runs (P0 ships the in-memory impl;
+    the SQLite table lands with P2 wiring)."""
+
+    def add(self, run: PeerAgentRun) -> None: ...
+    def save(self, run: PeerAgentRun) -> None: ...  # upsert (status updates)
+    def get(self, run_id: str) -> PeerAgentRun | None: ...
