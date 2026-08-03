@@ -78,6 +78,11 @@ class PeerAgentService:
         self._audit = audit
         self._runs = runs
 
+    @property
+    def registry(self) -> PeerAgentRegistry:
+        """Read-only access to the peer agent registry."""
+        return self._registry
+
     def launch(
         self,
         *,
