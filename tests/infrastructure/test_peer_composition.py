@@ -86,6 +86,47 @@ class TestCreatePeerAgentService:
             )
 
 
+class TestShannonRegistration:
+    """P3 Task 3: Shannon is opt-in behind enable_shannon flag."""
+
+    def _make_service(self, tmp_path: Path, **kwargs: object) -> PeerAgentService:
+        from secopent.application.audit import AuditService
+        from secopent.application.ports.peer_runs import InMemoryPeerRunRepository
+
+        return create_peer_agent_service(
+            audit=AuditService(repo=_FakeAuditRepo()),
+            runs=InMemoryPeerRunRepository(),
+            llm_provider="openai/gpt-4o-mini",
+            secret_lookup={"LLM_API_KEY": "sk-test", "ANTHROPIC_API_KEY": "sk-ant"},
+            workdir_root=tmp_path,
+            **kwargs,
+        )
+
+    def test_default_registry_has_no_shannon(self, tmp_path: Path) -> None:
+        service = self._make_service(tmp_path)
+        assert service.registry.get("shannon") is None
+
+    def test_enabled_with_repo_registers_shannon(self, tmp_path: Path) -> None:
+        repo = tmp_path / "target-repo"
+        repo.mkdir()
+        service = self._make_service(
+            tmp_path,
+            enable_shannon=True,
+            shannon_repo_path=repo,
+        )
+        desc = service.registry.get("shannon")
+        assert desc is not None
+        assert desc.license == "AGPL-3.0"
+        assert desc.name == "shannon"
+        assert desc.version == "2.0"
+        assert desc.trust_level is PeerAgentTrustLevel.ADOPTED_EXTERNAL
+        assert "whitebox" in desc.capabilities
+
+    def test_enabled_without_repo_does_not_register(self, tmp_path: Path) -> None:
+        service = self._make_service(tmp_path, enable_shannon=True)
+        assert service.registry.get("shannon") is None
+
+
 class _FakeAuditRepo:
     """Minimal audit repo for composition tests."""
 

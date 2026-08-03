@@ -13,5 +13,8 @@ from ..adapters.image_catalog import ImageRef
 PEER_IMAGE_CATALOG: dict[str, ImageRef] = {
     # Digest pinned after first build; verify with `docker images --digests`.
     "strix": ImageRef("secopent/peer-worker-strix", "1.4.1", ""),
-    # P3: "shannon": ImageRef("keygraph/shannon", "<tag>", ""),
+    # P3: Shannon (AGPL-3.0). Digest to be pinned after first pull:
+    #   docker pull keygraph/shannon:latest
+    #   docker images --digests keygraph/shannon
+    "shannon": ImageRef("keygraph/shannon", "latest", ""),
 }
