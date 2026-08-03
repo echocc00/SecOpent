@@ -153,6 +153,33 @@ class AdapterStepRunner:
             # The dalfox image has no ENTRYPOINT, so the binary name leads the
             # command. `target` is the URL (with a query string) to fuzz for XSS.
             return ["dalfox", "url", target, "-o", "json", "--silence"], mounts
+        if adapter_key == "subfinder":
+            # Subdomain enumeration: target is a bare domain.
+            return ["-d", target, "-json", "-silent"], mounts
+        if adapter_key == "katana":
+            # Web crawler: target is a URL.
+            return ["-u", target, "-json", "-silent", "-d", "3"], mounts
+        if adapter_key == "fingerprinthub":
+            # Service fingerprinting via TCP probes: target is host:port or IP.
+            return ["-t", target, "-j"], mounts
+        if adapter_key == "schemathesis":
+            # OpenAPI fuzzing: target is the OpenAPI spec URL.
+            return ["run", target, "--report", "json", "--hypothesis-max-examples", "50"], mounts
+        if adapter_key == "prowler":
+            # Cloud posture scan: target is the provider (e.g. "aws").
+            return [target, "-M", "json"], mounts
+        if adapter_key == "kube_bench":
+            # CIS benchmark for the local node (runs inside the cluster).
+            return ["--json"], mounts
+        if adapter_key == "scoutsuite":
+            # Cloud audit: target is the provider (e.g. "aws").
+            return [target, "--report-dir", "/work/output", "--json"], mounts
+        if adapter_key == "zap":
+            # ZAP baseline scan: target is the URL.
+            return ["-t", target, "-J", "-l", "WARN"], mounts
+        if adapter_key == "restler":
+            # RESTler fuzz: target is the path to the compiled grammar dir.
+            return ["test", "--grammar_file", target], mounts
         if adapter_key == "trivy":
             # `target` is the scan ref (image name / filesystem path).
             return ["image", "--format", "json", "--quiet", target], mounts

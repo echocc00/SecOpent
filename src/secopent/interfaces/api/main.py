@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import tempfile
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from ...application.health import BundleSignatureState
 from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
+from ...domain.assessments.models import AssessmentStatus
 from ...domain.common.canonical import utc_now
 from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.engine import (
@@ -176,6 +178,19 @@ def create_app(engine: Engine | None = None) -> FastAPI:
             engine = create_sqlite_engine(Path(db_path))
     app.state.db = Database(engine)
     app.state.idempotency = {}
+
+    # Startup recovery: any assessment left in RUNNING/QUEUED from a prior
+    # process (crash, restart, deploy) is transitioned to FAILED so it does not
+    # spin forever in the UI. The operator can re-start it explicitly.
+    with Session(engine) as recovery_session:
+        recovery_repo = SqlAlchemyAssessmentRepository(recovery_session)
+        stale_statuses = {AssessmentStatus.RUNNING, AssessmentStatus.QUEUED}
+        for assessment in recovery_repo.list_all():
+            if assessment.status in stale_statuses:
+                recovery_repo.add(
+                    replace(assessment, status=AssessmentStatus.FAILED)
+                )
+        recovery_session.commit()
 
     # Seed the bundled default TestCatalog (§3.1) so plan generation works out
     # of the box when the store is empty (no operator import required).

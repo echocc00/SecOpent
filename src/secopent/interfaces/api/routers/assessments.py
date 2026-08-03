@@ -241,10 +241,14 @@ def start_assessment(
                 audit_repo=SqlAlchemyAuditRepository(bg_session),
                 step_runner_factory=_production_step_runner,
             )
+            bg_session.commit()
+        except Exception:
+            bg_session.rollback()
+            raise
         finally:
             bg_session.close()
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=False, name=f"assess-{assessment_id}").start()
     return _to_out(assessment)
 
 

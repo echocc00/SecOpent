@@ -323,7 +323,7 @@ def _write_iac(tmp_path: Path) -> str:
 
 
 @pytest.mark.e2e_real
-def test_cloud_orchestration_checkov_iac_scan(tmp_path: Path) -> None:
+def test_cloud_orchestration_checkov_iac_scan(docker_mount_dir: Path) -> None:
     """Cloud/container domain: checkov IaC scan through the orchestrator.
 
     The Planner selects the checkov adapter for the container asset; the
@@ -335,7 +335,7 @@ def test_cloud_orchestration_checkov_iac_scan(tmp_path: Path) -> None:
         pytest.skip("docker not available")
     if not _docker_image_present(_CHECKOV_IMAGE):
         pytest.skip("checkov image not available locally")
-    iac_dir = _write_iac(tmp_path)
+    iac_dir = _write_iac(docker_mount_dir)
 
     catalog = TestCatalog(
         version="2026.07",

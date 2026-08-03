@@ -49,7 +49,7 @@ IMAGE_CATALOG: dict[str, ImageRef] = {
     "trivy": ImageRef("aquasec/trivy", "latest", ""),  # digest TBD (A2)
     "kube_bench": ImageRef("aquasec/kube-bench", "latest", ""),  # digest TBD (A2)
     "checkov": ImageRef("bridgecrew/checkov", "latest", ""),  # digest TBD (A2)
-    "scoutsuite": ImageRef("yelp/yesod", "latest", ""),  # digest TBD (A2, placeholder - verify image name)
+    "scoutsuite": ImageRef("nccgroup/scoutsuite", "latest", ""),  # digest TBD (A2)
     # --- Targets (E2E) ---
     "juice_shop": ImageRef("bkimminich/juice-shop", "latest", "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a"),
     "httpbin": ImageRef("kennethreitz/httpbin", "latest", "sha256:599fe5e5073102dbb0ee3dbb65f049dab44fa9fc251f6835c9990f8fb196a72b"),

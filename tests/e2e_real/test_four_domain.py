@@ -101,9 +101,9 @@ def _run(plan: ExecutionPlan, step_runner: AdapterStepRunner, owner: str) -> Job
 
 
 @pytest.mark.e2e_real
-def test_web_multi_adapter_juice_shop(require_target, tmp_path: Path) -> None:
+def test_web_multi_adapter_juice_shop(require_target, docker_mount_dir: Path) -> None:
     require_target("juice_shop")
-    tpl_dir = _write_template(tmp_path, JUICE_SQLI_TEMPLATE)
+    tpl_dir = _write_template(docker_mount_dir, JUICE_SQLI_TEMPLATE)
 
     plan = _plan(
         "web-multi",

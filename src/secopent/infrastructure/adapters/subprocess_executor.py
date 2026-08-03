@@ -160,6 +160,10 @@ class SubprocessContainerExecutor:
             self._docker,
             "run",
             "--rm",
+            # Label every execution container so the emergency stop
+            # (DockerContainerTerminator) can find and kill them (§12).
+            "--label",
+            "secopent=execution",
             # Let the tool container reach host-mapped targets (Juice Shop,
             # httpbin, ...) via host.docker.internal. Docker Desktop defines it
             # already (harmless re-map); Linux runners/CI need the explicit
