@@ -12,10 +12,11 @@ application layer stays framework-free.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Protocol, runtime_checkable
 
+from ..domain.findings.attack_chain import AttackChain, ChainStatus
 from ..domain.findings.models import Finding, FindingStatus
 from ..domain.reports.models import Report, ReportSection
 from .evidence import Redactor
@@ -168,3 +169,57 @@ class ReportRenderer:
         if not items:
             return "_None._"
         return "\n".join(f"- {item}" for item in items)
+
+
+def render_chain_section(chains: Iterable[AttackChain]) -> str:
+    """Render attack-chain section for the report (pure function, Markdown).
+
+    CONFIRMED chains → "已验证攻击链" with per-link finding refs + severity.
+    PARTIALLY_VERIFIED / HYPOTHESIS chains → "建议优先修复路径" with unconfirmed
+    links noted. Empty input → placeholder message.
+    """
+    chain_list = list(chains)
+    if not chain_list:
+        return "## 攻击链分析\n\n本次评估未发现可验证攻击链。\n"
+
+    confirmed = [c for c in chain_list if c.status is ChainStatus.CONFIRMED]
+    suggested = [
+        c
+        for c in chain_list
+        if c.status in (ChainStatus.PARTIALLY_VERIFIED, ChainStatus.HYPOTHESIS)
+    ]
+
+    parts: list[str] = ["## 攻击链分析\n"]
+
+    if confirmed:
+        parts.append("### 已验证攻击链\n")
+        for chain in confirmed:
+            parts.append(
+                f"- **{chain.template_id}** (severity: {chain.severity.value})"
+            )
+            for link in chain.links:
+                parts.append(f"  - finding: `{link.confirmed_finding_id}`")
+        parts.append("")
+
+    if suggested:
+        parts.append("### 建议优先修复路径\n")
+        for chain in suggested:
+            status_label = (
+                "partially verified"
+                if chain.status is ChainStatus.PARTIALLY_VERIFIED
+                else "hypothesis"
+            )
+            parts.append(
+                f"- **{chain.template_id}** ({status_label}, "
+                f"severity: {chain.severity.value})"
+            )
+            for link in chain.links:
+                if link.is_confirmed:
+                    parts.append(f"  - finding: `{link.confirmed_finding_id}`")
+                else:
+                    parts.append(
+                        f"  - ⚠ unconfirmed (pending: `{link.pending_verification_key}`)"
+                    )
+        parts.append("")
+
+    return "\n".join(parts) + "\n"
