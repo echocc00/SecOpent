@@ -486,30 +486,39 @@ from secopent.domain.scope.models import ScopeSnapshot
 
 
 def _scope() -> ScopeSnapshot:
-    # 与现有 scope 测试相同的构造方式（参考 tests/domain/test_scope*.py 的 fixture）；
-    # 最小形态：允许 host.docker.internal 域名 + 3000 端口的快照。
+    """构造方式与 tests/domain/test_scope.py::_snapshot 同款。"""
+    from datetime import datetime, UTC
+
+    from secopent.domain.scope.models import ScopeLimits
+
     return ScopeSnapshot(
-        id="scope-1",
-        ips=(),
-        domains=("host.docker.internal",),
-        urls=("http://host.docker.internal:3000",),
+        id="snap",
+        project_id="proj",
+        include=("host.docker.internal", "http://host.docker.internal:3000"),
+        exclude=(),
         ports=(3000,),
-        cloud_accounts=(),
-        created_by="tester",
-        note="",
+        limits=ScopeLimits(requests_per_second=5.0, concurrency=3, max_requests=1000),
+        approved_by="analyst",
+        approved_at=datetime(2026, 1, 1, tzinfo=UTC),
+        digest="sha256:" + "0" * 64,
     )
 
 
 def _catalog() -> TestCatalog:
+    from secopent.domain.policy.models import RiskClass
+
     return TestCatalog(
         version="test-1",
-        required_classes=(
-            RequiredTestClass(
-                id="sql-injection", name="SQL Injection",
-                cwe=("CWE-89",), owasp=("WSTG-INPV-05",),
-                domains=("web",),
+        mappings={
+            AssetType.WEB_APP: (
+                RequiredTestClass(
+                    id="sql-injection",
+                    cwe=("CWE-89",),
+                    owasp=("WSTG-INPV-05",),
+                    risk=RiskClass.ACTIVE,
+                ),
             ),
-        ),
+        },
     )
 
 
