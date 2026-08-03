@@ -61,7 +61,8 @@ def docker_mount_dir(tmp_path: Path) -> Path:
     On systems where pytest's tmp_path lands on tmpfs/overlay (NAS appliances,
     some CI containers), Docker bind mounts see an empty directory. This fixture
     detects that and relocates to a plain-filesystem path under /var/tmp or
-    the project's own directory.
+    the project's own directory. Fallback directories are cleaned up after the
+    test to avoid disk space leaks on repeated runs.
 
     Usage in tests::
 
@@ -71,7 +72,8 @@ def docker_mount_dir(tmp_path: Path) -> Path:
             mounts = {"/templates": str(docker_mount_dir / "templates")}
     """
     if _is_bind_mount_safe(tmp_path):
-        return tmp_path
+        yield tmp_path
+        return
 
     # Fallback: /var/tmp is almost always on the root filesystem (ext4/btrfs/xfs)
     fallback_base = Path("/var/tmp/secopent-test")
@@ -81,8 +83,11 @@ def docker_mount_dir(tmp_path: Path) -> Path:
 
     fallback_base.mkdir(parents=True, exist_ok=True)
     # Create a unique subdirectory per test (mirrors tmp_path semantics)
+    import shutil
     import uuid
 
     target = fallback_base / uuid.uuid4().hex[:12]
     target.mkdir(parents=True, exist_ok=True)
-    return target
+    yield target
+    # Cleanup after test to prevent disk space accumulation
+    shutil.rmtree(target, ignore_errors=True)
