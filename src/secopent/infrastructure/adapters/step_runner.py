@@ -197,7 +197,13 @@ class AdapterStepRunner:
                     "json",
                     "--quiet",
                 ], mounts
-            return ["--output", "json", "--quiet"], mounts
+            # Without a template directory checkov would scan the empty /work
+            # dir and silently produce zero findings (false negative). Fail
+            # explicitly so the orchestrator records INPUT_INVALID.
+            raise StepFailure(
+                FailureClass.INPUT_INVALID,
+                "checkov requires template_host_dir (IaC input directory)",
+            )
         # Conservative default: the target as the sole positional argument.
         return [target], mounts
 

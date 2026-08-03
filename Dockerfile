@@ -24,10 +24,13 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install Python deps first (better layer caching)
+# Install Python deps first (better layer caching).
+# Production image: install only runtime deps (no pytest/ruff/mypy).
+# Alembic + psycopg are needed for migrations and PG support.
 COPY pyproject.toml ./
 COPY src/secopent/__version__.py ./src/secopent/__version__.py
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN pip install --no-cache-dir -e . \
+    && pip install --no-cache-dir "alembic>=1.13" "psycopg[binary]>=3.1"
 
 # Copy the source + the built frontend
 COPY src/ ./src/

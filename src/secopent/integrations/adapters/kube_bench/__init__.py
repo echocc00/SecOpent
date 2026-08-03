@@ -161,7 +161,13 @@ def parse(
                 continue
             results = test_group.get("results")
             if not isinstance(results, list):
-                continue
+                # kube-bench v0.7+ may embed test fields directly at the
+                # test-group level (flattened output). Treat the group itself
+                # as a single result if it carries a test_number.
+                if _safe_str(test_group.get("test_number") or test_group.get("testNumber")):
+                    results = [test_group]
+                else:
+                    continue
             for result in results:
                 if not isinstance(result, dict):
                     continue

@@ -60,7 +60,7 @@ def parse(
     observations: list[Observation] = []
     seen: set[str] = set()
     for idx, record in enumerate(records):
-        ip = record.get("ip") or record.get("host")
+        ip = record.get("ip") or record.get("host") or record.get("address")
         port = record.get("port")
         if not ip or port is None:
             continue

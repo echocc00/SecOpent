@@ -204,10 +204,13 @@ def parse(
             or record.get("url")
             or ""
         )
-        # De-dupe on (template_id, matched target): real scans of one target
+        # De-dupe on (template_id, matched-at URL): real scans of one target
         # emit many findings that share a host, and distinct templates can match
         # the same URL - keying on host alone would drop distinct vulnerabilities.
-        dedup_key = f"{template_id}|{host}"
+        # Using matched-at (full URL with path/params) preserves multiple distinct
+        # injection points on the same host for the same template.
+        matched_at = str(record.get("matched-at") or "")
+        dedup_key = f"{template_id}|{matched_at or host}"
         if not host or dedup_key in seen:
             continue
         seen.add(dedup_key)
