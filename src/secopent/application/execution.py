@@ -65,6 +65,7 @@ def execute_assessment(
     step_runner_factory: Callable[[ScopeSnapshot], StepRunner],
     catalog: object | None = None,
     asset_types: tuple[object, ...] = (),
+    max_workers: int = 1,
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -98,7 +99,7 @@ def execute_assessment(
 
         step_runner = step_runner_factory(scope)
         jobs = JobService()
-        orchestrator = Orchestrator(jobs, step_runner)
+        orchestrator = Orchestrator(jobs, step_runner, max_workers=max_workers)
         orchestrator.dispatch(plan)
         orchestrator.run_to_completion(owner="system", now=utc_now())
 

@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [0.1.5] - 2026-08-03
+
+`Schema: no | Deps: no | Breaking: no` - Linux/NAS deployment hardening pass.
+Systematic analysis of Linux/NAS adaptation surfaced 16 gaps (4 P0 + 8 P1 + 4
+P2); this release closes them all. The 4 P0 items are hard prerequisites for a
+long-lived NAS install.
+
+### Added - P0 (NAS long-run prerequisites)
+- **SecretStore persistence** (`PersistentEncryptedFileBackend`): Fernet-
+  encrypted secrets persisted to disk (0600, atomic writes) so signed
+  Cases/AppModels stay verifiable after a restart. Fernet key in a separate
+  auto-generated file. Env: `SECOPTENT_SECRET_STORE_PATH` +
+  `SECOPTENT_SECRET_KEY_PATH`. Falls back to in-memory when unset (dev/test).
+- **SigningKeyService metadata persistence**: public-key metadata persisted
+  (0600 JSON) alongside the SecretStore; `ensure_default_key` is idempotent
+  across restarts (the default signing key is reused, not regenerated).
+- **SQLite/network-filesystem guard**: `create_sqlite_engine` refuses to start
+  when the DB path is on NFS/SMB/CIFS/sshfs (WAL file locks are unreliable
+  there -> silent DB corruption). Override with `SECOPTENT_ALLOW_NFS_DB=1`.
+- **nftables boot unit** (`scripts/provision/secopent-egress.service`): preload
+  the `secopent_egress` table at boot. Default DISABLED - the table's output
+  chain default-DROPs all host egress, so enable ONLY on a dedicated isolation
+  host, never a general-purpose NAS.
+- **Graceful shutdown** (FastAPI lifespan): on SIGTERM, terminate in-flight
+  execution containers (reuses the emergency-stop terminator) and join
+  assessment threads (25s budget, matches systemd `TimeoutStopSec=30`).
+  Leftover RUNNING assessments are transitioned to FAILED by startup recovery.
+
+### Added - P1 (security / stability / ops)
+- **`--ulimit nofile=65536`** on every adapter container (fuzzers EMFILE at the
+  1024 default).
+- **`secopent vacuum` CLI**: `wal_checkpoint(TRUNCATE)` + `VACUUM` to reclaim
+  space (findings + audit chain grow); for cron on long-lived installs.
+- **`SECOPTENT_MAX_PARALLEL_STEPS`** env: same-layer step concurrency (default
+  1, NAS-safe; raise on strong hosts).
+- **0600 file perms** enforced: backup/restore CLI writes + DB file (best-effort
+  `chmod 0600`); systemd `UMask=0077` covers WAL/.shm sidecars.
+- **systemd resource limits** documented: `MemoryMax=2G` `CPUQuota=200%`
+  `TimeoutStopSec=30` `UMask=0077`.
+- **Docker socket security** documented: rootless Docker or docker-socket-proxy
+  (the `docker` group = root).
+- **Docker log rotation** + **image-prune cron** documented.
+- **SSD recommendation** documented: DB + Docker data-root on SSD (HDD tanks
+  performance).
+
+### Changed
+- `egress.nft`: removed `flush ruleset` (it cleared the host's entire nftables
+  ruleset, including the NAS firewall); now manages only its own table.
+
+### Added - P2 (completeness)
+- Target compose (`docker-compose.targets.yml`): per-service `deploy.resources.
+  limits` (juice-shop 512m/1cpu, httpbin 128m/0.5, crapi 1g/1cpu).
+- `verify_env.py`: port-conflict check (8000 API conflict = FAIL; 3000/8080
+  in-use = info, may be the targets themselves).
+- `docs/deployment/linux.md` rewritten (14 sections): SecretStore persistence,
+  NFS guard, nftables modes, Docker security/maintenance, NAS hardware tuning,
+  Interactsh NAT, backup/VACUUM, verification checklist.
+
+### Verified
+- ruff + mypy clean on all 8 changed source files.
+- 1014 unit tests pass (2 platform skips), 49.5s.
+
+### Notes
+- NftScopeEnforcer remains unwired into the live execution path (T11 is
+  implemented + unit-tested; production wiring tracked separately). The boot
+  unit + `egress.nft` fix prepare for that wiring without changing current
+  behavior.
+- Adapter image digest-pinning (`scripts/pin_digests.py`) still pending a run
+  on a Docker+internet host (carried over from v0.1.4).
+
+
 ## [0.1.4] - 2026-08-01
 
 `Schema: no | Deps: no | Breaking: no` - systematic hardening pass. Independent

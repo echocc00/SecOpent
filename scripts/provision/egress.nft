@@ -7,12 +7,22 @@
 # dropped even if mistakenly whitelisted (defence in depth).
 #
 # NftScopeEnforcer (infrastructure/egress/nft_scope.py) populates the two sets
-# per assessment and flushes them on revoke. Load once as root:
-#   sudo nft -f scripts/provision/egress.nft
+# per assessment and flushes them on revoke. (The enforcer is implemented +
+# unit-tested; wiring it into the live execution path is tracked separately.)
+#
+# WARNING: this output chain default-DROPS all host egress. On a general-purpose
+# NAS (SSH / Docker / SMB all share the host network) do NOT auto-load it at
+# boot - it will cut every outbound connection. Auto-load is for a DEDICATED
+# isolation host only (see scripts/provision/secopent-egress.service).
+#
+# Manual load (idempotent: delete-then-add, ignores "table absent"):
+#   sudo nft delete table inet secopent_egress 2>/dev/null; sudo nft -f scripts/provision/egress.nft
 # Inspect:  sudo nft list table inet secopent_egress
 # Tear down: sudo nft delete table inet secopent_egress
-
-flush ruleset
+#
+# NOTE: this file deliberately does NOT use `flush ruleset` - that would clear
+# the host's entire nftables ruleset (including the NAS firewall). It manages
+# only its own `inet secopent_egress` table.
 
 table inet secopent_egress {
     # Scoped, in-scope destinations (single IPs and/or CIDRs; interval set).

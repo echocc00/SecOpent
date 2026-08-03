@@ -126,6 +126,34 @@ def check_filesystem() -> dict:
     return {"pass": True, "fs_type": best_fs or "unknown"}
 
 
+def check_ports() -> dict:
+    """Detect whether SecOpent's ports (API + targets) are already in use.
+
+    8000 in use before startup is a hard conflict (the API cannot bind). 3000/
+    8080 in use may legitimately be the SecOpent target range itself (run before
+    verify) so they are reported as info, not failures.
+    """
+    import socket
+    ports = [("8000", "SecOpent API"), ("3000", "juice-shop"), ("8080", "httpbin")]
+    findings: dict[str, dict] = {}
+    for port_s, label in ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        try:
+            in_use = sock.connect_ex(("127.0.0.1", int(port_s))) == 0
+        except OSError:
+            in_use = False
+        finally:
+            sock.close()
+        findings[port_s] = {"label": label, "in_use": in_use}
+    api_conflict = findings["8000"]["in_use"]
+    return {
+        "pass": not api_conflict,
+        "ports": findings,
+        "note": "8000 in use = API port conflict; 3000/8080 in use may be your targets",
+    }
+
+
 def check_host_gateway() -> dict:
     """Verify host.docker.internal resolves inside a container.
 
@@ -175,6 +203,7 @@ def main() -> int:
         "targets": check_targets(),
         "interactsh": check_interactsh(),
         "filesystem": check_filesystem(),
+        "ports": check_ports(),
         "host_gateway": check_host_gateway(),
         "llm": check_llm(),
     }

@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Sequence
+import threading
+import time
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -55,6 +58,9 @@ from ...infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyAssessmentRepository,
 )
 from ...infrastructure.secrets.encrypted_file_backend import EncryptedFileBackend
+from ...infrastructure.secrets.persistent_file_backend import (
+    PersistentEncryptedFileBackend,
+)
 from ...infrastructure.signing.ed25519 import Ed25519KeyProvider
 from .routers import (
     appmodels_router,
@@ -82,6 +88,83 @@ from .sse import event_stream
 _TERMINAL_ASSESSMENT_STATUSES = frozenset(
     {"completed", "partial", "failed", "cancelled", "rejected"}
 )
+
+
+# Wall-clock budget for draining in-flight assessments on shutdown. systemd's
+# TimeoutStopSec=30 leaves a margin for the SIGTERM -> drain -> SIGKILL window.
+_SHUTDOWN_DRAIN_SECONDS = 25.0
+
+
+def _drain_active_executions(app: FastAPI) -> None:
+    """SIGTERM/shutdown grace: stop execution containers, wait for in-flight runs.
+
+    Reuses the emergency-stop container terminator so an in-flight adapter step
+    fails fast and the executor's except-branch records FAILED (rather than the
+    thread being SIGKILLed mid-step, which would leave a RUNNING assessment for
+    startup recovery). Best-effort: any thread still alive after the budget is
+    force-killed by systemd SIGKILL; startup recovery transitions the leftover
+    RUNNING status to FAILED on next boot.
+    """
+    threads: list[threading.Thread] = []
+    with app.state.active_executions_lock:
+        threads = list(app.state.active_executions)
+    if not threads:
+        return
+    try:
+        from ...infrastructure.safety.emergency_infra import (
+            DockerContainerTerminator,
+        )
+
+        DockerContainerTerminator().terminate_active()
+    except Exception:  # noqa: BLE001 - shutdown must not fail on docker being down
+        pass
+    deadline = time.monotonic() + _SHUTDOWN_DRAIN_SECONDS
+    for thread in threads:
+        remaining = max(0.0, deadline - time.monotonic())
+        thread.join(timeout=remaining)
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """App lifespan: drain in-flight assessments on shutdown (SIGTERM grace).
+
+    The execution-tracking state is initialized in ``create_app`` (not here) so
+    it is present even when the app is constructed without a running server
+    (e.g. TestClient-less unit tests that still hit the start endpoint).
+    """
+    yield
+    app.state.shutdown_event.set()
+    _drain_active_executions(app)
+
+
+def _build_secret_backend() -> EncryptedFileBackend | PersistentEncryptedFileBackend:
+    """Pick the secret backend from env (NAS hardening, v0.1.5).
+
+    SECOPTENT_SECRET_STORE_PATH + SECOPTENT_SECRET_KEY_PATH -> persistent
+    (secrets survive restart; signed Cases stay verifiable). Otherwise the
+    in-memory EncryptedFileBackend (dev/test; secrets lost on restart).
+    """
+    store_env = os.environ.get("SECOPTENT_SECRET_STORE_PATH")
+    key_env = os.environ.get("SECOPTENT_SECRET_KEY_PATH")
+    if store_env and key_env:
+        return PersistentEncryptedFileBackend(Path(store_env), Path(key_env))
+    return EncryptedFileBackend()
+
+
+def _signing_key_metadata_path() -> Path | None:
+    """Optional signing-key metadata file (public keys, 0600).
+
+    Persisted alongside the SecretStore so signatures stay verifiable after
+    restart. None when the persistent backend is not in use (dev/test).
+    """
+    if not os.environ.get("SECOPTENT_SECRET_STORE_PATH"):
+        return None
+    meta_env = os.environ.get("SECOPTENT_SIGNING_KEY_METADATA_PATH")
+    if meta_env:
+        return Path(meta_env)
+    return Path(os.environ["SECOPTENT_SECRET_STORE_PATH"]).with_name(
+        "signing_keys.json"
+    )
 
 
 def _register_api(app: FastAPI) -> None:
@@ -160,7 +243,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     ``engine`` is the SQLAlchemy engine to bind; when omitted a temporary
     SQLite engine is created (for tests / lightweight runs).
     """
-    app = FastAPI(title="SecOpent API", version="0.1.0")
+    app = FastAPI(title="SecOpent API", version="0.1.0", lifespan=_lifespan)
     # Structured logging (§3.8): JSON when SECOPTENT_LOG_FORMAT=json, with
     # sensitive-field redaction. Idempotent across calls.
     configure_logging(json_format=os.environ.get("SECOPTENT_LOG_FORMAT") == "json")
@@ -178,6 +261,12 @@ def create_app(engine: Engine | None = None) -> FastAPI:
             engine = create_sqlite_engine(Path(db_path))
     app.state.db = Database(engine)
     app.state.idempotency = {}
+    # Execution-tracking state for graceful shutdown (v0.1.5): in-flight
+    # assessment threads register here so SIGTERM can drain them (terminate
+    # execution containers + join) rather than being SIGKILLed mid-step.
+    app.state.shutdown_event = threading.Event()
+    app.state.active_executions = set()
+    app.state.active_executions_lock = threading.Lock()
 
     # Startup recovery: any assessment left in RUNNING/QUEUED from a prior
     # process (crash, restart, deploy) is transitioned to FAILED so it does not
@@ -201,11 +290,15 @@ def create_app(engine: Engine | None = None) -> FastAPI:
             seed_session.commit()
     # Server-side signing (decision H): Ed25519 private keys are held encrypted
     # at rest in the SecretStore; the frontend can request a signature but never
-    # holds a private key. A default key is created at startup.
+    # holds a private key. A default key is created at startup (idempotent across
+    # restarts when the persistent backend is configured, so signed Cases stay
+    # verifiable).
     signing_keys = SigningKeyService(
-        SecretStore(EncryptedFileBackend()), Ed25519KeyProvider()
+        SecretStore(_build_secret_backend()),
+        Ed25519KeyProvider(),
+        key_metadata_path=_signing_key_metadata_path(),
     )
-    signing_keys.create_key("default", now=utc_now())
+    signing_keys.ensure_default_key("default", now=utc_now())
     app.state.signing_keys = signing_keys
     # Shared state for the §7.3 signature detector (P3 §3.4): the intel bundle
     # publisher records each real verification here; /updates/health reads it.

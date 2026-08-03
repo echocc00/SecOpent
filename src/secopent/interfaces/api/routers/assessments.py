@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import threading
 import uuid
 
@@ -203,6 +204,19 @@ def _production_step_runner(scope: ScopeSnapshot) -> AdapterStepRunner:
     )
 
 
+def _orchestrator_max_workers() -> int:
+    """Same-layer step concurrency (NAS hardening, v0.1.5).
+
+    Default 1 (serial) is NAS-safe: weak CPUs (N100/Celeron) and limited RAM
+    OOM when multiple adapter containers overlap. Raise on a strong host via
+    SECOPTENT_MAX_PARALLEL_STEPS=N (e.g. 4 on a 16GB workstation).
+    """
+    try:
+        return max(1, int(os.environ.get("SECOPTENT_MAX_PARALLEL_STEPS", "1")))
+    except ValueError:
+        return 1
+
+
 @router.post("/{assessment_id}/start", response_model=AssessmentOut)
 def start_assessment(
     assessment_id: str, payload: StartRequest, request: Request, session: DbSession
@@ -231,6 +245,13 @@ def start_assessment(
     db = request.app.state.db
 
     def _run() -> None:
+        thread = threading.current_thread()
+        # Register so SIGTERM grace (lifespan shutdown) can drain this thread.
+        active = getattr(request.app.state, "active_executions", None)
+        lock = getattr(request.app.state, "active_executions_lock", None)
+        if active is not None and lock is not None:
+            with lock:
+                active.add(thread)
         bg_session = db.open_session()
         try:
             # Compute coverage inputs (catalog + asset types) for the report.
@@ -253,6 +274,7 @@ def start_assessment(
                 step_runner_factory=_production_step_runner,
                 catalog=catalog,
                 asset_types=asset_types,
+                max_workers=_orchestrator_max_workers(),
             )
             bg_session.commit()
         except Exception:
@@ -260,6 +282,9 @@ def start_assessment(
             raise
         finally:
             bg_session.close()
+            if active is not None and lock is not None:
+                with lock:
+                    active.discard(thread)
 
     threading.Thread(target=_run, daemon=False, name=f"assess-{assessment_id}").start()
     return _to_out(assessment)

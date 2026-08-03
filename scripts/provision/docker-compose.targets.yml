@@ -11,6 +11,10 @@
 #
 # NOTE: crapi is multi-container (web+api+auth+db); pull from upstream crAPI repo
 # when needed. For Phase A core E2E, juice-shop + httpbin suffice.
+#
+# Resource limits (v0.1.5 NAS hardening): each target is capped so a runaway
+# target cannot OOM the host. Adjust to your hardware; on a weak NAS (<=4GB RAM)
+# keep juice-shop at 512m and run only one target at a time.
 
 services:
   juice-shop:
@@ -21,6 +25,11 @@ services:
     networks:
       - secopent-targets
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
 
   httpbin:
     image: kennethreitz/httpbin:latest
@@ -31,6 +40,11 @@ services:
     networks:
       - secopent-targets
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.5"
 
   # crAPI (completely ridiculous API) - deliberately vulnerable API for BOLA/BFLA
   # E2E (P2-F / T6). Opt-in via its own profile so the default juice-shop+httpbin
@@ -47,6 +61,11 @@ services:
     networks:
       - secopent-targets
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "1.0"
 
 networks:
   secopent-targets:

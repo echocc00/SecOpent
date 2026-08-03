@@ -1,0 +1,46 @@
+# SecOpent scoped-egress nftables table - systemd unit (T11, v0.1.5).
+#
+# Pre-loads the `inet secopent_egress` table at boot so NftScopeEnforcer can
+# populate its allow/block sets without a manual `nft -f`.
+#
+# !!! WARNING - READ BEFORE ENABLING !!!
+# The table's output chain default-DROPS all host egress except DNS, established
+# return traffic, and the scoped allow-set (empty until an assessment runs).
+# Enabling this unit on a GENERAL-PURPOSE NAS will cut SSH, apt, Docker pulls,
+# SMB - every outbound connection - the moment the table loads with an empty
+# allow-set.
+#
+# Enable ONLY on a DEDICATED isolation host whose sole purpose is running
+# SecOpent assessments. On a general-purpose NAS, leave this unit DISABLED and
+# let NftScopeEnforcer load the table on demand during an assessment (or load
+# it manually: see scripts/provision/egress.nft).
+#
+# Install + enable (dedicated host only):
+#   sudo cp scripts/provision/secopent-egress.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now secopent-egress
+# Verify:
+#   sudo nft list table inet secopent_egress
+# Uninstall:
+#   sudo systemctl disable --now secopent-egress
+#   sudo nft delete table inet secopent_egress
+
+[Unit]
+Description=SecOpent scoped-egress nftables table (T11)
+Documentation=file:///opt/SecOpent/docs/deployment/linux.md
+After=network-pre.target
+Before=network.target
+DefaultDependencies=no
+ConditionPathExists=/opt/SecOpent/scripts/provision/egress.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Idempotent: drop any prior version of the table before loading (the leading
+# `-` tells systemd to ignore a non-zero exit, e.g. when the table is absent).
+ExecStartPre=-/sbin/nft delete table inet secopent_egress
+ExecStart=/sbin/nft -f /opt/SecOpent/scripts/provision/egress.nft
+ExecStop=/sbin/nft delete table inet secopent_egress
+
+[Install]
+WantedBy=multi-user.target

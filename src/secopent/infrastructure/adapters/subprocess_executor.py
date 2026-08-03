@@ -204,6 +204,11 @@ class SubprocessContainerExecutor:
             self._memory(resource_limits),
             "--cpus",
             self._cpus(resource_limits),
+            # Fuzzers (schemathesis/restler) open many concurrent connections;
+            # the container default nofile=1024 EMFILEs them. 65536 is safe for
+            # all adapters (<= fs.nr_open, default 1048576 on Linux).
+            "--ulimit",
+            "nofile=65536:65536",
             "--workdir",
             "/work",
         ]

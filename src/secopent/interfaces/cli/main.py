@@ -11,11 +11,27 @@ services): ``version``, ``doctor`` (health check of the deterministic core).
 from __future__ import annotations
 
 import argparse
+import contextlib
+import os
 import sys
+from pathlib import Path
 
 from secopent.__version__ import __version__
 
 __all__ = ["build_parser", "main", "__version__"]
+
+
+def _chmod_0600(path: Path) -> None:
+    """Best-effort 0600 on a sensitive file (POSIX only; no-op elsewhere).
+
+    Backup/restore files contain findings/scope/audit-chain material; the
+    encrypted secret store copy contains ciphertext. All deserve 0600 even
+    though the parent directory should already be 0700.
+    """
+    if os.name != "posix":
+        return
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o600)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     upgrade.add_argument(
         "--dry-run", action="store_true", help="Print the steps without running them."
     )
+    vacuum = subparsers.add_parser(
+        "vacuum",
+        help="VACUUM the SQLite DB to reclaim space (stop the API first).",
+    )
+    vacuum.add_argument("--db", required=True, help="Path to the SQLite database file.")
     return parser
 
 
@@ -102,6 +123,7 @@ def _cmd_backup(
     finally:
         dest_conn.close()
         src_conn.close()
+    _chmod_0600(dest)
     print(f"backed up {src} -> {dest}")
 
     if include_secrets:
@@ -118,6 +140,7 @@ def _cmd_backup(
             return 1
         secrets_dest = out / f"secrets-{timestamp}.enc"
         shutil.copy2(secrets_src, secrets_dest)
+        _chmod_0600(secrets_dest)
         print(f"backed up encrypted secret store {secrets_src} -> {secrets_dest}")
         print(
             "WARNING: the Fernet master key is NOT in this backup; escrow it "
@@ -157,10 +180,12 @@ def _cmd_restore(db_path: str, from_backup: str) -> int:
     if target.exists():
         rollback = target.with_name(f"{target.name}.pre-restore-{timestamp}")
         shutil.copy2(target, rollback)
+        _chmod_0600(rollback)
 
     tmp = target.with_name(f"{target.name}.restore-tmp-{timestamp}")
     shutil.copy2(src, tmp)
     os.replace(tmp, target)
+    _chmod_0600(target)
 
     if not verify_db_audit_chain(target):
         print("error: restored db audit chain INVALID; rolling back")
@@ -252,6 +277,32 @@ def _cmd_upgrade(
     return 0
 
 
+def _cmd_vacuum(db_path: str) -> int:
+    """VACUUM the SQLite DB to reclaim space (findings + audit chain grow).
+
+    Requires exclusive access (stop the API first, like restore). Folds the WAL
+    back into the main file (wal_checkpoint TRUNCATE) then rebuilds the file
+    compactly (VACUUM). Run periodically (cron) on long-lived NAS installs.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    src = Path(db_path)
+    if not src.exists():
+        print(f"error: db not found: {db_path}")
+        return 1
+    conn = sqlite3.connect(str(src))
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.execute("VACUUM")
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"vacuumed {src}")
+    print("note: ensure the API service was stopped (exclusive access required)")
+    return 0
+
+
 def _cmd_doctor() -> int:
     """Verify the deterministic core imports and basic invariants hold."""
     try:
@@ -290,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
             no_migrate=args.no_migrate,
             dry_run=args.dry_run,
         )
+    if args.command == "vacuum":
+        return _cmd_vacuum(args.db)
     parser.print_help()
     return 1
 
