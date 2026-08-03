@@ -17,7 +17,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -43,6 +43,7 @@ class PeerInvocation:
     mounts: Mapping[str, str]
     capabilities: Sequence[str]
     resource_limits: Mapping[str, object]
+    env: Mapping[str, str] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -75,6 +76,7 @@ class _Executor(Protocol):
         resource_limits: Mapping[str, object],
         capabilities: Sequence[str] = (),
         extra_labels: Mapping[str, str] = ...,
+        env: Mapping[str, str] = ...,
     ) -> ContainerResult: ...
 
 
@@ -116,6 +118,7 @@ class ContainerPeerAgentHarness:
             resource_limits=dict(invocation.resource_limits),
             capabilities=tuple(invocation.capabilities),
             extra_labels={"secopent.peer_run": run.id},
+            env=dict(invocation.env),
         )
         wall = time.monotonic() - started
         report = backend.parse_report(result, workdir)

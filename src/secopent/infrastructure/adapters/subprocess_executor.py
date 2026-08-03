@@ -96,6 +96,7 @@ class SubprocessContainerExecutor:
         resource_limits: Mapping[str, Any],
         capabilities: Sequence[str] = (),
         extra_labels: Mapping[str, str] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> ContainerResult:
         """Verify the digest, run the container, and capture its output.
 
@@ -105,11 +106,15 @@ class SubprocessContainerExecutor:
         ``extra_labels``: additional ``--label key=value`` pairs appended after
         the mandatory ``secopent=execution`` label. Used by peer-agent harness
         to tag containers with ``secopent.peer_run=<run_id>`` for targeted stop.
+
+        ``env``: additional ``--env KEY=VALUE`` pairs injected into the
+        container. Used by peer-agent backends to pass LLM credentials and
+        configuration without writing them to files.
         """
         self._verify_digest(image_digest)
         args = self._build_args(
             image_digest, command, mounts, network_policy, resource_limits,
-            capabilities, extra_labels or {},
+            capabilities, extra_labels or {}, env or {},
         )
         artifacts_dir = self._artifacts_dir(mounts)
         try:
@@ -168,6 +173,7 @@ class SubprocessContainerExecutor:
         resource_limits: Mapping[str, Any],
         capabilities: Sequence[str] = (),
         extra_labels: Mapping[str, str] | None = None,
+        env: Mapping[str, str] | None = None,
     ) -> list[str]:
         args = [
             self._docker,
@@ -211,6 +217,13 @@ class SubprocessContainerExecutor:
             # is writable, so point HOME there.
             "--env",
             "HOME=/tmp",
+        ]
+        # Inject caller-supplied environment variables (e.g. peer-agent LLM
+        # credentials). These are appended after HOME=/tmp so they can
+        # override defaults if needed, but never remove the HOME guarantee.
+        for key, value in (env or {}).items():
+            args += ["--env", f"{key}={value}"]
+        args += [
             "--network",
             self._network_mode(network_policy),
             "--memory",

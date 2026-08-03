@@ -99,6 +99,7 @@ class ContainerExecutor(Protocol):
         network_policy: str,
         resource_limits: Mapping[str, Any],
         extra_labels: Mapping[str, str] = ...,
+        env: Mapping[str, str] = ...,
     ) -> ContainerResult: ...
 
 
