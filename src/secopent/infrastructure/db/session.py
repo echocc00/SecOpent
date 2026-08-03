@@ -34,19 +34,20 @@ def init_db(engine: Engine) -> None:
     """Create all tables on the engine.
 
     Also creates the ``core_vulnerabilities_fts`` FTS5 virtual table used by
-    the intel search endpoint. SQLAlchemy 2.0 does not model FTS5 virtual
-    tables declaratively, so it is issued as raw DDL here (idempotent via
-    ``IF NOT EXISTS``) so that any engine - test SQLite or production - gets a
-    working intel search surface.
+    the intel search endpoint (SQLite only). SQLAlchemy 2.0 does not model FTS5
+    virtual tables declaratively, so it is issued as raw DDL here (idempotent
+    via ``IF NOT EXISTS``). On PostgreSQL the FTS5 DDL is skipped (PG uses
+    tsvector; the intel search endpoint falls back to LIKE queries).
     """
     CoreBase.metadata.create_all(engine)
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS core_vulnerabilities_fts "
-                "USING fts5(canonical_id UNINDEXED, cve, description, cwe)"
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS core_vulnerabilities_fts "
+                    "USING fts5(canonical_id UNINDEXED, cve, description, cwe)"
+                )
             )
-        )
 
 
 class Database:

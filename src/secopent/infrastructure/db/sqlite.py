@@ -12,6 +12,12 @@ def create_sqlite_engine(path: Path) -> Engine:
         f"sqlite:///{path}",
         connect_args={"check_same_thread": False, "timeout": 5.0},
         future=True,
+        # NullPool: each thread (request handler + background executor) gets
+        # its own connection, avoiding StaticPool's single-shared-connection
+        # contention. SQLite WAL handles the concurrency at the file level.
+        poolclass=None,  # SQLAlchemy defaults to QueuePool for file-based SQLite
+        pool_size=5,
+        max_overflow=10,
     )
 
     @event.listens_for(engine, "connect")

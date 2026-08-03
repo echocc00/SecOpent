@@ -31,7 +31,7 @@ def _is_bind_mount_safe(path: Path) -> bool:
     Docker bind mounts from tmpfs-backed or overlay-backed directories may
     appear empty inside the container on certain kernel/filesystem combos
     (e.g. NAS appliances where /tmp is tmpfs with overlay subvolumes).
-    A path is considered safe if it is NOT on tmpfs or overlay.
+    A path is considered safe if its most-specific mount is NOT tmpfs/overlay.
     """
     try:
         # Linux: check the filesystem type via /proc/mounts
@@ -39,15 +39,17 @@ def _is_bind_mount_safe(path: Path) -> bool:
         if not mounts_file.exists():
             return True  # non-Linux (Windows/macOS Docker Desktop) - assume safe
         resolved = str(path.resolve())
+        best_match = ""
+        best_fs = ""
         for line in mounts_file.read_text().splitlines():
             parts = line.split()
             if len(parts) < 3:
                 continue
             mount_point, fs_type = parts[1], parts[2]
-            if resolved.startswith(mount_point) or mount_point == "/":
-                if fs_type in ("tmpfs", "overlay"):
-                    return False
-        return True
+            if resolved.startswith(mount_point) and len(mount_point) > len(best_match):
+                best_match = mount_point
+                best_fs = fs_type
+        return best_fs not in ("tmpfs", "overlay")
     except OSError:
         return True  # cannot determine - assume safe
 

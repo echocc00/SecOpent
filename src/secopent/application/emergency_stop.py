@@ -69,10 +69,20 @@ class EmergencyStop:
         return not self._triggered
 
     def trigger(self, *, actor: str, reason: str) -> EmergencyReport:
-        """Activate the kill switch; idempotent on the switch itself."""
+        """Activate the kill switch; idempotent on the switch itself.
+
+        Container termination failures are captured in the report (with a
+        negative count) rather than raising - the switch must still flip and
+        the audit event must still land even if Docker is unreachable. The
+        negative ``terminated_containers`` signals the operator that manual
+        verification is needed.
+        """
         self._triggered = True
         revoked = self._permit_revoker.revoke_unused()
-        terminated = self._container_terminator.terminate_active()
+        try:
+            terminated = self._container_terminator.terminate_active()
+        except Exception:  # noqa: BLE001 - kill switch must not fail silently
+            terminated = -1  # signals: termination could not be verified
         # Evidence is deliberately preserved for forensics (never deleted).
         self._audit.record(
             actor=actor,

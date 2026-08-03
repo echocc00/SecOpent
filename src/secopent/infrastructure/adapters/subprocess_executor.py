@@ -94,11 +94,17 @@ class SubprocessContainerExecutor:
         mounts: Mapping[str, str],
         network_policy: str,
         resource_limits: Mapping[str, Any],
+        capabilities: Sequence[str] = (),
     ) -> ContainerResult:
-        """Verify the digest, run the container, and capture its output."""
+        """Verify the digest, run the container, and capture its output.
+
+        ``capabilities``: Linux capabilities to ADD back after ``--cap-drop ALL``
+        (e.g. ``("NET_RAW",)`` for nmap/naabu SYN scanning). Empty by default.
+        """
         self._verify_digest(image_digest)
         args = self._build_args(
-            image_digest, command, mounts, network_policy, resource_limits
+            image_digest, command, mounts, network_policy, resource_limits,
+            capabilities,
         )
         artifacts_dir = self._artifacts_dir(mounts)
         try:
@@ -155,6 +161,7 @@ class SubprocessContainerExecutor:
         mounts: Mapping[str, str],
         network_policy: str,
         resource_limits: Mapping[str, Any],
+        capabilities: Sequence[str] = (),
     ) -> list[str]:
         args = [
             self._docker,
@@ -174,11 +181,18 @@ class SubprocessContainerExecutor:
             "65532:65532",
             "--cap-drop",
             "ALL",
+        ]
+        # Re-add specific capabilities needed by certain tools (e.g. NET_RAW
+        # for nmap/naabu SYN scanning). Principle of least privilege: only the
+        # explicitly requested caps are restored, never a broad set.
+        for cap in capabilities:
+            args += ["--cap-add", cap]
+        args += [
             "--read-only",
             "--tmpfs",
             # nosec B108 - "/tmp" here is a container-internal tmpfs mount
             # (hardened: rw,noexec,nosuid), not predictable host temp usage.
-            "/tmp:rw,noexec,nosuid",
+            "/tmp:rw,noexec,nosuid,size=256m",
             # Non-root tools need a writable HOME under the read-only rootfs
             # (e.g. nuclei writes its config to $HOME/.config). The /tmp tmpfs
             # is writable, so point HOME there.

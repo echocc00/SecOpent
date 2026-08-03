@@ -69,6 +69,23 @@ _ADAPTER_PARSERS: dict[str, Any] = {
 
 _DEFAULT_RESOURCE_LIMITS: dict[str, Any] = {"memory": "512m", "cpus": "0.5"}
 
+# Adapter-specific resource limits: tools that need more memory/CPU than the
+# default 512m/0.5 (trivy loads a ~1GB vuln DB; prowler/scoutsuite enumerate
+# large cloud accounts into memory).
+_ADAPTER_RESOURCE_LIMITS: dict[str, dict[str, Any]] = {
+    "trivy": {"memory": "2g", "cpus": "1.0"},
+    "prowler": {"memory": "1g", "cpus": "1.0"},
+    "scoutsuite": {"memory": "1g", "cpus": "1.0"},
+    "zap": {"memory": "1g", "cpus": "1.0"},
+}
+
+# Adapter-specific Linux capabilities: network scanners need NET_RAW for SYN
+# probes (without it they silently degrade to TCP connect scans).
+_ADAPTER_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "nmap": ("NET_RAW",),
+    "naabu": ("NET_RAW",),
+}
+
 
 @dataclass(frozen=True, slots=True)
 class RealScanResult:
@@ -109,6 +126,7 @@ class RealScanRunner:
         mounts: dict[str, str] | None = None,
         source: AdapterSource | None = None,
         resource_limits: dict[str, Any] | None = None,
+        capabilities: list[str] | None = None,
     ) -> RealScanResult:
         """Run the adapter's tool container and parse its stdout into Observations."""
         parser = _ADAPTER_PARSERS.get(adapter_key)
@@ -120,7 +138,8 @@ class RealScanRunner:
                 command=list(args),
                 mounts=dict(mounts or {}),
                 network_policy="bridge",
-                resource_limits=dict(resource_limits or _DEFAULT_RESOURCE_LIMITS),
+                resource_limits=dict(resource_limits or _ADAPTER_RESOURCE_LIMITS.get(adapter_key, _DEFAULT_RESOURCE_LIMITS)),
+                capabilities=list(capabilities or _ADAPTER_CAPABILITIES.get(adapter_key, ())),
             )
             scan_source = source or AdapterSource(
                 name=adapter_key, version="1.0.0", template_version="1.0.0"

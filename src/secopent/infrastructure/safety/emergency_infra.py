@@ -5,8 +5,9 @@ These satisfy the application-layer ``ContainerTerminator`` / ``PermitRevoker``
 protocols so ``EmergencyStop`` can act on the real environment:
 
 - ``DockerContainerTerminator`` stops running execution containers (labelled
-  ``secopent``) via the Docker CLI; returns 0 when Docker is unavailable or no
-  containers are running (honest count).
+  ``secopent=execution``) via the Docker CLI. Raises ``DockerUnreachableError``
+  when the daemon cannot be contacted - an emergency stop MUST fail loudly
+  rather than silently report success.
 - ``NullPermitRevoker`` is a placeholder: permits are short-lived signed tokens
   not persisted in a revocable store yet, so there is nothing to revoke (0).
   A revocable permit store is a follow-up (P4 remote worker).
@@ -14,6 +15,10 @@ protocols so ``EmergencyStop`` can act on the real environment:
 from __future__ import annotations
 
 import subprocess
+
+
+class DockerUnreachableError(RuntimeError):
+    """The Docker daemon is not reachable; emergency stop cannot verify termination."""
 
 
 class DockerContainerTerminator:
@@ -31,8 +36,14 @@ class DockerContainerTerminator:
                 timeout=30,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return 0
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise DockerUnreachableError(
+                f"cannot reach Docker daemon during emergency stop: {exc}"
+            ) from exc
+        if listed.returncode != 0:
+            raise DockerUnreachableError(
+                f"docker ps failed (exit {listed.returncode}): {listed.stderr.strip()}"
+            )
         ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
         if not ids:
             return 0
