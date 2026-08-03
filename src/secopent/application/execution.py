@@ -36,6 +36,25 @@ class _FindingRepository(Protocol):
     def add(self, finding: Finding) -> None: ...
 
 
+def _compute_coverage(
+    catalog: object | None, asset_types: tuple[object, ...], observations: object
+) -> tuple[float, tuple[str, ...]]:
+    """Best-effort coverage rate from the run's observations.
+
+    Returns (0.0, ()) when catalog/asset_types are unavailable (e.g. tests),
+    so the report endpoint can fall back to 0.0 without crashing. Uses the
+    first asset type; multi-type assessments take the conservative rate.
+    """
+    if catalog is None or not asset_types or not observations:
+        return 0.0, ()
+    try:
+        from .coverage import CoverageService
+        report = CoverageService().compute(asset_types[0], observations, catalog)  # type: ignore[arg-type]
+        return report.coverage_rate, report.uncovered_classes
+    except Exception:  # noqa: BLE001 - coverage is best-effort, never fail execution
+        return 0.0, ()
+
+
 def execute_assessment(
     *,
     assessment_id: str,
@@ -44,6 +63,8 @@ def execute_assessment(
     finding_repo: _FindingRepository,
     audit_repo: object,
     step_runner_factory: Callable[[ScopeSnapshot], StepRunner],
+    catalog: object | None = None,
+    asset_types: tuple[object, ...] = (),
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -52,6 +73,11 @@ def execute_assessment(
     ``RealScanRunner``), dispatches the plan, runs to completion, correlates
     observations into findings (tagged with ``assessment_id``), and updates
     status. Any exception -> ``FAILED`` with the reason audited.
+
+    When ``catalog`` + ``asset_types`` are supplied, a coverage report is
+    computed from the run's observations and the rate is recorded in the
+    ``assessment.completed`` audit payload (so the report endpoint can surface
+    a real number instead of a hardcoded 0.0).
     """
     service = AssessmentService(assessment_repo)
     audit = AuditService(audit_repo)  # type: ignore[arg-type]
@@ -82,10 +108,15 @@ def execute_assessment(
             finding_repo.add(replace(finding, assessment_id=assessment_id))
 
         service.complete(assessment_id)  # RUNNING -> COMPLETED
+        coverage_rate, uncovered = _compute_coverage(catalog, asset_types, observations)
         audit.record(
             actor="system", action="assessment.completed",
             resource_type="assessment", resource_id=assessment_id,
-            payload={"findings": len(findings)},
+            payload={
+                "findings": len(findings),
+                "coverage_rate": coverage_rate,
+                "uncovered_classes": list(uncovered),
+            },
         )
     except Exception as exc:  # noqa: BLE001 - executor must never leak
         with contextlib.suppress(Exception):

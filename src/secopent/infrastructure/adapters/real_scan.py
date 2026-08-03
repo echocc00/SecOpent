@@ -77,6 +77,11 @@ _ADAPTER_RESOURCE_LIMITS: dict[str, dict[str, Any]] = {
     "prowler": {"memory": "1g", "cpus": "1.0"},
     "scoutsuite": {"memory": "1g", "cpus": "1.0"},
     "zap": {"memory": "1g", "cpus": "1.0"},
+    # Fuzzers generate many in-memory requests/sequences; the 512m default OOMs.
+    "schemathesis": {"memory": "1g", "cpus": "1.0"},
+    "restler": {"memory": "1g", "cpus": "1.0"},
+    "checkov": {"memory": "1g", "cpus": "1.0"},
+    "kube_bench": {"memory": "1g", "cpus": "1.0"},
 }
 
 # Adapter-specific Linux capabilities: network scanners need NET_RAW for SYN
@@ -138,7 +143,11 @@ class RealScanRunner:
                 command=list(args),
                 mounts=dict(mounts or {}),
                 network_policy="bridge",
-                resource_limits=dict(resource_limits or _ADAPTER_RESOURCE_LIMITS.get(adapter_key, _DEFAULT_RESOURCE_LIMITS)),
+                resource_limits=dict(
+                    resource_limits or _ADAPTER_RESOURCE_LIMITS.get(
+                        adapter_key, _DEFAULT_RESOURCE_LIMITS
+                    )
+                ),
                 capabilities=list(capabilities or _ADAPTER_CAPABILITIES.get(adapter_key, ())),
             )
             scan_source = source or AdapterSource(

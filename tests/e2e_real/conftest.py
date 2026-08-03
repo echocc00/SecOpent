@@ -8,6 +8,7 @@ down, so the default suite stays green anywhere; run them with
 from __future__ import annotations
 
 import shutil
+import subprocess
 import urllib.request
 import uuid
 from pathlib import Path
@@ -21,7 +22,20 @@ _TARGETS = {
 
 
 def _docker_available() -> bool:
-    return shutil.which("docker") is not None
+    """True only if the docker CLI exists AND the daemon responds.
+
+    ``shutil.which`` alone is insufficient: Docker Desktop may be installed
+    but stopped. ``docker info`` requires a live daemon, so tests SKIP (not
+    fail) when the daemon is down.
+    """
+    if shutil.which("docker") is None:
+        return False
+    try:
+        return subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=5, check=False,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _target_up(url: str) -> bool:

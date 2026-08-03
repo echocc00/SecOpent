@@ -7,8 +7,8 @@ Surface over ``SqlAlchemyReportRepository``:
 - ``GET /reports/{report_id}`` - one report with its sections.
 
 Reports are rendered from Findings/Evidence (never hand-written numbers) by the
-ReportRenderer, with redaction re-applied at render time. Coverage rate is
-reported as 0.0 until the coverage matrix is wired into the run (known gap).
+ReportRenderer, with redaction re-applied at render time. Coverage rate is read
+from the ``assessment.completed`` audit payload (written by the execution layer).
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from ....infrastructure.evidence_store.redaction import RedactionEngine
 from ....infrastructure.report_templates.renderer import Jinja2TemplateRenderer
 from ....infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyAssessmentRepository,
+    SqlAlchemyAuditRepository,
     SqlAlchemyScopeRepository,
 )
 from ....infrastructure.repositories.sqlalchemy_findings import (
@@ -36,6 +37,30 @@ from ..deps import DbSession
 from ..schemas import ReportGenerate, ReportOut, ReportSectionOut
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+def _coverage_from_audit(session: DbSession, assessment_id: str) -> tuple[float, tuple[str, ...]]:
+    """Read the coverage rate recorded by the execution layer.
+
+    ``execute_assessment`` writes ``coverage_rate`` + ``uncovered_classes`` into
+    the ``assessment.completed`` audit payload. Returns (0.0, ()) when no such
+    event exists (pre-coverage runs or not-yet-completed assessments).
+    """
+    events = SqlAlchemyAuditRepository(session).list_events()
+    for event in reversed(events):
+        if (
+            event.action == "assessment.completed"
+            and event.resource_id == assessment_id
+            and "coverage_rate" in event.payload
+        ):
+            rate_raw = event.payload.get("coverage_rate", 0.0)
+            uncovered_raw = event.payload.get("uncovered_classes", ())
+            rate = float(rate_raw) if isinstance(rate_raw, int | float) else 0.0
+            uncovered: tuple[str, ...] = (
+                tuple(uncovered_raw) if isinstance(uncovered_raw, list | tuple) else ()
+            )
+            return rate, uncovered
+    return 0.0, ()
 
 
 def _to_out(report: Report) -> ReportOut:
@@ -107,14 +132,17 @@ def generate_report(
     scope_summary = (
         "In scope: " + ", ".join(snapshot.include) if snapshot else "n/a"
     )
+    # Coverage rate is recorded by the execution layer in the audit chain
+    # (assessment.completed payload); fall back to 0.0 for pre-coverage runs.
+    coverage_rate, uncovered_classes = _coverage_from_audit(session, payload.assessment_id)
     data = ReportData(
         assessment_id=payload.assessment_id,
         title=payload.title,
         scope_summary=scope_summary,
         method="Catalog-driven authorized assessment with oracle N/N verification.",
         findings=tuple(findings),
-        coverage_rate=0.0,
-        uncovered_classes=(),
+        coverage_rate=coverage_rate,
+        uncovered_classes=uncovered_classes,
         evidence_digests=tuple(
             eid for f in findings for eid in f.evidence_ids
         ),

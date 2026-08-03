@@ -7,19 +7,34 @@ default ``pytest`` run stays fast and green; run them explicitly with
 """
 from __future__ import annotations
 
-import os
 import shutil
-import stat
-import tempfile
+import subprocess
 from pathlib import Path
 
 import pytest
 
 
+def _docker_daemon_reachable() -> bool:
+    """True only if the docker CLI exists AND the daemon responds.
+
+    ``shutil.which`` alone is insufficient: Docker Desktop may be installed
+    but stopped, in which case integration tests must SKIP (not fail at the
+    first ``docker image inspect``). ``docker info`` requires a live daemon.
+    """
+    if shutil.which("docker") is None:
+        return False
+    try:
+        return subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=5, check=False,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def pytest_collection_modifyitems(config, items):  # type: ignore[no-untyped-def]
-    if shutil.which("docker"):
+    if _docker_daemon_reachable():
         return
-    skip_docker = pytest.mark.skip(reason="docker not available")
+    skip_docker = pytest.mark.skip(reason="docker daemon not reachable")
     for item in items:
         if "integration" in item.keywords or "e2e_real" in item.keywords:
             item.add_marker(skip_docker)

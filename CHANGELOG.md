@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [0.1.4] - 2026-08-01
+
+`Schema: no | Deps: no | Breaking: no` - systematic hardening pass. Independent
+verification of the v0.1.4-pre fixes (commits ebaba9c..8e30e86) surfaced 3
+residual defects + confirmed the 8 commits' root-cause patterns; this release
+closes them.
+
+### Fixed
+- **Weak Docker skip guard** (root-cause A): `tests/integration/conftest.py` +
+  `tests/e2e_real/conftest.py` used `shutil.which("docker")` which returns True
+  even when the daemon is stopped, so integration tests FAILED (not skipped)
+  with `ImageDigestMismatch`. Now uses `docker info` (daemon reachability).
+- **Report coverage_rate hardcoded 0.0** (root-cause B): `POST /reports` set
+  `coverage_rate=0.0` unconditionally. Now `execute_assessment` computes real
+  coverage (CoverageService over the run's observations + catalog + asset types)
+  and records it in the `assessment.completed` audit payload; the report reads
+  it back. Falls back to 0.0 for pre-coverage runs.
+- **ruff**: `real_scan.py` E501 + `tests/integration/conftest.py` 3 unused
+  imports left by the v0.1.4-pre commits.
+
+### Added
+- **`_ADAPTER_RESOURCE_LIMITS`** expanded (root-cause D): schemathesis, restler,
+  checkov, kube_bench now get 1g/1cpu (fuzzers OOM at the 512m default).
+- **`scripts/pin_digests.py`** (root-cause C): pulls each `:latest` adapter
+  image, resolves its sha256 digest, and (with `--apply`) auto-edits
+  `image_catalog.py`. Run on a Docker+internet host to pin the 9 still-unpinned
+  adapters (fingerprinthub/restler/schemathesis/zap/prowler/trivy/kube_bench/
+  checkov/scoutsuite).
+
+### Verified-OK (no action needed)
+- **Parser error handling** (root-cause E): audited dalfox/kube_bench `return []`
+  - both are legitimate top-level parse failures (no partial results dropped).
+  dalfox NDJSON already `continue`s on bad lines (commit 5).
+- **Unbounded loops** (root-cause F): SSE `while True` already capped at 3600
+  iterations (commit 5); Orchestrator `run_to_completion` capped at 100 rounds.
+- **4 "wired" endpoints** (root-cause B): drift + generate-tests genuinely call
+  DriftDetector/LogicTestGenerator; job retry resets to READY (design: re-start
+  picks up); only report coverage was a real bug (fixed above).
+
+### Notes
+- `:latest` adapter images remain a reproducibility/supply-chain risk until
+  `scripts/pin_digests.py` is run on a provisioned host (documented in
+  `docs/deployment/upgrade.md`).
+
+
 ## [0.1.3] - 2026-07-31
 
 `Schema: no | Deps: no | Breaking: no` — upgrade tooling + runbook (no behavioral

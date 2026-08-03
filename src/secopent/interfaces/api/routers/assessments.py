@@ -233,6 +233,17 @@ def start_assessment(
     def _run() -> None:
         bg_session = db.open_session()
         try:
+            # Compute coverage inputs (catalog + asset types) for the report.
+            catalog = SqlAlchemyCatalogRepository(bg_session).latest_catalog()
+            assessment = SqlAlchemyAssessmentRepository(bg_session).get(assessment_id)
+            scope = (
+                SqlAlchemyScopeRepository(bg_session).get_snapshot(
+                    assessment.scope_snapshot_id
+                )
+                if assessment
+                else None
+            )
+            asset_types = tuple(_classify_asset_types(scope)) if scope else ()
             execute_assessment(
                 assessment_id=assessment_id,
                 assessment_repo=SqlAlchemyAssessmentRepository(bg_session),
@@ -240,6 +251,8 @@ def start_assessment(
                 finding_repo=SqlAlchemyFindingRepository(bg_session),
                 audit_repo=SqlAlchemyAuditRepository(bg_session),
                 step_runner_factory=_production_step_runner,
+                catalog=catalog,
+                asset_types=asset_types,
             )
             bg_session.commit()
         except Exception:
