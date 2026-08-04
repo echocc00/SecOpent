@@ -58,6 +58,8 @@ def init_db(engine: Engine, *, mode: str | None = None) -> None:
     )
     if create_tables:
         CoreBase.metadata.create_all(engine)
+        if os.environ.get("SECOPTENT_DB_STAMP_ON_INIT") == "1":
+            _stamp_head(engine)
     if engine.dialect.name == "sqlite":
         with engine.begin() as connection:
             connection.execute(
@@ -66,6 +68,32 @@ def init_db(engine: Engine, *, mode: str | None = None) -> None:
                     "USING fts5(canonical_id UNINDEXED, cve, description, cwe)"
                 )
             )
+
+
+def _stamp_head(engine: Engine) -> None:
+    """Best-effort: stamp the DB at the alembic baseline so it's tracked (W4-D T3).
+
+    A fresh ``create_all``-bootstrapped DB has the schema but no
+    ``alembic_version`` row; without it, a later ``alembic upgrade`` can't tell
+    the DB is already at head. Stamping records the current revision. Failures
+    are swallowed (alembic/ini missing, or the baseline is stale) - boot must
+    not break; the operator can ``secopent db stamp`` manually.
+    """
+    try:
+        from pathlib import Path
+
+        import secopent
+        from alembic import command
+        from alembic.config import Config
+
+        ini = Path(secopent.__file__).resolve().parents[2] / "alembic.ini"
+        if not ini.exists():
+            return
+        os.environ["SECOPTENT_DB_URL"] = str(engine.url)
+        cfg = Config(str(ini))
+        command.stamp(cfg, "head")
+    except Exception:  # noqa: BLE001 - best-effort stamp; boot must not break
+        pass
 
 
 class Database:

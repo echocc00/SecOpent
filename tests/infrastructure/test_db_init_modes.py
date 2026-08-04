@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from secopent.infrastructure.db.core_models import CoreBase
 from secopent.infrastructure.db.session import init_db
@@ -54,3 +54,21 @@ def test_mode_reads_from_env_when_not_passed(
     eng = _engine()
     init_db(eng)  # no mode arg -> reads SECOPTENT_DB_INIT
     assert not inspect(eng).has_table("core_projects")
+
+
+def test_auto_stamps_fresh_db_when_flag_set(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("SECOPTENT_DB_STAMP_ON_INIT", "1")
+    eng = create_engine(f"sqlite:///{(tmp_path / 't.db').as_posix()}")
+    init_db(eng, mode="auto")
+    with eng.connect() as conn:
+        rows = conn.execute(text("SELECT version_num FROM alembic_version")).fetchall()
+    assert len(rows) == 1  # stamped at head (tracked from baseline)
+
+
+def test_auto_does_not_stamp_when_flag_unset(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    eng = create_engine(f"sqlite:///{(tmp_path / 't.db').as_posix()}")
+    init_db(eng, mode="auto")
+    # create_all does not create alembic_version; stamp skipped (flag unset).
+    assert not inspect(eng).has_table("alembic_version")
