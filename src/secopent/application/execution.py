@@ -16,14 +16,17 @@ subprocess then fails, ``run_to_completion`` raises, and this module records
 from __future__ import annotations
 
 import contextlib
+import secrets
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import timedelta
 from typing import Protocol
 
 import structlog
 
 from ..domain.common.canonical import utc_now
 from ..domain.findings.models import Finding
+from ..domain.permits.models import DEFAULT_PERMIT_TTL_SECONDS, ExecutionPermit
 from ..domain.scope.models import ScopeSnapshot
 from .assessments import AssessmentService
 from .audit import AuditService
@@ -32,6 +35,7 @@ from .finding_correlation import FindingCorrelation
 from .jobs import JobService
 from .orchestrator import Orchestrator, StepRunner
 from .ports.repositories import AssessmentRepository, ScopeRepository
+from .ports.security import PermitRegistry, PermitSignerProtocol
 
 _logger = structlog.get_logger(__name__)
 
@@ -60,6 +64,42 @@ def _compute_coverage(
         return 0.0, ()
 
 
+def _issue_permit(
+    signer: PermitSignerProtocol | None,
+    registry: PermitRegistry | None,
+    *,
+    assessment_id: str,
+    scope_digest: str,
+    plan_digest: str,
+) -> ExecutionPermit | None:
+    """Sign an ExecutionPermit binding this run to its scope + plan (W2-A T3).
+
+    Returns None when no signer is wired (e.g. tests that don't exercise the
+    permit chain). The signed permit's nonce is registered with the registry so
+    EmergencyStop can invalidate it before it's used.
+    """
+    if signer is None:
+        return None
+    now = utc_now()
+    permit = signer.issue(ExecutionPermit(
+        job_id=assessment_id,
+        worker_id="adapter-executor",
+        scope_digest=scope_digest,
+        plan_digest=plan_digest,
+        capabilities=(),
+        budget=0.0,
+        issued_at=now,
+        expires_at=now + timedelta(seconds=DEFAULT_PERMIT_TTL_SECONDS),
+        nonce=secrets.token_urlsafe(16),
+    ))
+    if registry is not None:
+        registry.record_issued(permit.nonce, used=False)
+    _logger.info(
+        "permit issued", assessment_id=assessment_id, permit_nonce=permit.nonce,
+    )
+    return permit
+
+
 def execute_assessment(
     *,
     assessment_id: str,
@@ -72,6 +112,8 @@ def execute_assessment(
     asset_types: tuple[object, ...] = (),
     max_workers: int = 1,
     emergency_stop: EmergencyStop | None = None,
+    permit_signer: PermitSignerProtocol | None = None,
+    permit_registry: PermitRegistry | None = None,
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -104,18 +146,25 @@ def execute_assessment(
             )
             return
 
-        audit.record(
-            actor="system", action="assessment.started",
-            resource_type="assessment", resource_id=assessment_id, payload={},
-        )
-        _logger.info("assessment started", assessment_id=assessment_id)
-
         assessment = assessment_repo.get(assessment_id)
         assert assessment is not None and assessment.active_plan_id is not None
         plan = assessment_repo.get_plan(assessment.active_plan_id)
         assert plan is not None
         scope = scope_repo.get_snapshot(assessment.scope_snapshot_id)
         assert scope is not None
+
+        permit = _issue_permit(
+            permit_signer, permit_registry,
+            assessment_id=assessment_id, scope_digest=scope.digest,
+            plan_digest=plan.digest,
+        )
+
+        audit.record(
+            actor="system", action="assessment.started",
+            resource_type="assessment", resource_id=assessment_id,
+            payload={"permit_nonce": permit.nonce} if permit is not None else {},
+        )
+        _logger.info("assessment started", assessment_id=assessment_id)
 
         step_runner = step_runner_factory(scope)
         jobs = JobService()

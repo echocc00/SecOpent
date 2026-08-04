@@ -53,3 +53,55 @@ def test_execute_refuses_when_emergency_stop_triggered(memory_repositories) -> N
     actions = [e.action for e in memory_repositories.audit.events]
     assert "assessment.blocked.emergency_stop" in actions
     assert "assessment.completed" not in actions
+
+
+# --- T3: Permit signing -----------------------------------------------------
+
+
+def test_start_assessment_signs_permit_bound_to_scope_and_plan(
+    memory_repositories,
+) -> None:
+    from secopent.domain.permits.models import ExecutionPermit
+    from secopent.infrastructure.permits.permit_signer import PermitSigner
+
+    a = _seed_approved(memory_repositories)
+    AssessmentService(memory_repositories.assessments).start(a.id)  # -> QUEUED
+
+    real_signer = PermitSigner()
+    captured: list[ExecutionPermit] = []
+
+    class _CapturingSigner:
+        def issue(self, permit: ExecutionPermit) -> ExecutionPermit:
+            signed = real_signer.issue(permit)
+            captured.append(signed)
+            return signed
+
+    revoker = InMemoryPermitRevoker()
+
+    execute_assessment(
+        assessment_id=a.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        permit_signer=_CapturingSigner(),
+        permit_registry=revoker,
+    )
+
+    assert len(captured) == 1
+    permit = captured[0]
+    assert permit.signature  # non-empty Ed25519 signature
+    assert permit.worker_id == "adapter-executor"
+    assert permit.job_id == a.id
+
+    assessment = memory_repositories.assessments.get(a.id)
+    assert assessment is not None
+    plan = memory_repositories.assessments.get_plan(assessment.active_plan_id)
+    scope = memory_repositories.scopes.get_snapshot(assessment.scope_snapshot_id)
+    assert plan is not None and scope is not None
+    assert permit.scope_digest == scope.digest
+    assert permit.plan_digest == plan.digest
+
+    # nonce registered with the revoker so EmergencyStop can revoke it
+    assert revoker.revoke_unused() == 1
