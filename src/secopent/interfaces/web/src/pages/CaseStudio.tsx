@@ -19,7 +19,6 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { AppModelEditor } from "@/features/case-studio/AppModelEditor";
-import { DriftView } from "@/features/case-studio/DriftView";
 import { PropertyPanel } from "@/features/case-studio/PropertyPanel";
 import { SigningPanel } from "@/features/case-studio/SigningPanel";
 import { TestGenerator } from "@/features/case-studio/TestGenerator";
@@ -203,7 +202,6 @@ export function CaseStudio() {
                 <TabsTrigger value="yaml">YAML (Cases)</TabsTrigger>
                 <TabsTrigger value="signing">Signing</TabsTrigger>
                 <TabsTrigger value="tests">Test Generation</TabsTrigger>
-                <TabsTrigger value="drift">Drift</TabsTrigger>
               </TabsList>
 
               <TabsContent value="editor" className="mt-3 min-h-0 flex-1">
@@ -250,10 +248,6 @@ export function CaseStudio() {
                   version={loaded.version}
                   status={loaded.status}
                 />
-              </TabsContent>
-
-              <TabsContent value="drift" className="mt-3">
-                <DriftView />
               </TabsContent>
             </Tabs>
           </>
