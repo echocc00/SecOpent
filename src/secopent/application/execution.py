@@ -39,6 +39,7 @@ from .orchestrator import Orchestrator, StepRunner
 from .ports.repositories import AssessmentRepository, ScopeRepository
 from .ports.security import (
     EgressGuardProtocol,
+    NftScopeEnforcerProtocol,
     PermitRegistry,
     PermitSignerProtocol,
     PermitVerifierProtocol,
@@ -255,6 +256,7 @@ def execute_assessment(
     permit_verifier: PermitVerifierProtocol | None = None,
     scope_enforcer: ScopeEnforcer | None = None,
     egress_guard: EgressGuardProtocol | None = None,
+    nft_scope_enforcer: NftScopeEnforcerProtocol | None = None,
     audit_chain: AuditChain | None = None,
 ) -> None:
     """Run one assessment to completion in a background thread.
@@ -273,6 +275,7 @@ def execute_assessment(
     service = AssessmentService(assessment_repo)
     audit = AuditService(audit_repo)  # type: ignore[arg-type]
 
+    nft_applied = False
     try:
         service.mark_running(assessment_id)  # QUEUED -> RUNNING
 
@@ -327,6 +330,19 @@ def execute_assessment(
         ):
             return  # out-of-scope/egress-denied target: assessment already FAILED + audited
 
+        # Push the scope into kernel nftables (host-level defence in depth,
+        # W2-B). Best-effort: non-Linux dev hosts have no nft binary; failures
+        # are audited and the run continues on the app-layer EgressGuard alone.
+        if nft_scope_enforcer is not None:
+            try:
+                nft_scope_enforcer.apply_scope(scope)
+                nft_applied = True
+            except Exception as exc:  # noqa: BLE001 - nft is defence-in-depth
+                _logger.warning(
+                    "nft apply_scope failed (continuing on app-layer guard)",
+                    assessment_id=assessment_id, error=str(exc),
+                )
+
         step_runner = step_runner_factory(scope)
         jobs = JobService()
         orchestrator = Orchestrator(jobs, step_runner, max_workers=max_workers)
@@ -366,3 +382,9 @@ def execute_assessment(
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
         )
+    finally:
+        # Flush the nft allow/block sets so the next assessment starts clean
+        # (W2-B). Best-effort: revoke must never mask a real failure.
+        if nft_applied and nft_scope_enforcer is not None:
+            with contextlib.suppress(Exception):
+                nft_scope_enforcer.revoke()

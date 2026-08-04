@@ -397,3 +397,82 @@ def test_full_auth_chain_integration_and_emergency_stop(memory_repositories) -> 
     assert a2.status is AssessmentStatus.FAILED
     actions = [e.action for e in chain.events()]
     assert "assessment.blocked.emergency_stop" in actions
+
+
+# --- W2-B: nftables scope enforcement ---------------------------------------
+
+
+def test_nft_scope_enforcer_applied_and_revoked_around_execution(
+    memory_repositories,
+) -> None:
+    """apply_scope(scope) runs before dispatch; revoke() runs after (finally)."""
+
+    class _CapturingNft:
+        def __init__(self) -> None:
+            self.applied: list[object] = []
+            self.revoked = 0
+
+        def apply_scope(self, snapshot: object) -> object:
+            self.applied.append(snapshot)
+            return None
+
+        def revoke(self) -> None:
+            self.revoked += 1
+
+    nft = _CapturingNft()
+    a = _seed_approved(memory_repositories)
+    AssessmentService(memory_repositories.assessments).start(a.id)
+
+    execute_assessment(
+        assessment_id=a.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        nft_scope_enforcer=nft,
+    )
+
+    assert len(nft.applied) == 1
+    assert nft.applied[0] is memory_repositories.scopes.get_snapshot(
+        memory_repositories.assessments.get(a.id).scope_snapshot_id
+    )
+    assert nft.revoked == 1  # revoke ran in finally
+    assert memory_repositories.assessments.get(a.id).status is AssessmentStatus.COMPLETED
+
+
+def test_nft_scope_enforcer_revoked_even_on_failure(memory_repositories) -> None:
+    """revoke() runs in finally even when the assessment fails."""
+
+    class _CapturingNft:
+        def __init__(self) -> None:
+            self.applied: list[object] = []
+            self.revoked = 0
+
+        def apply_scope(self, snapshot: object) -> object:
+            self.applied.append(snapshot)
+            return None
+
+        def revoke(self) -> None:
+            self.revoked += 1
+
+    nft = _CapturingNft()
+    a = _seed_approved(memory_repositories)
+    AssessmentService(memory_repositories.assessments).start(a.id)
+
+    def _boom(_scope):  # noqa: ANN001
+        raise RuntimeError("adapter exploded")
+
+    execute_assessment(
+        assessment_id=a.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=_boom,
+        nft_scope_enforcer=nft,
+    )
+
+    assert nft.applied  # apply ran before the boom
+    assert nft.revoked == 1  # revoke still ran in finally
+    assert memory_repositories.assessments.get(a.id).status is AssessmentStatus.FAILED

@@ -49,7 +49,7 @@ from ...infrastructure.db.engine import (
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
 from ...infrastructure.egress.egress_guard import EgressGuard
-from ...infrastructure.egress.nft_scope import SocketDnsResolver
+from ...infrastructure.egress.nft_scope import NftScopeEnforcer, SocketDnsResolver
 from ...infrastructure.evidence_store.redaction import RedactionEngine
 from ...infrastructure.llm.null_backend import NullModelBackend
 from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
@@ -336,6 +336,15 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # and prompt-injection guard (validates agent actions on the proposal path).
     app.state.egress_guard = EgressGuard(SocketDnsResolver())
     app.state.prompt_injection_guard = PromptInjectionGuard()
+    # Kernel-level egress (W2-B): pushes the scope's resolved targets into the
+    # nftables allow/block sets so egress is enforced at the packet level. The
+    # execution path calls apply_scope/revoke around dispatch; on non-Linux dev
+    # hosts apply_scope is best-effort (no nft binary -> audited + skipped).
+    app.state.nft_scope_enforcer = NftScopeEnforcer(
+        SocketDnsResolver(),
+        guard=app.state.egress_guard,
+        audit=audit_chain,
+    )
 
     # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
     # null backend so LLM-assisted endpoints degrade to their deterministic
@@ -370,6 +379,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.emergency_stop = app.state.emergency_stop
     api.state.egress_guard = app.state.egress_guard
     api.state.prompt_injection_guard = app.state.prompt_injection_guard
+    api.state.nft_scope_enforcer = app.state.nft_scope_enforcer
     _register_api(api)
     app.mount("/api", api)
 

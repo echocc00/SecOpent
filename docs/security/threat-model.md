@@ -71,7 +71,7 @@
 |---|---|
 | Agent 执行任意 Shell | MCP 禁注册 shell/docker_run/execute_python（条件 3） |
 | 未批准 Active/Intrusive 执行 | PolicyEngine 风险/能力门 + Approval（条件 4） |
-| 插件逃逸沙箱 | seccomp + read-only + non-root + cap-drop ALL + 禁 Docker Socket（条件 9） |
+| 插件逃逸沙箱 | Docker 默认 seccomp（永不 unconfined）+ read-only + non-root + cap-drop ALL + 禁 Docker Socket（条件 9） |
 | Agent 自我提权（改 scope/case/审批） | PromptInjectionGuard 保护资源集 + LLM 不裁决（条件 8） |
 | Scope 外执行 | ScopeEnforcer 10 步链 + EgressGuard 双校验（条件 1/2） |
 

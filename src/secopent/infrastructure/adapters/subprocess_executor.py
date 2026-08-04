@@ -12,10 +12,14 @@ Security guarantees enforced here:
 - **non-root**: ``--user 65532:65532``;
 - **no capabilities**: ``--cap-drop ALL``;
 - **read-only rootfs**: ``--read-only`` with a ``noexec,nosuid`` tmpfs at /tmp;
+- **seccomp**: Docker's **default** profile is in effect (never
+  ``seccomp=unconfined``); ~60 dangerous syscalls blocked. No custom profile
+  is shipped (W2-B honesty: the M2 "custom seccomp profile" claim is deferred
+  until a curated whitelist is validated against all adapters);
 - **resource limits**: ``--memory`` / ``--cpus``;
 - **network**: option c bridge (see ``egress/network_policy.py``) - scope is
-  enforced at the application layer (PolicyEngine); M5 strengthens this to
-  nftables/netns network isolation.
+  enforced at the application layer (EgressGuard) + host-level nftables
+  (W2-B ``NftScopeEnforcer`` apply_scope/revoke around dispatch).
 
 A timeout returns ``exit_code=124`` (matching the timeout(1) convention) rather
 than raising, so the AdapterRunner records it as a non-completed run.

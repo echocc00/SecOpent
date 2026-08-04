@@ -66,3 +66,19 @@ class EgressGuardProtocol(Protocol):
     """
 
     def check(self, target: str, scope: ScopeSnapshot) -> PolicyDecision: ...
+
+
+@runtime_checkable
+class NftScopeEnforcerProtocol(Protocol):
+    """Push a scope's resolved targets into kernel nftables allow/block sets.
+
+    Host-level defence in depth: even if a container's application-layer
+    EgressGuard is bypassed, the nft output chain default-drops anything not in
+    the allow set. ``apply_scope`` is best-effort (non-Linux dev hosts have no
+    nft binary; failures are audited and the run continues on app-layer guard
+    alone). Concrete impl (NftScopeEnforcer) lives in infrastructure.
+    """
+
+    def apply_scope(self, snapshot: ScopeSnapshot) -> object: ...
+
+    def revoke(self) -> None: ...

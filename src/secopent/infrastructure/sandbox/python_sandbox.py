@@ -4,11 +4,17 @@
 A plugin is statically scanned before it runs: forbidden module imports
 (subprocess/os/socket/docker/ctypes/importlib/shutil) and forbidden calls
 (eval/exec/compile/__import__/open/getattr) are rejected - the plugin can only
-reach the world through the CaseContext SDK. The actual isolation (seccomp
-profile + read-only/non-root/cap-drop ALL/no-new-privileges/no-host-network/
+reach the world through the CaseContext SDK. The runtime isolation
+(read-only/non-root/cap-drop ALL/no-new-privileges/no-host-network/
 no-docker-socket container) is provided by an injected ``SandboxRuntime``
-(Docker in M5; a mock in tests). seccomp is the M2-locked isolation choice: it
-is lighter than gVisor and runs on the 2C2G Lite target.
+(Docker in production; a mock in tests).
+
+seccomp: containers run under Docker's **default** seccomp profile (never
+disabled; ~60 dangerous syscalls blocked). No custom profile is shipped - a
+tighter whitelist is a future hardening option. The M2 design (sepcs/
+2026-07-25-m2-verification-case-engine-plan.md) proposed a custom seccomp
+profile; W2-B honestly downgrades this to "Docker default" until a curated
+profile is validated against all adapters.
 """
 from __future__ import annotations
 

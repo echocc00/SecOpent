@@ -68,6 +68,39 @@ def test_run_without_extra_labels_unchanged(monkeypatch: Any) -> None:
     assert result.exit_code == 0
 
 
+def test_seccomp_is_never_disabled(monkeypatch: Any) -> None:
+    """W2-B honesty: containers must never run seccomp=unconfined (Docker's
+    default profile is always in effect)."""
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        captured.setdefault("args", list(args))
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Result()  # type: ignore[return-value]
+
+    import subprocess as sp
+
+    monkeypatch.setattr(sp, "run", fake_run)
+    executor = SubprocessContainerExecutor()
+    executor.run(
+        image_digest="alpine:3.20",
+        command=["true"],
+        mounts={},
+        network_policy="scoped-egress",
+        resource_limits={},
+    )
+    args = captured["args"]
+    security_opts = [
+        args[i + 1] for i, a in enumerate(args) if a == "--security-opt"
+    ]
+    assert "seccomp=unconfined" not in security_opts
+
+
 def test_env_flags_appear_alongside_home(monkeypatch: Any) -> None:
     """Regression: caller-supplied --env pairs coexist with HOME=/tmp (P2)."""
     captured: dict[str, list[str]] = {}

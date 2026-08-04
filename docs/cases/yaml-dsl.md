@@ -62,11 +62,11 @@ assertions:
 
 **声明风险不得低于计算风险**（可声明更高，保守允许）。不达标 `RiskAnalyzer.enforce_publish` 阻止发布。
 
-## Python 插件沙箱（§11.4，seccomp）
+## Python 插件沙箱（§11.4，AST 静态扫描 + Docker 默认 seccomp）
 
-`infrastructure/sandbox/python_sandbox.py`：插件运行前**静态扫描**，拒绝 forbidden import（subprocess/os/socket/docker/ctypes/importlib/shutil/sys）与 forbidden call（eval/exec/compile/__import__/open/getattr/...）。隔离用 **seccomp**（M2 锁定，比 gVisor 轻，2C2G Lite 可跑）+ 容器 `read-only / non-root / cap-drop ALL / no-new-privileges / 无 Host Network / 无 Docker Socket`。
+`infrastructure/sandbox/python_sandbox.py`：插件运行前**静态扫描**，拒绝 forbidden import（subprocess/os/socket/docker/ctypes/importlib/shutil/sys）与 forbidden call（eval/exec/compile/__import__/open/getattr/...）。运行时隔离用容器 `read-only / non-root / cap-drop ALL / no-new-privileges / 无 Host Network / 无 Docker Socket` + Docker **默认 seccomp profile**（永不 `seccomp=unconfined`，约 60 个危险 syscall 被阻断）。M2 设计曾提自定义 seccomp profile，W2-B 诚实降级为"Docker 默认"直到策展白名单通过全 adapter 验证。
 
-插件只能通过 **CaseContext SDK** 获取声明式 Capability：`scoped_http / scoped_tcp / credential_ref / temp_fs / oast / emit_observation`。`credential_ref` 返回引用句柄，**绝不返回原始 secret**。Docker/seccomp 运行时在 M5；M2 用注入的 `SandboxRuntime` mock。
+插件只能通过 **CaseContext SDK** 获取声明式 Capability：`scoped_http / scoped_tcp / credential_ref / temp_fs / oast / emit_observation`。`credential_ref` 返回引用句柄，**绝不返回原始 secret**。Docker 运行时由 `SubprocessContainerExecutor` 提供；测试用注入的 `SandboxRuntime` mock。
 
 ## 生命周期（§11.5/§11.8）
 

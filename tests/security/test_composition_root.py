@@ -12,6 +12,7 @@ from secopent.application.prompt_injection import (
 from secopent.application.scope_enforcer import ScopeEnforcer
 from secopent.infrastructure.db.sqlite import create_sqlite_engine
 from secopent.infrastructure.egress.egress_guard import EgressGuard
+from secopent.infrastructure.egress.nft_scope import NftScopeEnforcer
 from secopent.infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from secopent.infrastructure.safety.permit_revoker import InMemoryPermitRevoker
 from secopent.interfaces.api.main import create_app
@@ -29,6 +30,7 @@ def test_create_app_assembles_security_components_in_state(tmp_path) -> None:
     assert isinstance(app.state.scope_enforcer, ScopeEnforcer)
     assert isinstance(app.state.egress_guard, EgressGuard)
     assert isinstance(app.state.prompt_injection_guard, PromptInjectionGuard)
+    assert isinstance(app.state.nft_scope_enforcer, NftScopeEnforcer)
 
     # EmergencyStop shares the registry + audit chain (kill switch wiring).
     assert app.state.emergency_stop._permit_revoker is app.state.permit_registry
