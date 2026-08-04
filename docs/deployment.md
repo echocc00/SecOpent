@@ -97,4 +97,5 @@ secopent restore --db <sqlite文件> --from <备份文件>
 - [ ] 审计链启用 HMAC（防篡改要求时）
 - [ ] 签名审计链持久化（H6，W3-C）：`SECOPTENT_AUDIT_KEY_PATH` 指向 0600 审计签名密钥文件（首启自动生成；跨重启签名链可复验）；签名事件落 `core_signed_audit_events` 表
 - [ ] 网络命名空间隔离（W3-F，Linux）：`NetnsIsolator` + `NftScopeEnforcer(netns=...)` 已就绪--每个 assessment 建独立 netns、nft 规则在 netns 内生效。**剩余**：Docker 扫描容器进 netns 的 `--network` 接线需 Linux 环境（`ip netns exec` + Docker 网络工程），当前在非 Linux 开发机上不可真测；Linux 部署时应接通
+- [ ] Peer-agent 接线（W4-A）：`SECOPTENT_PEER_AGENTS_ENABLED=1` + `LLM_API_KEY` 启用 `PeerAgentService`（`/peer-agents`、`/assessments/{id}/peer-runs` 路由）；当前用 `NullPeerAgentHarness` 降级（strix/shannon 镜像未 pin digest，launch 返回空结果）。真 backends 待镜像构建 + digest pinning 后，去掉 `harness=NullPeerAgentHarness()` 改用 factory 默认 `ContainerPeerAgentHarness`。peer run 审计经 `DatabaseAuditRecorder` 落库（session-per-call，singleton 安全）
 - [ ] Docker / 镜像 digest-pin / 靶场 / Interactsh / LLM key 按 `environment-setup.md` 就绪
