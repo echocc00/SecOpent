@@ -115,12 +115,14 @@ class NftScopeEnforcer:
         audit: AuditSink | None = None,
         table: str = _DEFAULT_TABLE,
         blocked_cidrs: tuple[str, ...] = DEFAULT_BLOCKED_CIDRS,
+        netns: str | None = None,
     ) -> None:
         self._dns = dns_resolver
         self._guard = guard or EgressGuard(dns_resolver, blocked_cidrs=blocked_cidrs)
         self._runner = runner or _default_runner
         self._audit = audit
         self._table = table
+        self._netns = netns
         self._blocked_nets = [
             ipaddress.ip_network(cidr, strict=False) for cidr in blocked_cidrs
         ]
@@ -211,6 +213,9 @@ class NftScopeEnforcer:
             )
 
     def _run(self, args: list[str]) -> None:
+        if self._netns is not None:
+            # W3-F: run nft inside the isolated netns (ip netns exec <netns> nft ...).
+            args = ["ip", "netns", "exec", self._netns, *args]
         self._runner(args)
 
     def _record(self, action: str, resource_id: str) -> None:
