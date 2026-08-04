@@ -21,9 +21,14 @@ def manifest() -> AdapterManifest:
     """Return the subfinder AdapterManifest.
 
     subfinder is a passive subdomain enumeration tool (ProjectDiscovery, MIT).
-    Upstream digest is a placeholder sha256 - the real digest is pinned at M5
-    container build time; for M1 the manifest only needs to be structurally
-    valid and uniquely identifiable.
+
+    The upstream ``digest`` is a PLACEHOLDER (``sha256:subfinder-<version>``),
+    not a real image content hash - it is structurally valid + uniquely
+    identifiable, which is all the M1 manifest contract required. The real
+    pinned image digest lives in ``infrastructure/adapters/image_catalog.py``
+    (key ``"subfinder"``); before running adapters in production the manifest
+    digest must be pinned to that catalog digest (M5 container-build task, see
+    ``docs/deployment.md`` §8 supply-chain gate).
     """
     return AdapterManifest(
         id="subfinder",
