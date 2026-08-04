@@ -21,3 +21,6 @@ playwright-report/
 *.shm
 minimax-key.txt
 云主机.txt
+# Local ops scripts with live cloud credentials -- never commit.
+# Sanitize (env vars / SecretStore) before tracking.
+scripts/pentest_cloud_host.py
