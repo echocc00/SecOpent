@@ -54,6 +54,7 @@ from ...infrastructure.db.engine import (
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
 from ...infrastructure.egress.egress_guard import EgressGuard
+from ...infrastructure.egress.netns_isolator import NetnsIsolator
 from ...infrastructure.egress.nft_scope import NftScopeEnforcer, SocketDnsResolver
 from ...infrastructure.evidence_store.redaction import RedactionEngine
 from ...infrastructure.llm.null_backend import NullModelBackend
@@ -395,15 +396,25 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # and prompt-injection guard (validates agent actions on the proposal path).
     app.state.egress_guard = EgressGuard(SocketDnsResolver())
     app.state.prompt_injection_guard = PromptInjectionGuard()
-    # Kernel-level egress (W2-B): pushes the scope's resolved targets into the
-    # nftables allow/block sets so egress is enforced at the packet level. The
-    # execution path calls apply_scope/revoke around dispatch; on non-Linux dev
-    # hosts apply_scope is best-effort (no nft binary -> audited + skipped).
-    app.state.nft_scope_enforcer = NftScopeEnforcer(
-        SocketDnsResolver(),
-        guard=app.state.egress_guard,
-        audit=audit_chain,
-    )
+    # Kernel-level egress (W2-B / W4-B): pushes the scope's resolved targets
+    # into the nftables allow/block sets so egress is enforced at the packet
+    # level. NetnsIsolator creates a per-assessment netns on Linux so each
+    # assessment's nft rules (and eventually its scan container) are isolated
+    # from the host default netns; make_nft_enforcer builds an enforcer bound
+    # to a given netns. The legacy singleton (netns=None) is kept for non-Linux
+    # dev hosts and any reader that still reads app.state.nft_scope_enforcer.
+    app.state.netns_isolator = NetnsIsolator()
+
+    def make_nft_enforcer(netns: str | None) -> NftScopeEnforcer:
+        return NftScopeEnforcer(
+            SocketDnsResolver(),
+            guard=app.state.egress_guard,
+            audit=audit_chain,
+            netns=netns,
+        )
+
+    app.state.make_nft_enforcer = make_nft_enforcer
+    app.state.nft_scope_enforcer = make_nft_enforcer(None)
 
     # Oracle (W3-A): canary singleton auditing to the shared signed chain + a
     # shared RealScanRunner for N/N rescan reproduction. OracleService is
@@ -486,6 +497,8 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.egress_guard = app.state.egress_guard
     api.state.prompt_injection_guard = app.state.prompt_injection_guard
     api.state.nft_scope_enforcer = app.state.nft_scope_enforcer
+    api.state.netns_isolator = app.state.netns_isolator
+    api.state.make_nft_enforcer = app.state.make_nft_enforcer
     api.state.canary = app.state.canary
     api.state.oracle = app.state.oracle
     api.state.peer_agent_service = app.state.peer_agent_service
