@@ -61,6 +61,8 @@ from ...infrastructure.logging_setup import configure_logging
 from ...infrastructure.observability.context import install_request_context
 from ...infrastructure.observability.metrics import render_metrics
 from ...infrastructure.observability.tracing import setup_tracing
+from ...infrastructure.oracle.interactsh import InteractshClient
+from ...infrastructure.oracle.null_interactsh import NullInteractshTransport
 from ...infrastructure.oracle.verifier_factory import RescanVerifierFactory
 from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from ...infrastructure.repositories.sqlalchemy_audit_chain import (
@@ -410,8 +412,12 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     template_host_dir = (
         os.environ.get("SECOPTENT_NUCLEI_TEMPLATE_DIR", "").strip() or None
     )
+    # OOB callback channel (W3-E): NullInteractshTransport until the self-hosted
+    # interactsh-server is deployed (M5, SECOPTENT_INTERACTSH_SERVER_URL). OOB
+    # verification is wired but reports FAILURE without a live server.
+    interactsh = InteractshClient(NullInteractshTransport())
     verifier_factory = RescanVerifierFactory(
-        oracle_scan_runner, template_host_dir, canary
+        oracle_scan_runner, template_host_dir, canary, interactsh=interactsh
     )
     app.state.canary = canary
     app.state.oracle = OracleService(

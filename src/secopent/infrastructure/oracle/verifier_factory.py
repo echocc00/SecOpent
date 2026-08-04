@@ -17,6 +17,7 @@ from typing import Any
 
 from ...application.oracle import OracleVerifier
 from ..adapters.real_scan import RealScanRunner
+from .interactsh import InteractshClient
 from .rescan_verifier import RescanVerifier
 
 
@@ -28,14 +29,22 @@ class RescanVerifierFactory:
         scan_runner: RealScanRunner,
         template_host_dir: str | None,
         canary: Any,  # CanaryTokenManager (typed via the port in OracleService)
+        *,
+        interactsh: InteractshClient | None = None,
     ) -> None:
         self._scan_runner = scan_runner
         self._template_host_dir = template_host_dir
         self._canary = canary
+        self._interactsh = interactsh
 
     def for_finding(self, finding: Any) -> OracleVerifier:
         args = ["-t", "/templates/", "-u", finding.asset, "-jsonl", "-silent", "-duc"]
         scan_kwargs: dict[str, Any] = {"adapter_key": "nuclei", "args": args}
         if self._template_host_dir:
             scan_kwargs["mounts"] = {"/templates": self._template_host_dir}
-        return RescanVerifier(self._scan_runner, scan_kwargs, canary=self._canary)
+        return RescanVerifier(
+            self._scan_runner,
+            scan_kwargs,
+            canary=self._canary,
+            interactsh=self._interactsh,
+        )
