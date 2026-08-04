@@ -25,6 +25,7 @@ from typing import Protocol
 import structlog
 
 from ..domain.common.canonical import utc_now
+from ..domain.common.errors import DomainError
 from ..domain.findings.models import Finding
 from ..domain.permits.models import DEFAULT_PERMIT_TTL_SECONDS, ExecutionPermit
 from ..domain.scope.models import ScopeSnapshot
@@ -35,7 +36,8 @@ from .finding_correlation import FindingCorrelation
 from .jobs import JobService
 from .orchestrator import Orchestrator, StepRunner
 from .ports.repositories import AssessmentRepository, ScopeRepository
-from .ports.security import PermitRegistry, PermitSignerProtocol
+from .ports.security import PermitRegistry, PermitSignerProtocol, PermitVerifierProtocol
+from .scope_enforcer import EnforcementContext, ScopeEnforcer
 
 _logger = structlog.get_logger(__name__)
 
@@ -100,6 +102,88 @@ def _issue_permit(
     return permit
 
 
+def _verify_permit(
+    permit: ExecutionPermit | None,
+    verifier: PermitVerifierProtocol | None,
+    registry: PermitRegistry | None,
+    assessment_id: str,
+    service: AssessmentService,
+    audit: AuditService,
+) -> bool | None:
+    """Verify the signed permit (signature + expiry + replay + worker).
+
+    Returns True if the permit is valid (or no verifier is wired). Returns
+    None if verification failed (the assessment is already FAILED + audited).
+    On success the nonce is marked used so it cannot be replayed.
+    """
+    if verifier is None or permit is None:
+        return True
+    try:
+        verifier.verify(
+            permit, now=utc_now(), used_nonces=frozenset(),
+            expected_worker="adapter-executor",
+        )
+    except DomainError as exc:
+        service.fail(assessment_id, f"PERMIT_INVALID:{exc}")
+        audit.record(
+            actor="system", action="assessment.blocked.permit_invalid",
+            resource_type="assessment", resource_id=assessment_id,
+            payload={"reason": str(exc)},
+        )
+        _logger.warning(
+            "permit verification failed", assessment_id=assessment_id, error=str(exc),
+        )
+        return None
+    if registry is not None:
+        registry.record_used(permit.nonce)
+    return True
+
+
+def _check_plan_scope(
+    enforcer: ScopeEnforcer | None,
+    plan: object,
+    scope: ScopeSnapshot,
+    permit_valid: bool,
+    assessment_id: str,
+    service: AssessmentService,
+    audit: AuditService,
+) -> bool:
+    """Pre-check every plan target against the scope before dispatch.
+
+    Returns True if all targets are in scope (or no enforcer is wired).
+    Returns False (and FAILS + audits the assessment) on the first denial.
+    """
+    if enforcer is None:
+        return True
+    steps = getattr(plan, "steps", ())
+    for step in steps:
+        target = step.parameters.get("target") if hasattr(step, "parameters") else None
+        if not target:
+            continue
+        context = EnforcementContext(
+            risk=step.risk,
+            approved_risks=frozenset({step.risk}),
+            approved=True,
+            budget_remaining=1.0,
+            now=utc_now(),
+            permit_valid=permit_valid,
+        )
+        decision = enforcer.check(target, scope, context)
+        if not decision.allowed:
+            service.fail(assessment_id, f"SCOPE_VIOLATION:{decision.reason}")
+            audit.record(
+                actor="system", action="assessment.blocked.scope_violation",
+                resource_type="assessment", resource_id=assessment_id,
+                payload={"target": target, "reason": decision.reason},
+            )
+            _logger.warning(
+                "scope violation", assessment_id=assessment_id,
+                target=target, reason=decision.reason,
+            )
+            return False
+    return True
+
+
 def execute_assessment(
     *,
     assessment_id: str,
@@ -114,6 +198,8 @@ def execute_assessment(
     emergency_stop: EmergencyStop | None = None,
     permit_signer: PermitSignerProtocol | None = None,
     permit_registry: PermitRegistry | None = None,
+    permit_verifier: PermitVerifierProtocol | None = None,
+    scope_enforcer: ScopeEnforcer | None = None,
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -159,12 +245,23 @@ def execute_assessment(
             plan_digest=plan.digest,
         )
 
+        permit_valid = _verify_permit(
+            permit, permit_verifier, permit_registry, assessment_id, service, audit,
+        )
+        if permit_valid is None:
+            return  # verification failed: assessment already FAILED + audited
+
         audit.record(
             actor="system", action="assessment.started",
             resource_type="assessment", resource_id=assessment_id,
             payload={"permit_nonce": permit.nonce} if permit is not None else {},
         )
         _logger.info("assessment started", assessment_id=assessment_id)
+
+        if not _check_plan_scope(
+            scope_enforcer, plan, scope, permit_valid, assessment_id, service, audit,
+        ):
+            return  # out-of-scope target: assessment already FAILED + audited
 
         step_runner = step_runner_factory(scope)
         jobs = JobService()

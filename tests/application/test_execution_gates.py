@@ -105,3 +105,150 @@ def test_start_assessment_signs_permit_bound_to_scope_and_plan(
 
     # nonce registered with the revoker so EmergencyStop can revoke it
     assert revoker.revoke_unused() == 1
+
+
+# --- T4: Permit verification + ScopeEnforcer --------------------------------
+
+
+def test_permit_verification_failure_fails_assessment(memory_repositories) -> None:
+    """A permit signed by key A but verified with key B -> FAILED."""
+    from secopent.infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
+
+    a = _seed_approved(memory_repositories)
+    AssessmentService(memory_repositories.assessments).start(a.id)
+
+    signer = PermitSigner()  # key A
+    wrong_verifier = PermitVerifier(PermitSigner().public_key_bytes())  # key B
+
+    execute_assessment(
+        assessment_id=a.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        permit_signer=signer,
+        permit_registry=InMemoryPermitRevoker(),
+        permit_verifier=wrong_verifier,
+    )
+
+    assessment = memory_repositories.assessments.get(a.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.FAILED
+    actions = [e.action for e in memory_repositories.audit.events]
+    assert "assessment.blocked.permit_invalid" in actions
+
+
+def test_permit_verification_success_proceeds_to_completion(memory_repositories) -> None:
+    """A permit signed + verified with the same key -> COMPLETED."""
+    from secopent.infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
+
+    a = _seed_approved(memory_repositories)
+    AssessmentService(memory_repositories.assessments).start(a.id)
+
+    signer = PermitSigner()
+    verifier = PermitVerifier(signer.public_key_bytes())
+
+    execute_assessment(
+        assessment_id=a.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        permit_signer=signer,
+        permit_registry=InMemoryPermitRevoker(),
+        permit_verifier=verifier,
+    )
+
+    assessment = memory_repositories.assessments.get(a.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.COMPLETED
+
+
+def _seed_approved_ip_scope(repos, *, target: str) -> None:
+    """Seed an assessment whose scope is an IP network (enforcer-friendly)."""
+    from datetime import UTC, datetime
+
+    from secopent.domain.policy.models import ExecutionMode, RiskClass
+    from secopent.domain.projects.models import Project
+    from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
+
+    repos.projects.add(Project.create(project_id="p1", name="t"))
+    repos.scopes.add_snapshot(ScopeSnapshot(
+        id="s1", project_id="p1", include=("10.0.0.0/30",), exclude=(),
+        ports=(80,),
+        limits=ScopeLimits(requests_per_second=10, concurrency=2, max_requests=100),
+        approved_by="a", approved_at=datetime.now(UTC), digest="sha256:scope-ip",
+    ))
+    service = AssessmentService(repos.assessments)
+    assessment = service.create(
+        project_id="p1", scope_snapshot_id="s1", mode=ExecutionMode.APPROVAL,
+    )
+    from secopent.domain.assessments.models import PlanStep
+    service.attach_plan(assessment.id, steps=(
+        PlanStep(
+            key="nuclei-sqli", runner="nuclei", risk=RiskClass.LOW,
+            parameters={"target": target}, dependencies=(),
+        ),
+    ))
+    service.approve(
+        assessment_id=assessment.id, approved_by="analyst",
+        approved_risks=frozenset({RiskClass.LOW}),
+        approved_capabilities=frozenset(), scope_digest="sha256:scope-ip",
+    )
+
+
+class _NullDnsResolver:
+    def resolve(self, host: str) -> tuple[str, ...]:
+        return ()
+
+
+def test_scope_enforcer_denies_out_of_scope_target(memory_repositories) -> None:
+    from secopent.application.scope_enforcer import ScopeEnforcer
+
+    _seed_approved_ip_scope(memory_repositories, target="http://192.168.50.50")
+    assessment = memory_repositories.assessments.items[
+        next(iter(memory_repositories.assessments.items))
+    ]
+    AssessmentService(memory_repositories.assessments).start(assessment.id)
+
+    execute_assessment(
+        assessment_id=assessment.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        scope_enforcer=ScopeEnforcer(_NullDnsResolver()),
+    )
+
+    assessment = memory_repositories.assessments.get(assessment.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.FAILED
+    actions = [e.action for e in memory_repositories.audit.events]
+    assert "assessment.blocked.scope_violation" in actions
+
+
+def test_scope_enforcer_allows_in_scope_target(memory_repositories) -> None:
+    from secopent.application.scope_enforcer import ScopeEnforcer
+
+    _seed_approved_ip_scope(memory_repositories, target="http://10.0.0.1")
+    assessment = memory_repositories.assessments.items[
+        next(iter(memory_repositories.assessments.items))
+    ]
+    AssessmentService(memory_repositories.assessments).start(assessment.id)
+
+    execute_assessment(
+        assessment_id=assessment.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        scope_enforcer=ScopeEnforcer(_NullDnsResolver()),
+    )
+
+    assessment = memory_repositories.assessments.get(assessment.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.COMPLETED
