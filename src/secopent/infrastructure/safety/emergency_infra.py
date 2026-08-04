@@ -8,9 +8,10 @@ protocols so ``EmergencyStop`` can act on the real environment:
   ``secopent=execution``) via the Docker CLI. Raises ``DockerUnreachableError``
   when the daemon cannot be contacted - an emergency stop MUST fail loudly
   rather than silently report success.
-- ``NullPermitRevoker`` is a placeholder: permits are short-lived signed tokens
-  not persisted in a revocable store yet, so there is nothing to revoke (0).
-  A revocable permit store is a follow-up (P4 remote worker).
+- ``NullPermitRevoker`` is the no-op fallback for tests/legacy paths: production
+  wires ``InMemoryPermitRevoker`` (``infrastructure/safety/permit_revoker.py``)
+  in the composition root so permits ARE persisted in a revocable store. Keep
+  NullPermitRevoker for unit tests that exercise EmergencyStop in isolation.
 """
 from __future__ import annotations
 

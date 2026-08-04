@@ -11,8 +11,6 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 
 from ....application.assessments import AssessmentPermissionError, AssessmentService
-from ....application.audit import AuditService
-from ....application.emergency_stop import EmergencyStop
 from ....application.execution import execute_assessment
 from ....application.planner import Planner
 from ....domain.assessments.models import Assessment, ExecutionPlan
@@ -35,10 +33,6 @@ from ....infrastructure.repositories.sqlalchemy_core import (
 )
 from ....infrastructure.repositories.sqlalchemy_findings import (
     SqlAlchemyFindingRepository,
-)
-from ....infrastructure.safety.emergency_infra import (
-    DockerContainerTerminator,
-    NullPermitRevoker,
 )
 from ..deps import DbSession
 from ..schemas import (
@@ -379,11 +373,10 @@ def emergency_stop(
     # background executor sees the triggered flag and refuses new assessments.
     stop = getattr(request.app.state, "emergency_stop", None)
     if stop is None:
-        # Fallback (older app without composition root): construct per-call.
-        stop = EmergencyStop(
-            permit_revoker=NullPermitRevoker(),
-            container_terminator=DockerContainerTerminator(),
-            audit=AuditService(SqlAlchemyAuditRepository(session)),
+        # The composition root is mandatory since W2-A; an unconfigured app
+        # must fail loudly (503) rather than silently revoke 0 permits.
+        raise HTTPException(
+            status_code=503, detail="emergency stop not configured"
         )
     report = stop.trigger(actor=payload.actor, reason=payload.reason)
     return EmergencyReportOut(
