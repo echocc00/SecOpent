@@ -34,14 +34,34 @@ from cryptography.fernet import Fernet
 class PersistentEncryptedFileBackend:
     """Disk-persisted Fernet secret store; survives restart, 0600 file perms."""
 
-    def __init__(self, store_path: Path, key_path: Path) -> None:
+    def __init__(
+        self,
+        store_path: Path,
+        key_path: Path,
+        *,
+        env_key: str | None = None,
+    ) -> None:
         self._store_path = store_path
         self._key_path = key_path
-        self._fernet = Fernet(self._load_or_create_key())
+        self._env_key = env_key
+        self._key = self._load_or_create_key()
+        self._fernet = Fernet(self._key)
         self._store: dict[str, str] = self._load_store()
 
     def _load_or_create_key(self) -> bytes:
-        """Load the Fernet key, generating + persisting it on first use (0600)."""
+        """Load the Fernet key.
+
+        Priority: (1) ``env_key`` env var (operator/KMS-injected, never written
+        to disk); (2) ``key_path`` file (read if present, else generated +
+        persisted 0600). An invalid env value raises ValueError at startup so a
+        misconfigured key fails fast rather than silently regenerating.
+        """
+        if self._env_key is not None:
+            raw = os.environ.get(self._env_key)
+            if raw:
+                key = raw.strip().encode("utf-8")
+                Fernet(key)  # validates format; raises ValueError on garbage
+                return key
         if self._key_path.exists():
             return self._key_path.read_bytes().strip()
         self._key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +69,11 @@ class PersistentEncryptedFileBackend:
         self._atomic_write(self._key_path, key)
         os.chmod(self._key_path, 0o600)
         return key
+
+    def key_bytes(self) -> bytes:
+        """The current Fernet master key (for export/rotation auditing)."""
+        return self._key
+
 
     def _load_store(self) -> dict[str, str]:
         if not self._store_path.exists():
