@@ -91,6 +91,7 @@ secopent restore --db <sqlite文件> --from <备份文件>
 - [ ] `SECOPTENT_LOG_FORMAT=json` 接入日志管道，确认无明文敏感字段
 - [ ] 数据库换持久路径或 PG（替换默认 temp SQLite）
 - [ ] SecretStore 接稳定 Fernet key + 持久后端（如需跨重启保留密钥）
+- [ ] Oracle 复证已接线（W3-A）：`SECOPTENT_NUCLEI_TEMPLATE_DIR` 指向复证用模板目录，`SECOPTENT_SCAN_TIMEOUT` 覆盖复证超时（与扫描同源；oracle 在 assessment correlation 后 best-effort 运行，失败不阻塞完成）
 - [ ] 签名密钥轮换流程演练（rotate 后旧签可验、新签可用）
 - [ ] `secopent backup` 定时 + 恢复 round-trip 验证
 - [ ] 审计链启用 HMAC（防篡改要求时）
