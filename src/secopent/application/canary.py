@@ -19,7 +19,7 @@ import hashlib
 import secrets
 
 from ..domain.common.errors import DomainError
-from .audit import AuditService
+from .ports.audit import AuditRecorder
 
 # Placeholder the CaseEngine / probe templates use for the canary token.
 CANARY_PLACEHOLDER = "{{canary_token}}"
@@ -46,7 +46,7 @@ def _audit_id(token: str) -> str:
 class CanaryTokenManager:
     """Generate, embed, and verify single-use canary tokens."""
 
-    def __init__(self, audit: AuditService, *, oob_domain: str = "oast.example.com") -> None:
+    def __init__(self, audit: AuditRecorder, *, oob_domain: str = "oast.example.com") -> None:
         self._audit = audit
         self._oob_domain = oob_domain
         self._issued: set[str] = set()

@@ -16,15 +16,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from .ports.audit import AuditRecorder
 
-@runtime_checkable
-class AuditRecorder(Protocol):
-    """Append-only audit sink (AuditService or signed AuditChain both satisfy)."""
-
-    def record(
-        self, *, actor: str, action: str, resource_type: str,
-        resource_id: str, payload: dict[str, object],
-    ) -> object: ...
+__all__ = [
+    "AuditRecorder",
+    "PermitRevoker",
+    "ContainerTerminator",
+    "EmergencyReport",
+    "EmergencyStop",
+]
 
 
 @runtime_checkable
