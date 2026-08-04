@@ -11,7 +11,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import httpx
-import pytest
 
 from secopent.domain.verification.models import (
     CandidateFinding,
@@ -56,13 +55,7 @@ def _stub_transport(canary_token: str) -> HttpInteractshTransport:
     )
 
 
-def test_oob_branch_fires_success_when_callback_present(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import secopent.infrastructure.oracle.rescan_verifier as rv
-
-    monkeypatch.setattr(rv.time, "sleep", lambda _s: None)  # skip the OOB wait
-
+def test_oob_branch_fires_success_when_callback_present() -> None:
     canary_token = "tok-xyz"
     interactsh = InteractshClient(_stub_transport(canary_token))
     factory = RescanVerifierFactory(
@@ -72,6 +65,7 @@ def test_oob_branch_fires_success_when_callback_present(
         interactsh=interactsh,
     )
     verifier = factory.for_finding(SimpleNamespace(asset=_candidate().target))
+    verifier._oob_sleep = lambda _s: None  # skip the OOB wait (default is bound at import)
     method = VerificationMethod(
         vuln_type=VulnType.SSRF, default_n=1, oob_window_seconds=5
     )
@@ -81,13 +75,7 @@ def test_oob_branch_fires_success_when_callback_present(
     assert status is ReproductionStatus.SUCCESS
 
 
-def test_oob_branch_fires_failure_when_no_callback(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import secopent.infrastructure.oracle.rescan_verifier as rv
-
-    monkeypatch.setattr(rv.time, "sleep", lambda _s: None)
-
+def test_oob_branch_fires_failure_when_no_callback() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path == "/register":
             return httpx.Response(200, json={"correlation_domain": "abc.oast.test"})
@@ -105,6 +93,7 @@ def test_oob_branch_fires_failure_when_no_callback(
         interactsh=interactsh,
     )
     verifier = factory.for_finding(SimpleNamespace(asset=_candidate().target))
+    verifier._oob_sleep = lambda _s: None
     method = VerificationMethod(
         vuln_type=VulnType.SSRF, default_n=1, oob_window_seconds=5
     )
