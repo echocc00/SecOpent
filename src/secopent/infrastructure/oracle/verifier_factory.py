@@ -18,7 +18,7 @@ from typing import Any
 from ...application.oracle import OracleVerifier
 from ..adapters.real_scan import RealScanRunner
 from .interactsh import InteractshClient
-from .rescan_verifier import RescanVerifier
+from .rescan_verifier import OOB_PLACEHOLDER, RescanVerifier
 
 
 class RescanVerifierFactory:
@@ -38,7 +38,22 @@ class RescanVerifierFactory:
         self._interactsh = interactsh
 
     def for_finding(self, finding: Any) -> OracleVerifier:
-        args = ["-t", "/templates/", "-u", finding.asset, "-jsonl", "-silent", "-duc"]
+        # Embed the OOB canary placeholder in the -u URL so the OOB branch in
+        # RescanVerifier.reproduce can fire for OOB-method findings (W4-C T2).
+        # reproduce() replaces it with the allocated callback subdomain before
+        # scanning. The literal placeholder is harmless for non-OOB findings
+        # (URL-encoded, ignored by the target, prefix-match still holds).
+        asset = finding.asset
+        sep = "&" if "?" in asset else "?"
+        args = [
+            "-t",
+            "/templates/",
+            "-u",
+            f"{asset}{sep}cb={OOB_PLACEHOLDER}",
+            "-jsonl",
+            "-silent",
+            "-duc",
+        ]
         scan_kwargs: dict[str, Any] = {"adapter_key": "nuclei", "args": args}
         if self._template_host_dir:
             scan_kwargs["mounts"] = {"/templates": self._template_host_dir}
