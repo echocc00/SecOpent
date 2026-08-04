@@ -40,6 +40,8 @@
 
 > **W3-A 更新**：oracle 现已接线进生产执行链，关闭"已建未接线"缺口。`OracleService`（应用层）在 `execute_assessment` correlation 落库后对每个 finding 跑 N/N 复证：CWE 经 `domain/verification/cwe_mapping.py` 映射到 `VulnType`，可映射者由 `RescanVerifierFactory`（composition root 装配，复用 `RealScanRunner` + 模板目录 + 共享 canary 单例）逐 finding 构造 `RescanVerifier`，`OracleEngine.verify` 跑 N 次复现，`CONFIRMED` 则 `confirm` 升级为 `ConfirmedFinding` 并经 `SqlAlchemyConfirmedFindingRepository` 持久化（独立 `core_confirmed_findings` 表，`candidate_id` 溯源源 Finding）；同时更新源 `Finding.oracle_verdict`。oracle 尽力运行（best-effort）：复证异常不阻塞 assessment 完成，findings 仍落库但留 `PENDING`。canary 单例审计进共享 `AuditChain`（canary 事件进签名链）。未映射 CWE 的 finding 跳过 oracle（留 `PENDING`）。`/findings/{id}/verdict` 保留为人工覆盖路径。**已知局限**：生产复现 scan_kwargs 不含 `{{canary_token}}` 占位，RescanVerifier 走 legacy 子串匹配（canary 仍生成+审计，但 echo 强校验未激活）；定向复现模板（按 CWE 选子集）是后续优化。
 
+> **W3-E 更新**：OOB canary 验证接线进 `RescanVerifier`。当 `InteractshClient` 注入 + `method.oob_window_seconds > 0`（SSRF/XXE/反序列化）+ scan_kwargs 含 `{{canary_oob_subdomain}}` 占位时，`reproduce` 走 OOB 路径：`allocate_correlated` 拿 `(subdomain, correlation_domain)`，嵌入占位，scan，sleep `oob_window_seconds`，`has_callback` 命中即 SUCCESS。`InteractshClient.allocate_correlated` 补了 `allocate` 的 API 缺口（返回 bare correlation domain 给 `has_callback`）。composition root 用 `NullInteractshTransport`（无服务器时 OOB 静默 FAIL；真实 HTTP transport 是 M5，`SECOPTENT_INTERACTSH_SERVER_URL`）。**已知局限**：同 echo canary，生产 scan_kwargs 不含 OOB 占位 -> OOB 路径已就绪但未激活，需 canary-aware 复现模板；OOB sleep 阻塞 oracle 线程（N×window）。
+
 ## pentest-ai 采纳（ADR-014）
 
 OracleEngine 通过 `OracleVerifier` 端口调用后端；`infrastructure/oracle/ptai_adapter.py::PtaiAdapter` 包装 pentest-ai（`pip install ptai`，MIT）。ptai 为可选运行时依赖，惰性导入，未安装处用注入 mock 测试（真实执行 M5）。
