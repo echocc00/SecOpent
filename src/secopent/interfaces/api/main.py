@@ -31,8 +31,10 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from ...application.audit_chain import AuditChain
+from ...application.canary import CanaryTokenManager
 from ...application.emergency_stop import EmergencyStop
 from ...application.health import BundleSignatureState
+from ...application.oracle_service import OracleService
 from ...application.prompt_injection import PromptInjectionGuard
 from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.scope_enforcer import ScopeEnforcer
@@ -40,6 +42,8 @@ from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
 from ...domain.assessments.models import AssessmentStatus
 from ...domain.common.canonical import utc_now
+from ...domain.verification.registry import default_registry
+from ...infrastructure.adapters.real_scan import RealScanRunner
 from ...infrastructure.audit.key_manager import AuditKeyManager
 from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.engine import (
@@ -57,6 +61,7 @@ from ...infrastructure.logging_setup import configure_logging
 from ...infrastructure.observability.context import install_request_context
 from ...infrastructure.observability.metrics import render_metrics
 from ...infrastructure.observability.tracing import setup_tracing
+from ...infrastructure.oracle.verifier_factory import RescanVerifierFactory
 from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
@@ -356,6 +361,31 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         audit=audit_chain,
     )
 
+    # Oracle (W3-A): canary singleton auditing to the shared signed chain + a
+    # shared RealScanRunner for N/N rescan reproduction. OracleService is
+    # session-independent; per-thread finding/confirmed repos are passed by the
+    # assessments router from the background session. The oracle runs after
+    # correlation in execute_assessment (best-effort: failures do not block the
+    # assessment - findings stay unconfirmed but persisted).
+    canary = CanaryTokenManager(audit_chain)
+    try:
+        scan_timeout = int(os.environ.get("SECOPTENT_SCAN_TIMEOUT", "1800"))
+    except ValueError:
+        scan_timeout = 1800
+    oracle_scan_runner = RealScanRunner(default_timeout=scan_timeout)
+    template_host_dir = (
+        os.environ.get("SECOPTENT_NUCLEI_TEMPLATE_DIR", "").strip() or None
+    )
+    verifier_factory = RescanVerifierFactory(
+        oracle_scan_runner, template_host_dir, canary
+    )
+    app.state.canary = canary
+    app.state.oracle = OracleService(
+        registry=default_registry(),
+        canary=canary,
+        verifier_factory=verifier_factory,
+    )
+
     # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
     # null backend so LLM-assisted endpoints degrade to their deterministic
     # path. The LLM only ever proposes/drafts - the deterministic layer decides.
@@ -390,6 +420,8 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.egress_guard = app.state.egress_guard
     api.state.prompt_injection_guard = app.state.prompt_injection_guard
     api.state.nft_scope_enforcer = app.state.nft_scope_enforcer
+    api.state.canary = app.state.canary
+    api.state.oracle = app.state.oracle
     _register_api(api)
     app.mount("/api", api)
 
