@@ -26,6 +26,7 @@ from . import (  # noqa: F401
     intel_models,
     job_models,
     report_models,
+    signed_audit_models,
     update_models,
 )
 from .core_models import CoreBase
