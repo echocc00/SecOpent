@@ -1,10 +1,11 @@
 """NftScopeEnforcer netns parameter (W3-F T2)."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
 from secopent.infrastructure.egress.egress_guard import DnsResolver, EgressGuard
 from secopent.infrastructure.egress.nft_scope import NftScopeEnforcer
-from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
-from datetime import UTC, datetime
 
 
 class _RecordingRunner:
