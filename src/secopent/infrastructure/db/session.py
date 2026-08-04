@@ -19,6 +19,7 @@ from . import (  # noqa: F401
     asset_models,
     case_models,
     catalog_models,
+    confirmed_finding_models,
     core_models,
     evidence_models,
     finding_models,
