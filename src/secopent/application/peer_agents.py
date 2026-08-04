@@ -83,6 +83,14 @@ class PeerAgentService:
         """Read-only access to the peer agent registry."""
         return self._registry
 
+    def get_run(self, run_id: str) -> PeerAgentRun | None:
+        """Look up a peer run by id (None if not found)."""
+        return self._runs.get(run_id)
+
+    def list_runs(self, assessment_id: str) -> tuple[PeerAgentRun, ...]:
+        """List peer runs for an assessment (newest-first stable order)."""
+        return self._runs.list_for_assessment(assessment_id)
+
     def launch(
         self,
         *,
