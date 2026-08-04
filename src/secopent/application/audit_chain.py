@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 from typing import Protocol, runtime_checkable
 
 from ..domain.audit.models import GENESIS_HASH, AuditEvent
+from .ports.audit_chain import SignedAuditEventStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,12 +37,35 @@ class AuditSigner(Protocol):
 class AuditChain:
     """A signed, tamper-evident audit hash chain."""
 
-    def __init__(self, signer: AuditSigner) -> None:
+    def __init__(
+        self,
+        signer: AuditSigner,
+        *,
+        store: SignedAuditEventStore | None = None,
+    ) -> None:
         self._signer = signer
+        self._store = store
         self._events: list[SignedAuditEvent] = []
         self._tail = GENESIS_HASH  # bare hex of the last event hash
         self._counter = 0
         self._redactions: dict[str, frozenset[str]] = {}
+        if store is not None:
+            self._load_from_store(store)
+
+    def _load_from_store(self, store: SignedAuditEventStore) -> None:
+        """Rebuild in-memory state from persisted events (H6 restart survival)."""
+        loaded = store.load_all()
+        self._events = list(loaded)
+        if loaded:
+            self._tail = loaded[-1].event.event_hash.removeprefix("sha256:")
+            self._counter = len(loaded)
+        # Re-derive GDPR redaction state from persisted gdpr.redacted events.
+        for signed in loaded:
+            if signed.event.action == "gdpr.redacted":
+                eid = signed.event.payload.get("redacted_event_id")
+                keys = signed.event.payload.get("keys")
+                if isinstance(eid, str) and isinstance(keys, list):
+                    self._redactions[eid] = frozenset(str(k) for k in keys)
 
     def record(
         self,
@@ -71,6 +95,8 @@ class AuditChain:
         signed = SignedAuditEvent(event=event, signature=signature)
         self._events.append(signed)
         self._tail = event.event_hash.removeprefix("sha256:")
+        if self._store is not None:
+            self._store.append(signed)
         return signed
 
     def record_permit_nonce(
