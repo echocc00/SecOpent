@@ -40,6 +40,7 @@ LLM 提供方选择与参数在 `config/llm.yaml`（endpoint / api_key_env / mod
 - **SQLite 调优**（`infrastructure/db/sqlite.py`，每连接生效）：`journal_mode=WAL` · `synchronous=NORMAL`（WAL 下持久且更快）· `journal_size_limit=64MB`（防长评估撑爆 WAL）· `foreign_keys=ON` · `busy_timeout=5000`。
 - **PostgreSQL**：Repository 层后端无关（同一套 ORM 模型跑 SQLite/PG）；`create_postgres_engine(dsn)`（`postgresql+psycopg://...`，`pool_pre_ping`）。唯一 SQLite 专属点是 intel 仓库的 FTS5（PG 换全全文检索），已隔离；有 PG 契约测试证明切换无需领域 / 应用层改动。
 - **多进程注意**：默认 temp SQLite + 内存 SecretStore（见 §5）均为单进程语义；多 worker / 集群需外接 PG + 持久化密钥后端（P4 方向）。
+- **Schema 演进（W4-D）**：alembic 是生产真源。`init_db` 受 `SECOPTENT_DB_INIT` 控制：`auto`（默认，新库 `create_all` + 可选 stamp、老库跳过让 alembic 管）、`always`（无条件 `create_all`，测试用）、`skip`（不动，operator 自行 `alembic upgrade`）。生产部署 pre-boot 跑 `secopent db upgrade --db <url>`（或 `secopent db stamp --db <url>` 标记已 `create_all` 的存量库），启动设 `SECOPTENT_DB_INIT=skip`；dev/test 保持默认 `auto`。`secopent db current --db <url>` 查当前版本。基线等价测试（`tests/infrastructure/test_alembic_schema_equivalence.py`）保证 `create_all` 与 alembic schema 一致。
 
 ## 5. 密钥管理
 
@@ -100,3 +101,4 @@ secopent restore --db <sqlite文件> --from <备份文件>
 - [ ] 网络命名空间隔离（W3-F/W4-B，Linux）：`NetnsIsolator` 已在 composition root 装配（`app.state.netns_isolator` + `make_nft_enforcer` factory），`start_assessment` 每次评估建独立 netns、nft 规则在 netns 内生效、评估结束（含异常）在 finally 销毁。非 Linux 开发机 `is_supported()` 为 False，enforcer 回退默认 netns（best-effort）。**剩余**：Docker 扫描容器进 netns 的 `--network` 接线需 Linux 环境（`ip netns exec` + Docker 网络工程），当前在非 Linux 开发机上不可真测；Linux 部署时应接通
 - [ ] Peer-agent 接线（W4-A）：`SECOPTENT_PEER_AGENTS_ENABLED=1` + `LLM_API_KEY` 启用 `PeerAgentService`（`/peer-agents`、`/assessments/{id}/peer-runs` 路由）；当前用 `NullPeerAgentHarness` 降级（strix/shannon 镜像未 pin digest，launch 返回空结果）。真 backends 待镜像构建 + digest pinning 后，去掉 `harness=NullPeerAgentHarness()` 改用 factory 默认 `ContainerPeerAgentHarness`。peer run 审计经 `DatabaseAuditRecorder` 落库（session-per-call，singleton 安全）
 - [ ] Docker / 镜像 digest-pin / 靶场 / Interactsh / LLM key 按 `environment-setup.md` 就绪
+- [ ] Schema 演进（W4-D）：生产 pre-boot 跑 `secopent db upgrade --db <url>`（存量 `create_all` 库先 `secopent db stamp`），启动设 `SECOPTENT_DB_INIT=skip`；alembic 为真源，`init_db` 默认 `auto` 仅新库建表

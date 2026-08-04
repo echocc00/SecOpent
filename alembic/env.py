@@ -18,7 +18,9 @@ from secopent.infrastructure.db.session import CoreBase
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False so in-process alembic calls (secopent db
+    # ...) don't clobber pytest's caplog handler or other pre-configured loggers.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = CoreBase.metadata
 

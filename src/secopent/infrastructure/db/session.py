@@ -89,9 +89,16 @@ def _stamp_head(engine: Engine) -> None:
         ini = Path(secopent.__file__).resolve().parents[2] / "alembic.ini"
         if not ini.exists():
             return
+        saved_url = os.environ.get("SECOPTENT_DB_URL")
         os.environ["SECOPTENT_DB_URL"] = str(engine.url)
-        cfg = Config(str(ini))
-        command.stamp(cfg, "head")
+        try:
+            cfg = Config(str(ini))
+            command.stamp(cfg, "head")
+        finally:
+            if saved_url is None:
+                os.environ.pop("SECOPTENT_DB_URL", None)
+            else:
+                os.environ["SECOPTENT_DB_URL"] = saved_url
     except Exception:  # noqa: BLE001 - best-effort stamp; boot must not break
         pass
 

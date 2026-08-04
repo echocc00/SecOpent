@@ -355,6 +355,7 @@ def _cmd_db(action: str, db_url: str) -> int:
         return 1
 
     url = db_url if "://" in db_url else f"sqlite:///{db_url}"
+    saved_url = os.environ.get("SECOPTENT_DB_URL")
     os.environ["SECOPTENT_DB_URL"] = url
 
     from alembic import command
@@ -374,6 +375,12 @@ def _cmd_db(action: str, db_url: str) -> int:
     except Exception as exc:  # noqa: BLE001 - CLI surfaces the alembic failure
         print(f"error: alembic {action} failed: {exc}")
         return 1
+    finally:
+        # Restore so in-process CLI calls (e.g. tests) don't leak the URL.
+        if saved_url is None:
+            os.environ.pop("SECOPTENT_DB_URL", None)
+        else:
+            os.environ["SECOPTENT_DB_URL"] = saved_url
     return 0
 
 
