@@ -36,6 +36,8 @@
 
 国内公共 OOB 不稳，故自托管 Interactsh。`infrastructure/oracle/interactsh.py::InteractshClient` 把 canary token 作回调域最左 label，按 label 关联回调；一个 correlation 域可服务多个并发验证。真实 interactsh-server（Docker）在 M5 E2E；M2 用注入的 `InteractshTransport` mock 测试。
 
+> **W2-C 更新**：canary token 现已真接线进 `RescanVerifier`（之前 `reproduce` 忽略 `canary_token` 参数）。当 scan_kwargs 含 `{{canary_token}}` 占位且注入 `CanaryTokenManager` 时，`reproduce` 深拷贝 kwargs、`canary.embed` 替换占位、scan 后对 `result.stdout` 调 `canary.verify_echo`；未回声即不确认（即使 target 字串出现在 observation 中）。无占位时回落到 legacy 子串匹配（向后兼容）。
+
 ## pentest-ai 采纳（ADR-014）
 
 OracleEngine 通过 `OracleVerifier` 端口调用后端；`infrastructure/oracle/ptai_adapter.py::PtaiAdapter` 包装 pentest-ai（`pip install ptai`，MIT）。ptai 为可选运行时依赖，惰性导入，未安装处用注入 mock 测试（真实执行 M5）。

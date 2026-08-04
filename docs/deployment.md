@@ -56,6 +56,8 @@ LLM 提供方选择与参数在 `config/llm.yaml`（endpoint / api_key_env / mod
 
 ## 6. 备份与恢复
 
+> **W2-C 更新**：`_build_secret_backend()` 现默认 `PersistentEncryptedFileBackend`（密文 + metadata 落盘 0600，跨重启可恢复）。Fernet 主密钥优先从 `SECOPTENT_SECRET_KEY` env 注入（KMS/operator 托管，永不落盘）；未设则读 `SECOPTENT_SECRET_KEY_PATH` 或 `./secret.key`（首启自动生成 0600）。`SECOPTENT_SECRET_BACKEND=memory` 显式 opt-in 纯内存（测试用）。生产应通过 env 注入 key。
+
 ```bash
 # 备份（可选 --include-secrets --secrets <secrets.enc> 一并备份加密 SecretStore）
 secopent backup --db <sqlite文件> --out <目录>
