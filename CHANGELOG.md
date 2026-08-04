@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [Unreleased]
+
+`Schema: yes | Deps: no | Breaking: no` - architecture cleanup + release-readiness.
+Wired the "built but not wired" security gaps (auth chain, oracle, audit
+persistence, netns, OOB canary), made alembic the production schema source of
+truth, exposed peer-agents over HTTP, and scrubbed the C1 credential leak.
+
+### Added - W2-A / W3-A (authorization + oracle wiring)
+- **Authorization chain wired end-to-end** (W2-A): PermitSigner/Verifier,
+  EmergencyStop, ScopeEnforcer, AuditChain, PromptInjectionGuard, EgressGuard
+  are constructed in `create_app` and threaded into `execute_assessment`. The
+  "强授权链" selling point now holds at runtime, not just in unit tests.
+- **Oracle N/N verification wired** (W3-A): `OracleService` runs after
+  correlation; CWE→VulnType mapping drives `RescanVerifierFactory`; confirmed
+  findings persist to the new `core_confirmed_findings` table. Best-effort:
+  oracle failure does not block assessment completion (findings stay PENDING).
+
+### Added - W3-C / W3-E / W4-C (audit persistence + OOB canary)
+- **Signed audit chain persisted** (W3-C, H6): `SqlAlchemySignedAuditEventStore`
+  + `SECOPTENT_AUDIT_KEY_PATH` (0600 Ed25519 key, auto-generated on first
+  start). Tamper-evident chain survives restart. New `core_signed_audit_events`
+  table.
+- **OOB canary active** (W3-E + W4-C): `InteractshClient.allocate_correlated`
+  + `HttpInteractshTransport` (self-hosted interactsh-server via
+  `SECOPTENT_INTERACTSH_SERVER_URL`). Production scan_kwargs now embeds
+  `{{canary_oob_subdomain}}`; OOB-class findings verify via callback.
+
+### Added - W3-D / W3-F / W4-B (domain + netns)
+- **Domain state machines** (W3-D): Report approve/release invariants,
+  ExecutionPermit expiry, Project archive/reactivate (idempotent transitions).
+- **Per-assessment netns isolation** (W3-F + W4-B): `NetnsIsolator` +
+  `make_nft_enforcer` factory in the composition root; `start_assessment`
+  creates/destroys a netns per assessment (Linux; non-Linux best-effort
+  no-op). Docker-container-into-netns wiring remains a Linux-env deferral.
+
+### Added - W4-A (peer-agent API surface)
+- **Peer-agent service exposed** (W4-A): `PeerAgentService` constructed in
+  `create_app` behind `SECOPTENT_PEER_AGENTS_ENABLED`; 5-route `peer_agents`
+  router (launch / list / get / stop / list-agents) on root + `/api`.
+  `NullPeerAgentHarness` degrades gracefully (strix/shannon image digests
+  unpinned); `DatabaseAuditRecorder` keeps singleton-service audit
+  session-safe. Real backends deferred to image digest pinning.
+
+### Added - W4-D (schema management)
+- **alembic as production source of truth** (W4-D): `secopent db
+  upgrade/stamp/current` CLI; `init_db` mode via `SECOPTENT_DB_INIT`
+  (auto/always/skip); fresh-DB stamp; baseline↔create_all schema-equivalence
+  test (baseline now includes the W3-A/W3-C tables).
+
+### Changed
+- `init_db` default mode is `auto` (was unconditional `create_all`): fresh DBs
+  still `create_all`; existing DBs skip create_all (alembic-managed). Prod
+  pre-boot runs `secopent db upgrade` and sets `SECOPTENT_DB_INIT=skip`. See
+  `docs/deployment.md` §4.
+- `PeerAgentService.audit` widened to `AuditRecorder` (structural;
+  `AuditService` still satisfies). `create_peer_agent_service` accepts a
+  `harness=` override (used to inject `NullPeerAgentHarness`).
+- `verifier_factory` embeds `{{canary_oob_subdomain}}` in the oracle rescan
+  `-u` URL (additive; legacy substring match remains the fallback for
+  non-OOB findings).
+
+### Security
+- **C1 credential leak**: cloud server credentials were in public GitHub
+  history for 9 days. `git filter-repo` scrubbed local + remote history
+  (force-pushed 2026-08-04); 6 release tags rewritten. **Password rotation +
+  server compromise check remain user actions** - the creds were harvestable
+  during the exposure window; scrubbing the canonical remote does not recall
+  already-cloned copies.
+
+### Removed
+- Unreachable `EmergencyStop` fallback in the stop route (composition root is
+  mandatory since W2-A); an unconfigured app now returns 503, not a silent
+  0-permit revoke.
+- Frontend `DriftView` placeholder tab + dead `PagePlaceholder` component
+  (backend `POST /{app_id}/{version}/drift` endpoint stays for a future UI).
+
+### Verified
+- 1315 tests passed (5 skipped, 15 deselected), 92% coverage (CI gate 80%).
+- ruff, mypy strict, bandit -ll (severity < MEDIUM), gitleaks full-history.
+- alembic baseline == create_all schema (equivalence test).
+- OOB canary branch fires E2E via `HttpInteractshTransport` (stub server).
+- Per-assessment netns lifecycle: create + destroy incl. cleanup-on-failure.
+
+### Notes
+- Deferrals (documented, non-blocking for v0.2.0): peer-agent real backends
+  (strix/shannon image digests), Docker-container-into-netns (Linux),
+  interactsh-server deployment (operator), echo canary `{{canary_token}}`
+  placeholder (per-method gate pending), adapter manifest digest pin to
+  image_catalog (M5 container build).
+
 ## [0.1.6] - 2026-08-03
 
 `Schema: no | Deps: no | Breaking: no` - end-to-end 0-findings root-cause fix.
