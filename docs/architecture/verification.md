@@ -42,6 +42,8 @@
 
 > **W3-E 更新**：OOB canary 验证接线进 `RescanVerifier`。当 `InteractshClient` 注入 + `method.oob_window_seconds > 0`（SSRF/XXE/反序列化）+ scan_kwargs 含 `{{canary_oob_subdomain}}` 占位时，`reproduce` 走 OOB 路径：`allocate_correlated` 拿 `(subdomain, correlation_domain)`，嵌入占位，scan，sleep `oob_window_seconds`，`has_callback` 命中即 SUCCESS。`InteractshClient.allocate_correlated` 补了 `allocate` 的 API 缺口（返回 bare correlation domain 给 `has_callback`）。composition root 用 `NullInteractshTransport`（无服务器时 OOB 静默 FAIL；真实 HTTP transport 是 M5，`SECOPTENT_INTERACTSH_SERVER_URL`）。**已知局限**：同 echo canary，生产 scan_kwargs 不含 OOB 占位 -> OOB 路径已就绪但未激活，需 canary-aware 复现模板；OOB sleep 阻塞 oracle 线程（N×window）。
 
+> **W4-C 更新**：OOB 路径现已激活。`RescanVerifierFactory.for_finding` 在生产 scan_kwargs 的 `-u` URL 嵌入 `{{canary_oob_subdomain}}`（`?cb=...` / `&cb=...`），故 OOB 类发现（`oob_window_seconds>0`）在 `SECOPTENT_INTERACTSH_SERVER_URL` 指向自建 interactsh-server 时经 `HttpInteractshTransport`（register/poll HTTP）真复证。未设该 env 则 `NullInteractshTransport`（OOB 静默 FAIL，回退 legacy 子串匹配）。echo 路径（`{{canary_token}}`）仍未激活--echo 无 per-method 门控，blanket 嵌入会把所有非 OOB 发现从 legacy 子串匹配切到更严的 echo 强校验，回归非反射型发现；待按方法粒度门控后启用。
+
 ## pentest-ai 采纳（ADR-014）
 
 OracleEngine 通过 `OracleVerifier` 端口调用后端；`infrastructure/oracle/ptai_adapter.py::PtaiAdapter` 包装 pentest-ai（`pip install ptai`，MIT）。ptai 为可选运行时依赖，惰性导入，未安装处用注入 mock 测试（真实执行 M5）。
