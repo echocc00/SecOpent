@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-04
+
 `Schema: yes | Deps: no | Breaking: no` - architecture cleanup + release-readiness.
 Wired the "built but not wired" security gaps (auth chain, oracle, audit
 persistence, netns, OOB canary), made alembic the production schema source of
