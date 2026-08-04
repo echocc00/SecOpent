@@ -57,6 +57,17 @@ class DockerContainerTerminator:
         return len([line for line in stopped.stdout.splitlines() if line.strip()])
 
 
+class NullContainerTerminator:
+    """No-op terminator: terminates nothing, returns 0.
+
+    Used in tests and non-Docker environments (e.g. Windows dev hosts) where
+    container termination is neither possible nor required.
+    """
+
+    def terminate_active(self) -> int:
+        return 0
+
+
 class NullPermitRevoker:
     """Placeholder revoker: no revocable permit store is wired yet (returns 0)."""
 

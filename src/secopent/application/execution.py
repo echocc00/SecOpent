@@ -27,6 +27,7 @@ from ..domain.findings.models import Finding
 from ..domain.scope.models import ScopeSnapshot
 from .assessments import AssessmentService
 from .audit import AuditService
+from .emergency_stop import EmergencyStop
 from .finding_correlation import FindingCorrelation
 from .jobs import JobService
 from .orchestrator import Orchestrator, StepRunner
@@ -70,6 +71,7 @@ def execute_assessment(
     catalog: object | None = None,
     asset_types: tuple[object, ...] = (),
     max_workers: int = 1,
+    emergency_stop: EmergencyStop | None = None,
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -89,6 +91,19 @@ def execute_assessment(
 
     try:
         service.mark_running(assessment_id)  # QUEUED -> RUNNING
+
+        if emergency_stop is not None and emergency_stop.is_triggered:
+            service.fail(assessment_id, "EMERGENCY_STOP_TRIGGERED")
+            audit.record(
+                actor="system", action="assessment.blocked.emergency_stop",
+                resource_type="assessment", resource_id=assessment_id,
+                payload={"reason": "emergency_stop_triggered"},
+            )
+            _logger.warning(
+                "assessment blocked by emergency stop", assessment_id=assessment_id,
+            )
+            return
+
         audit.record(
             actor="system", action="assessment.started",
             resource_type="assessment", resource_id=assessment_id, payload={},
