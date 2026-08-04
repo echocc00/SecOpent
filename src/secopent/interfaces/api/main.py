@@ -44,6 +44,7 @@ from ...domain.assessments.models import AssessmentStatus
 from ...domain.common.canonical import utc_now
 from ...domain.verification.registry import default_registry
 from ...infrastructure.adapters.real_scan import RealScanRunner
+from ...infrastructure.audit.database_recorder import DatabaseAuditRecorder
 from ...infrastructure.audit.key_manager import AuditKeyManager
 from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.engine import (
@@ -64,6 +65,11 @@ from ...infrastructure.observability.tracing import setup_tracing
 from ...infrastructure.oracle.interactsh import InteractshClient
 from ...infrastructure.oracle.null_interactsh import NullInteractshTransport
 from ...infrastructure.oracle.verifier_factory import RescanVerifierFactory
+from ...infrastructure.peer_agents.composition import create_peer_agent_service
+from ...infrastructure.peer_agents.in_memory_peer_runs import (
+    InMemoryPeerRunRepository,
+)
+from ...infrastructure.peer_agents.null_harness import NullPeerAgentHarness
 from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from ...infrastructure.repositories.sqlalchemy_audit_chain import (
     SqlAlchemySignedAuditEventStore,
@@ -444,6 +450,24 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         local_backend=llm_backend, redactor=RedactionEngine()
     )
 
+    # Peer agents (W4-A T5): opt-in via SECOPTENT_PEER_AGENTS_ENABLED. Uses
+    # NullPeerAgentHarness until strix/shannon image digests are pinned - the
+    # service is constructible and the API returns empty outcomes instead of
+    # 500ing; swap to the real ContainerPeerAgentHarness (via the factory's
+    # harness=None default) once images are built. The audit recorder is
+    # session-factory-backed so the singleton service never holds one session.
+    if os.environ.get("SECOPTENT_PEER_AGENTS_ENABLED") == "1":
+        app.state.peer_agent_service = create_peer_agent_service(
+            audit=DatabaseAuditRecorder(app.state.db),
+            runs=InMemoryPeerRunRepository(),
+            llm_provider=os.environ.get("SECOPTENT_PEER_LLM", "openai/gpt-4o-mini"),
+            secret_lookup={"LLM_API_KEY": os.environ.get("LLM_API_KEY", "")},
+            workdir_root=Path(os.environ.get("SECOPTENT_PEER_WORKDIR", "./peer_work")),
+            harness=NullPeerAgentHarness(),
+        )
+    else:
+        app.state.peer_agent_service = None
+
     # API at the root (dev: the vite proxy rewrites /api/* -> root).
     _register_api(app)
 
@@ -464,6 +488,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.nft_scope_enforcer = app.state.nft_scope_enforcer
     api.state.canary = app.state.canary
     api.state.oracle = app.state.oracle
+    api.state.peer_agent_service = app.state.peer_agent_service
     _register_api(api)
     app.mount("/api", api)
 

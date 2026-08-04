@@ -38,7 +38,7 @@ from ..domain.peer_agents.normalize import (
 )
 from ..domain.peer_agents.registry import PeerAgentRegistry
 from ..domain.scope.models import ScopeSnapshot
-from .audit import AuditService
+from .ports.audit import AuditRecorder
 from .ports.repositories import PeerRunRepository
 
 
@@ -70,7 +70,7 @@ class PeerAgentService:
         *,
         registry: PeerAgentRegistry,
         harness: PeerAgentHarness,
-        audit: AuditService,
+        audit: AuditRecorder,
         runs: PeerRunRepository,
     ) -> None:
         self._registry = registry

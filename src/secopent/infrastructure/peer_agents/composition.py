@@ -13,8 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from ...application.audit import AuditService
-from ...application.peer_agents import PeerAgentService
+from ...application.peer_agents import PeerAgentHarness, PeerAgentService
+from ...application.ports.audit import AuditRecorder
 from ...application.ports.repositories import PeerRunRepository
 from ...domain.peer_agents.models import (
     PeerAgentBudget,
@@ -74,11 +74,12 @@ def shannon_descriptor() -> PeerAgentDescriptor:
 
 def create_peer_agent_service(
     *,
-    audit: AuditService,
+    audit: AuditRecorder,
     runs: PeerRunRepository,
     llm_provider: str,
     secret_lookup: Mapping[str, str],
     workdir_root: Path,
+    harness: PeerAgentHarness | None = None,
     enable_shannon: bool = False,
     shannon_repo_path: Path | None = None,
     shannon_llm_key_name: str = "ANTHROPIC_API_KEY",
@@ -87,6 +88,10 @@ def create_peer_agent_service(
 
     Shannon is only registered when ``enable_shannon`` is True AND
     ``shannon_repo_path`` is provided (the target repo working copy source).
+
+    ``harness`` overrides the default ``ContainerPeerAgentHarness`` - pass a
+    ``NullPeerAgentHarness`` when Docker/images are unavailable so the service
+    degrades to empty outcomes instead of failing at launch.
     """
     registry = PeerAgentRegistry()
     registry.register(strix_descriptor())
@@ -106,13 +111,14 @@ def create_peer_agent_service(
             secret_lookup=secret_lookup,
         )
 
-    harness = ContainerPeerAgentHarness(
-        executor=SubprocessContainerExecutor(
-            default_timeout=STRIX_DEFAULT_BUDGET.max_wall_seconds,
-        ),
-        backends=backends,
-        workdir_root=workdir_root,
-    )
+    if harness is None:
+        harness = ContainerPeerAgentHarness(
+            executor=SubprocessContainerExecutor(
+                default_timeout=STRIX_DEFAULT_BUDGET.max_wall_seconds,
+            ),
+            backends=backends,
+            workdir_root=workdir_root,
+        )
     return PeerAgentService(
         registry=registry,
         harness=harness,
