@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 import threading
 import uuid
@@ -51,6 +52,7 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/assessments", tags=["assessments"])
+logger = logging.getLogger(__name__)
 
 
 def _to_out(assessment: Assessment) -> AssessmentOut:
@@ -269,6 +271,8 @@ def start_assessment(
     audit_chain = getattr(request.app.state, "audit_chain", None)
     egress_guard = getattr(request.app.state, "egress_guard", None)
     nft_scope_enforcer = getattr(request.app.state, "nft_scope_enforcer", None)
+    netns_isolator = getattr(request.app.state, "netns_isolator", None)
+    make_nft_enforcer = getattr(request.app.state, "make_nft_enforcer", None)
     oracle = getattr(request.app.state, "oracle", None)
 
     def _run() -> None:
@@ -280,6 +284,7 @@ def start_assessment(
             with lock:
                 active.add(thread)
         bg_session = db.open_session()
+        netns_handle = None
         try:
             # Compute coverage inputs (catalog + asset types) for the report.
             catalog = SqlAlchemyCatalogRepository(bg_session).latest_catalog()
@@ -292,6 +297,21 @@ def start_assessment(
                 else None
             )
             asset_types = tuple(_classify_asset_types(scope)) if scope else ()
+            # Per-assessment netns (W4-B T2): on Linux, isolate nft egress rules
+            # in a dedicated netns for this assessment; on non-Linux dev hosts
+            # is_supported() is False and the enforcer runs in the default netns
+            # (best-effort, same as before). The netns is destroyed in finally.
+            if (
+                netns_isolator is not None
+                and netns_isolator.is_supported()
+                and make_nft_enforcer is not None
+            ):
+                netns_handle = netns_isolator.create(assessment_id)
+                enforcer = make_nft_enforcer(netns_handle.name)
+            elif make_nft_enforcer is not None:
+                enforcer = make_nft_enforcer(None)
+            else:
+                enforcer = nft_scope_enforcer
             execute_assessment(
                 assessment_id=assessment_id,
                 assessment_repo=SqlAlchemyAssessmentRepository(bg_session),
@@ -308,7 +328,7 @@ def start_assessment(
                 permit_verifier=permit_verifier,
                 scope_enforcer=scope_enforcer,
                 egress_guard=egress_guard,
-                nft_scope_enforcer=nft_scope_enforcer,
+                nft_scope_enforcer=enforcer,
                 audit_chain=audit_chain,
                 oracle=oracle,
                 confirmed_finding_repo=(
@@ -323,6 +343,13 @@ def start_assessment(
             raise
         finally:
             bg_session.close()
+            if netns_handle is not None and netns_isolator is not None:
+                try:
+                    netns_isolator.destroy(netns_handle)
+                except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                    logger.exception(
+                        "netns destroy failed for %s", netns_handle.name
+                    )
             if active is not None and lock is not None:
                 with lock:
                     active.discard(thread)
