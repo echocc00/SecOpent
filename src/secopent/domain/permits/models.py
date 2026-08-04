@@ -60,6 +60,14 @@ class ExecutionPermit:
             raise DomainValidationError("ExecutionPermit.nonce must be non-empty")
         if self.budget < 0:
             raise DomainValidationError("ExecutionPermit.budget must be >= 0")
+        if self.expires_at <= self.issued_at:
+            raise DomainValidationError(
+                "ExecutionPermit.expires_at must be after issued_at"
+            )
+
+    def is_expired(self, now: datetime) -> bool:
+        """True if ``now`` is at or past the permit's expiry."""
+        return now >= self.expires_at
 
     def signing_payload(self) -> bytes:
         """Canonical bytes over every content field (excludes the signature)."""
