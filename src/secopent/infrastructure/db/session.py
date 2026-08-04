@@ -2,14 +2,16 @@
 """Database session factory + FastAPI dependency (Phase A P1, W1).
 
 Binds a SQLAlchemy engine to a session factory and exposes a request-scoped
-session dependency for the FastAPI routers. ``init_db`` creates all tables
-(importing every ORM model module so each registers on ``CoreBase.metadata``).
+session dependency for the FastAPI routers. ``init_db`` creates all tables on
+fresh databases (importing every ORM model module so each registers on
+``CoreBase.metadata``); existing databases are left to alembic (W4-D).
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -32,16 +34,30 @@ from . import (  # noqa: F401
 from .core_models import CoreBase
 
 
-def init_db(engine: Engine) -> None:
-    """Create all tables on the engine.
+def init_db(engine: Engine, *, mode: str | None = None) -> None:
+    """Create tables + FTS on the engine per the init ``mode`` (W4-D).
+
+    Modes (``SECOPTENT_DB_INIT`` env, default ``auto``):
+    - ``always``: unconditionally ``create_all`` (legacy behavior; tests).
+    - ``auto``: ``create_all`` only on fresh DBs (no ``core_projects``); on
+      existing DBs schema is alembic-managed (``secopent db upgrade``), so
+      ``create_all`` is skipped to avoid racing migrations.
+    - ``skip``: do nothing (operator runs alembic out-of-band).
 
     Also creates the ``core_vulnerabilities_fts`` FTS5 virtual table used by
-    the intel search endpoint (SQLite only). SQLAlchemy 2.0 does not model FTS5
-    virtual tables declaratively, so it is issued as raw DDL here (idempotent
-    via ``IF NOT EXISTS``). On PostgreSQL the FTS5 DDL is skipped (PG uses
-    tsvector; the intel search endpoint falls back to LIKE queries).
+    the intel search endpoint (SQLite only). It is not in ``CoreBase.metadata``
+    (SQLAlchemy 2.0 does not model FTS5 declaratively), so it is issued as raw
+    DDL here, idempotent via ``IF NOT EXISTS``. On PostgreSQL the FTS5 DDL is
+    skipped (PG uses tsvector; the intel search endpoint falls back to LIKE).
     """
-    CoreBase.metadata.create_all(engine)
+    resolved = mode or os.environ.get("SECOPTENT_DB_INIT", "auto")
+    if resolved == "skip":
+        return
+    create_tables = resolved == "always" or not inspect(engine).has_table(
+        "core_projects"
+    )
+    if create_tables:
+        CoreBase.metadata.create_all(engine)
     if engine.dialect.name == "sqlite":
         with engine.begin() as connection:
             connection.execute(
