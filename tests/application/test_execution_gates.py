@@ -252,3 +252,38 @@ def test_scope_enforcer_allows_in_scope_target(memory_repositories) -> None:
     assessment = memory_repositories.assessments.get(assessment.id)
     assert assessment is not None
     assert assessment.status is AssessmentStatus.COMPLETED
+
+
+# --- T5: AuditChain signed events + permit nonce ----------------------------
+
+
+def test_audit_chain_records_signed_events_and_permit_nonce(memory_repositories) -> None:
+    from secopent.application.audit_chain import AuditChain
+    from secopent.infrastructure.audit.key_manager import AuditKeyManager
+    from secopent.infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
+
+    a = _seed_approved(memory_repositories)
+    AssessmentService(memory_repositories.assessments).start(a.id)
+
+    signer = PermitSigner()
+    chain = AuditChain(AuditKeyManager())
+
+    execute_assessment(
+        assessment_id=a.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        permit_signer=signer,
+        permit_registry=InMemoryPermitRevoker(),
+        permit_verifier=PermitVerifier(signer.public_key_bytes()),
+        audit_chain=chain,
+    )
+
+    actions = [e.action for e in chain.events()]
+    assert "assessment.started" in actions
+    assert "assessment.completed" in actions
+    assert "permit.used" in actions  # record_permit_nonce
+    assert chain.permit_nonces()  # non-empty
+    assert chain.verify() is True  # hash chain + every signature valid

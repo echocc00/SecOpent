@@ -31,6 +31,7 @@ from ..domain.permits.models import DEFAULT_PERMIT_TTL_SECONDS, ExecutionPermit
 from ..domain.scope.models import ScopeSnapshot
 from .assessments import AssessmentService
 from .audit import AuditService
+from .audit_chain import AuditChain
 from .emergency_stop import EmergencyStop
 from .finding_correlation import FindingCorrelation
 from .jobs import JobService
@@ -102,10 +103,34 @@ def _issue_permit(
     return permit
 
 
+def _audit_record(
+    audit: AuditService,
+    audit_chain: AuditChain | None,
+    *,
+    actor: str,
+    action: str,
+    resource_type: str,
+    resource_id: str,
+    payload: dict[str, object],
+    permit_nonce: str | None = None,
+) -> None:
+    """Record to the DB-backed AuditService and, if wired, the signed AuditChain."""
+    audit.record(
+        actor=actor, action=action, resource_type=resource_type,
+        resource_id=resource_id, payload=payload,
+    )
+    if audit_chain is not None:
+        audit_chain.record(
+            actor=actor, action=action, resource_type=resource_type,
+            resource_id=resource_id, payload=payload, permit_nonce=permit_nonce,
+        )
+
+
 def _verify_permit(
     permit: ExecutionPermit | None,
     verifier: PermitVerifierProtocol | None,
     registry: PermitRegistry | None,
+    audit_chain: AuditChain | None,
     assessment_id: str,
     service: AssessmentService,
     audit: AuditService,
@@ -114,19 +139,24 @@ def _verify_permit(
 
     Returns True if the permit is valid (or no verifier is wired). Returns
     None if verification failed (the assessment is already FAILED + audited).
-    On success the nonce is marked used so it cannot be replayed.
+    On success the nonce is marked used so it cannot be replayed. Replay set
+    comes from the AuditChain's recorded nonces (T5).
     """
     if verifier is None or permit is None:
         return True
+    used_nonces: frozenset[str] = (
+        frozenset(audit_chain.permit_nonces()) if audit_chain is not None else frozenset()
+    )
     try:
         verifier.verify(
-            permit, now=utc_now(), used_nonces=frozenset(),
+            permit, now=utc_now(), used_nonces=used_nonces,
             expected_worker="adapter-executor",
         )
     except DomainError as exc:
         service.fail(assessment_id, f"PERMIT_INVALID:{exc}")
-        audit.record(
-            actor="system", action="assessment.blocked.permit_invalid",
+        _audit_record(
+            audit, audit_chain, actor="system",
+            action="assessment.blocked.permit_invalid",
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
         )
@@ -144,6 +174,7 @@ def _check_plan_scope(
     plan: object,
     scope: ScopeSnapshot,
     permit_valid: bool,
+    audit_chain: AuditChain | None,
     assessment_id: str,
     service: AssessmentService,
     audit: AuditService,
@@ -171,8 +202,9 @@ def _check_plan_scope(
         decision = enforcer.check(target, scope, context)
         if not decision.allowed:
             service.fail(assessment_id, f"SCOPE_VIOLATION:{decision.reason}")
-            audit.record(
-                actor="system", action="assessment.blocked.scope_violation",
+            _audit_record(
+                audit, audit_chain, actor="system",
+                action="assessment.blocked.scope_violation",
                 resource_type="assessment", resource_id=assessment_id,
                 payload={"target": target, "reason": decision.reason},
             )
@@ -200,6 +232,7 @@ def execute_assessment(
     permit_registry: PermitRegistry | None = None,
     permit_verifier: PermitVerifierProtocol | None = None,
     scope_enforcer: ScopeEnforcer | None = None,
+    audit_chain: AuditChain | None = None,
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -222,8 +255,9 @@ def execute_assessment(
 
         if emergency_stop is not None and emergency_stop.is_triggered:
             service.fail(assessment_id, "EMERGENCY_STOP_TRIGGERED")
-            audit.record(
-                actor="system", action="assessment.blocked.emergency_stop",
+            _audit_record(
+                audit, audit_chain, actor="system",
+                action="assessment.blocked.emergency_stop",
                 resource_type="assessment", resource_id=assessment_id,
                 payload={"reason": "emergency_stop_triggered"},
             )
@@ -246,20 +280,27 @@ def execute_assessment(
         )
 
         permit_valid = _verify_permit(
-            permit, permit_verifier, permit_registry, assessment_id, service, audit,
+            permit, permit_verifier, permit_registry, audit_chain,
+            assessment_id, service, audit,
         )
         if permit_valid is None:
             return  # verification failed: assessment already FAILED + audited
 
-        audit.record(
-            actor="system", action="assessment.started",
+        if audit_chain is not None and permit is not None:
+            audit_chain.record_permit_nonce(
+                actor="system", job_id=assessment_id, permit_nonce=permit.nonce,
+            )
+
+        _audit_record(
+            audit, audit_chain, actor="system", action="assessment.started",
             resource_type="assessment", resource_id=assessment_id,
             payload={"permit_nonce": permit.nonce} if permit is not None else {},
         )
         _logger.info("assessment started", assessment_id=assessment_id)
 
         if not _check_plan_scope(
-            scope_enforcer, plan, scope, permit_valid, assessment_id, service, audit,
+            scope_enforcer, plan, scope, permit_valid, audit_chain,
+            assessment_id, service, audit,
         ):
             return  # out-of-scope target: assessment already FAILED + audited
 
@@ -276,8 +317,8 @@ def execute_assessment(
 
         service.complete(assessment_id)  # RUNNING -> COMPLETED
         coverage_rate, uncovered = _compute_coverage(catalog, asset_types, observations)
-        audit.record(
-            actor="system", action="assessment.completed",
+        _audit_record(
+            audit, audit_chain, actor="system", action="assessment.completed",
             resource_type="assessment", resource_id=assessment_id,
             payload={
                 "findings": len(findings),
@@ -297,8 +338,8 @@ def execute_assessment(
         )
         with contextlib.suppress(Exception):
             service.fail(assessment_id, str(exc))
-        audit.record(
-            actor="system", action="assessment.failed",
+        _audit_record(
+            audit, audit_chain, actor="system", action="assessment.failed",
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
         )
