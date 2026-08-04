@@ -24,6 +24,9 @@ from ....infrastructure.adapters.step_runner import AdapterStepRunner, ScanConte
 from ....infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
+from ....infrastructure.repositories.sqlalchemy_confirmed import (
+    SqlAlchemyConfirmedFindingRepository,
+)
 from ....infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyAssessmentRepository,
     SqlAlchemyAuditRepository,
@@ -266,6 +269,7 @@ def start_assessment(
     audit_chain = getattr(request.app.state, "audit_chain", None)
     egress_guard = getattr(request.app.state, "egress_guard", None)
     nft_scope_enforcer = getattr(request.app.state, "nft_scope_enforcer", None)
+    oracle = getattr(request.app.state, "oracle", None)
 
     def _run() -> None:
         thread = threading.current_thread()
@@ -306,6 +310,12 @@ def start_assessment(
                 egress_guard=egress_guard,
                 nft_scope_enforcer=nft_scope_enforcer,
                 audit_chain=audit_chain,
+                oracle=oracle,
+                confirmed_finding_repo=(
+                    SqlAlchemyConfirmedFindingRepository(bg_session)
+                    if oracle is not None
+                    else None
+                ),
             )
             bg_session.commit()
         except Exception:
