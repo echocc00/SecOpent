@@ -70,6 +70,72 @@ def _candidate(vuln_type: VulnType) -> CandidateFinding:
     )
 
 
+# --- W2-C T5: OracleEngine + RescanVerifier(canary=...) end-to-end ---------
+
+
+class _EchoRunner:
+    """Fake RealScanRunner that echoes the scan args back in stdout.
+
+    Simulates a target that reflects the canary token embedded in the probe,
+    so verify_echo can detect it. ``echo`` toggles whether the token comes back.
+    """
+
+    def __init__(self, *, echo: bool = True) -> None:
+        self._echo = echo
+
+    def scan(self, adapter_key: str, *, args: Sequence[str], **kwargs: object) -> object:
+        class _Result:
+            pass
+
+        r = _Result()
+        r.observations = ()  # type: ignore[attr-defined]
+        r.stdout = " ".join(args) if self._echo else "no canary here"  # type: ignore[attr-defined]
+        return r
+
+
+def test_oracle_with_canary_rescan_verifier_confirms_on_echo(
+    memory_repositories,  # type: ignore[no-untyped-def]
+) -> None:
+    """W2-C T5: a real RescanVerifier with canary injected + a placeholder in
+    the scan kwargs -> N/N echoes -> CONFIRMED."""
+    from secopent.application.canary import CANARY_PLACEHOLDER
+    from secopent.infrastructure.oracle.rescan_verifier import RescanVerifier
+
+    audit = AuditService(memory_repositories.audit)
+    canary = CanaryTokenManager(audit)
+    verifier = RescanVerifier(
+        runner=_EchoRunner(echo=True),  # type: ignore[arg-type]
+        scan_kwargs={"adapter_key": "nuclei", "args": ["-u", f"http://t/{CANARY_PLACEHOLDER}"]},
+        canary=canary,
+    )
+    engine = OracleEngine(registry=default_registry(), verifier=verifier, canary=canary)
+
+    result = engine.verify(_candidate(VulnType.SQLI), actor="oracle")
+    assert result.status is VerificationStatus.CONFIRMED
+    assert result.successes == result.attempts  # N/N
+
+
+def test_oracle_with_canary_rescan_verifier_not_confirmed_without_echo(
+    memory_repositories,  # type: ignore[no-untyped-def]
+) -> None:
+    """W2-C T5: no canary echo in stdout -> not CONFIRMED (REFUTED)."""
+    from secopent.application.canary import CANARY_PLACEHOLDER
+    from secopent.infrastructure.oracle.rescan_verifier import RescanVerifier
+
+    audit = AuditService(memory_repositories.audit)
+    canary = CanaryTokenManager(audit)
+    verifier = RescanVerifier(
+        runner=_EchoRunner(echo=False),  # type: ignore[arg-type]
+        scan_kwargs={"adapter_key": "nuclei", "args": ["-u", f"http://t/{CANARY_PLACEHOLDER}"]},
+        canary=canary,
+    )
+    engine = OracleEngine(registry=default_registry(), verifier=verifier, canary=canary)
+
+    result = engine.verify(_candidate(VulnType.SQLI), actor="oracle")
+    assert result.status is not VerificationStatus.CONFIRMED
+    assert result.successes == 0
+
+
 def test_confirmed_at_n_of_n_successes(engine_factory) -> None:  # type: ignore[no-untyped-def]
     # RCE needs N=3.
     verifier = ScriptedVerifier([ReproductionStatus.SUCCESS] * 3)

@@ -140,10 +140,11 @@ def test_juice_shop_real_sqli_full_chain(require_target, docker_mount_dir: Path)
         vuln_type=_CWE_TO_VULN["CWE-89"],
         target=finding.asset,
     )
+    canary = CanaryTokenManager(_NullAudit())
     engine = OracleEngine(
         registry=default_registry(),
-        verifier=RescanVerifier(runner, scan_kwargs),
-        canary=CanaryTokenManager(_NullAudit()),
+        verifier=RescanVerifier(runner, scan_kwargs, canary=canary),
+        canary=canary,
     )
     verification = engine.verify(candidate, actor="oracle")
     assert verification.status is VerificationStatus.CONFIRMED, verification.reason

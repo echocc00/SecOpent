@@ -169,6 +169,7 @@ def test_web_orchestration_juice_shop_full_chain(require_target, docker_mount_di
         vuln_type=VulnType.SQLI,
         target=finding.asset,
     )
+    canary = CanaryTokenManager(_NullAudit())
     engine = OracleEngine(
         registry=default_registry(),
         verifier=RescanVerifier(
@@ -186,8 +187,9 @@ def test_web_orchestration_juice_shop_full_chain(require_target, docker_mount_di
                 ],
                 "mounts": {"/templates": tpl_dir},
             },
+            canary=canary,
         ),
-        canary=CanaryTokenManager(_NullAudit()),
+        canary=canary,
     )
     verification = engine.verify(candidate, actor="oracle")
     assert verification.status is VerificationStatus.CONFIRMED, verification.reason
