@@ -15,6 +15,9 @@ from secopent.infrastructure.egress.egress_guard import EgressGuard
 from secopent.infrastructure.egress.nft_scope import NftScopeEnforcer
 from secopent.infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from secopent.infrastructure.safety.permit_revoker import InMemoryPermitRevoker
+from secopent.infrastructure.secrets.persistent_file_backend import (
+    PersistentEncryptedFileBackend,
+)
 from secopent.interfaces.api.main import create_app
 
 
@@ -66,4 +69,19 @@ def test_prompt_injection_guard_blocks_protected_resource_action(tmp_path) -> No
     # An allowed action on a non-protected target passes.
     ok = AgentAction(action_type="add_observation", target="finding", payload={})
     assert guard.validate_action(ok) is ok
+
+
+def test_create_app_uses_persistent_secret_backend_by_default(
+    tmp_path, monkeypatch
+) -> None:
+    """W2-C T3: without SECOPTENT_SECRET_BACKEND=memory, the default is
+    PersistentEncryptedFileBackend (secrets survive restart)."""
+    monkeypatch.delenv("SECOPTENT_SECRET_BACKEND", raising=False)
+    monkeypatch.setenv("SECOPTENT_SECRET_STORE_PATH", str(tmp_path / "secrets.json"))
+    monkeypatch.setenv("SECOPTENT_SECRET_KEY_PATH", str(tmp_path / "secret.key"))
+
+    engine = create_sqlite_engine(tmp_path / "t.db")
+    app = create_app(engine=engine)
+    backend = app.state.signing_keys._secrets._backend
+    assert isinstance(backend, PersistentEncryptedFileBackend)
 

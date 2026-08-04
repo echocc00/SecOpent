@@ -147,17 +147,27 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def _build_secret_backend() -> EncryptedFileBackend | PersistentEncryptedFileBackend:
-    """Pick the secret backend from env (NAS hardening, v0.1.5).
+    """Pick the secret backend (W2-C T3: persistent by default).
 
-    SECOPTENT_SECRET_STORE_PATH + SECOPTENT_SECRET_KEY_PATH -> persistent
-    (secrets survive restart; signed Cases stay verifiable). Otherwise the
-    in-memory EncryptedFileBackend (dev/test; secrets lost on restart).
+    ``SECOPTENT_SECRET_BACKEND=memory`` -> in-memory EncryptedFileBackend (tests;
+    secrets lost on restart). Otherwise -> PersistentEncryptedFileBackend so
+    signed Cases/AppModels stay verifiable across restart:
+
+    - store path: ``SECOPTENT_SECRET_STORE_PATH`` or ``./secrets.json``
+    - key:        ``SECOPTENT_SECRET_KEY`` (Fernet key, KMS/operator-injected,
+                  never written to disk) else ``SECOPTENT_SECRET_KEY_PATH`` or
+                  ``./secret.key`` (auto-generated 0600 on first start)
+
+    Production should inject the key via env (KMS/age-encrypted); the auto-
+    generated key file is the dev escrow (back it up independently).
     """
-    store_env = os.environ.get("SECOPTENT_SECRET_STORE_PATH")
-    key_env = os.environ.get("SECOPTENT_SECRET_KEY_PATH")
-    if store_env and key_env:
-        return PersistentEncryptedFileBackend(Path(store_env), Path(key_env))
-    return EncryptedFileBackend()
+    if os.environ.get("SECOPTENT_SECRET_BACKEND") == "memory":
+        return EncryptedFileBackend()
+    store_path = Path(os.environ.get("SECOPTENT_SECRET_STORE_PATH", "secrets.json"))
+    key_path = Path(os.environ.get("SECOPTENT_SECRET_KEY_PATH", "secret.key"))
+    return PersistentEncryptedFileBackend(
+        store_path, key_path, env_key="SECOPTENT_SECRET_KEY",
+    )
 
 
 def _signing_key_metadata_path() -> Path | None:
