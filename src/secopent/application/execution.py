@@ -35,6 +35,7 @@ from .audit_chain import AuditChain
 from .emergency_stop import EmergencyStop
 from .finding_correlation import FindingCorrelation
 from .jobs import JobService
+from .oracle_service import OracleService
 from .orchestrator import Orchestrator, StepRunner
 from .ports.repositories import AssessmentRepository, ScopeRepository
 from .ports.security import (
@@ -258,6 +259,8 @@ def execute_assessment(
     egress_guard: EgressGuardProtocol | None = None,
     nft_scope_enforcer: NftScopeEnforcerProtocol | None = None,
     audit_chain: AuditChain | None = None,
+    oracle: OracleService | None = None,
+    confirmed_finding_repo: object | None = None,
 ) -> None:
     """Run one assessment to completion in a background thread.
 
@@ -353,6 +356,39 @@ def execute_assessment(
         findings = FindingCorrelation().correlate(observations)
         for finding in findings:
             finding_repo.add(replace(finding, assessment_id=assessment_id))
+
+        if oracle is not None and confirmed_finding_repo is not None and findings:
+            try:
+                summary = oracle.verify_findings(
+                    findings,
+                    finding_repo=finding_repo,
+                    confirmed_repo=confirmed_finding_repo,
+                    audit=audit,
+                    audit_chain=audit_chain,
+                    actor="system",
+                    verified_at=utc_now(),
+                )
+                _audit_record(
+                    audit, audit_chain, actor="system", action="oracle.batch_verified",
+                    resource_type="assessment", resource_id=assessment_id,
+                    payload={
+                        "confirmed": summary.confirmed,
+                        "refuted": summary.refuted,
+                        "inconclusive": summary.inconclusive,
+                        "skipped": summary.skipped,
+                        "failed": summary.failed,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - oracle is best-effort
+                _logger.warning(
+                    "oracle batch verification failed (findings remain unconfirmed)",
+                    assessment_id=assessment_id, error=str(exc), exc_info=True,
+                )
+                _audit_record(
+                    audit, audit_chain, actor="system", action="oracle.batch_failed",
+                    resource_type="assessment", resource_id=assessment_id,
+                    payload={"reason": str(exc)},
+                )
 
         service.complete(assessment_id)  # RUNNING -> COMPLETED
         coverage_rate, uncovered = _compute_coverage(catalog, asset_types, observations)
