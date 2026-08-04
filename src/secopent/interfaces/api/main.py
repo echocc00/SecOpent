@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session
 from ...application.audit_chain import AuditChain
 from ...application.emergency_stop import EmergencyStop
 from ...application.health import BundleSignatureState
+from ...application.prompt_injection import PromptInjectionGuard
 from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.scope_enforcer import ScopeEnforcer
 from ...application.secret_store import SecretStore
@@ -47,6 +48,7 @@ from ...infrastructure.db.engine import (
 )
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
+from ...infrastructure.egress.egress_guard import EgressGuard
 from ...infrastructure.egress.nft_scope import SocketDnsResolver
 from ...infrastructure.evidence_store.redaction import RedactionEngine
 from ...infrastructure.llm.null_backend import NullModelBackend
@@ -330,6 +332,10 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         container_terminator=DockerContainerTerminator(),
         audit=audit_chain,
     )
+    # Egress guard (app-layer pre-check; nftables kernel enforcement in W2-B)
+    # and prompt-injection guard (validates agent actions on the proposal path).
+    app.state.egress_guard = EgressGuard(SocketDnsResolver())
+    app.state.prompt_injection_guard = PromptInjectionGuard()
 
     # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
     # null backend so LLM-assisted endpoints degrade to their deterministic
@@ -362,6 +368,8 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.audit_chain = app.state.audit_chain
     api.state.scope_enforcer = app.state.scope_enforcer
     api.state.emergency_stop = app.state.emergency_stop
+    api.state.egress_guard = app.state.egress_guard
+    api.state.prompt_injection_guard = app.state.prompt_injection_guard
     _register_api(api)
     app.mount("/api", api)
 

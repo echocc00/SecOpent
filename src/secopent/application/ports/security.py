@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from ...domain.permits.models import ExecutionPermit
+from ...domain.policy.models import PolicyDecision
+from ...domain.scope.models import ScopeSnapshot
 
 
 @runtime_checkable
@@ -52,3 +54,15 @@ class PermitVerifierProtocol(Protocol):
         used_nonces: set[str] | frozenset[str],
         expected_worker: str | None = None,
     ) -> None: ...
+
+
+@runtime_checkable
+class EgressGuardProtocol(Protocol):
+    """Decide whether a connection to a target is permitted (egress layer).
+
+    Always blocks cloud-metadata / loopback / link-local destinations even if
+    the scope mistakenly includes them. Concrete impl (EgressGuard) lives in
+    infrastructure; nftables enforcement wraps this in W2-B.
+    """
+
+    def check(self, target: str, scope: ScopeSnapshot) -> PolicyDecision: ...

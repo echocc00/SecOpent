@@ -287,3 +287,34 @@ def test_audit_chain_records_signed_events_and_permit_nonce(memory_repositories)
     assert "permit.used" in actions  # record_permit_nonce
     assert chain.permit_nonces()  # non-empty
     assert chain.verify() is True  # hash chain + every signature valid
+
+
+# --- T7: EgressGuard app-layer pre-check ------------------------------------
+
+
+def test_egress_guard_denies_cloud_metadata_target(memory_repositories) -> None:
+    """169.254.169.254 is always blocked even if scope mistakenly includes it."""
+    from secopent.infrastructure.egress.egress_guard import EgressGuard
+    from secopent.infrastructure.egress.nft_scope import SocketDnsResolver
+
+    _seed_approved_ip_scope(memory_repositories, target="http://169.254.169.254")
+    assessment = memory_repositories.assessments.items[
+        next(iter(memory_repositories.assessments.items))
+    ]
+    AssessmentService(memory_repositories.assessments).start(assessment.id)
+
+    execute_assessment(
+        assessment_id=assessment.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        egress_guard=EgressGuard(SocketDnsResolver()),
+    )
+
+    assessment = memory_repositories.assessments.get(assessment.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.FAILED
+    actions = [e.action for e in memory_repositories.audit.events]
+    assert "assessment.blocked.egress_denied" in actions

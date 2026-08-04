@@ -264,6 +264,7 @@ def start_assessment(
     permit_verifier = getattr(request.app.state, "permit_verifier", None)
     scope_enforcer = getattr(request.app.state, "scope_enforcer", None)
     audit_chain = getattr(request.app.state, "audit_chain", None)
+    egress_guard = getattr(request.app.state, "egress_guard", None)
 
     def _run() -> None:
         thread = threading.current_thread()
@@ -301,6 +302,7 @@ def start_assessment(
                 permit_registry=permit_registry,
                 permit_verifier=permit_verifier,
                 scope_enforcer=scope_enforcer,
+                egress_guard=egress_guard,
                 audit_chain=audit_chain,
             )
             bg_session.commit()
