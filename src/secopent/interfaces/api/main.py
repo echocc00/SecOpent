@@ -30,12 +30,16 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from ...application.audit_chain import AuditChain
+from ...application.emergency_stop import EmergencyStop
 from ...application.health import BundleSignatureState
 from ...application.remote_model import ModelBackend, RemoteModelGateway
+from ...application.scope_enforcer import ScopeEnforcer
 from ...application.secret_store import SecretStore
 from ...application.signing_keys import SigningKeyService
 from ...domain.assessments.models import AssessmentStatus
 from ...domain.common.canonical import utc_now
+from ...infrastructure.audit.key_manager import AuditKeyManager
 from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.engine import (
     configured_database_url,
@@ -43,6 +47,7 @@ from ...infrastructure.db.engine import (
 )
 from ...infrastructure.db.session import Database
 from ...infrastructure.db.sqlite import create_sqlite_engine
+from ...infrastructure.egress.nft_scope import SocketDnsResolver
 from ...infrastructure.evidence_store.redaction import RedactionEngine
 from ...infrastructure.llm.null_backend import NullModelBackend
 from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
@@ -50,12 +55,15 @@ from ...infrastructure.logging_setup import configure_logging
 from ...infrastructure.observability.context import install_request_context
 from ...infrastructure.observability.metrics import render_metrics
 from ...infrastructure.observability.tracing import setup_tracing
+from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
 from ...infrastructure.repositories.sqlalchemy_core import (
     SqlAlchemyAssessmentRepository,
 )
+from ...infrastructure.safety.emergency_infra import DockerContainerTerminator
+from ...infrastructure.safety.permit_revoker import InMemoryPermitRevoker
 from ...infrastructure.secrets.encrypted_file_backend import EncryptedFileBackend
 from ...infrastructure.secrets.persistent_file_backend import (
     PersistentEncryptedFileBackend,
@@ -305,6 +313,24 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # publisher records each real verification here; /updates/health reads it.
     app.state.bundle_signature_state = BundleSignatureState()
 
+    # Security components (W2-A T6): signed permit chain + emergency stop +
+    # signed audit chain + scope enforcement. One shared instance each so the
+    # /stop route, the background executor, and the /api sub-app all see the
+    # same kill-switch flag, permit registry, and signed audit chain.
+    permit_signer = PermitSigner()
+    permit_registry = InMemoryPermitRevoker()
+    audit_chain = AuditChain(AuditKeyManager())
+    app.state.permit_signer = permit_signer
+    app.state.permit_verifier = PermitVerifier(permit_signer.public_key_bytes())
+    app.state.permit_registry = permit_registry
+    app.state.audit_chain = audit_chain
+    app.state.scope_enforcer = ScopeEnforcer(SocketDnsResolver())
+    app.state.emergency_stop = EmergencyStop(
+        permit_revoker=permit_registry,
+        container_terminator=DockerContainerTerminator(),
+        audit=audit_chain,
+    )
+
     # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
     # null backend so LLM-assisted endpoints degrade to their deterministic
     # path. The LLM only ever proposes/drafts - the deterministic layer decides.
@@ -330,6 +356,12 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.db = app.state.db
     api.state.idempotency = app.state.idempotency
     api.state.signing_keys = app.state.signing_keys
+    api.state.permit_signer = app.state.permit_signer
+    api.state.permit_verifier = app.state.permit_verifier
+    api.state.permit_registry = app.state.permit_registry
+    api.state.audit_chain = app.state.audit_chain
+    api.state.scope_enforcer = app.state.scope_enforcer
+    api.state.emergency_stop = app.state.emergency_stop
     _register_api(api)
     app.mount("/api", api)
 

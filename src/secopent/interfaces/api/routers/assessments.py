@@ -257,6 +257,13 @@ def start_assessment(
     # The background thread owns its own session; the request session is closed
     # after the response, so we reconstruct repos against app.state.db there.
     db = request.app.state.db
+    # Security components (W2-A T6): shared singletons from the composition root.
+    emergency_stop = getattr(request.app.state, "emergency_stop", None)
+    permit_signer = getattr(request.app.state, "permit_signer", None)
+    permit_registry = getattr(request.app.state, "permit_registry", None)
+    permit_verifier = getattr(request.app.state, "permit_verifier", None)
+    scope_enforcer = getattr(request.app.state, "scope_enforcer", None)
+    audit_chain = getattr(request.app.state, "audit_chain", None)
 
     def _run() -> None:
         thread = threading.current_thread()
@@ -289,6 +296,12 @@ def start_assessment(
                 catalog=catalog,
                 asset_types=asset_types,
                 max_workers=_orchestrator_max_workers(),
+                emergency_stop=emergency_stop,
+                permit_signer=permit_signer,
+                permit_registry=permit_registry,
+                permit_verifier=permit_verifier,
+                scope_enforcer=scope_enforcer,
+                audit_chain=audit_chain,
             )
             bg_session.commit()
         except Exception:
@@ -306,7 +319,7 @@ def start_assessment(
 
 @router.post("/{assessment_id}/stop", response_model=EmergencyReportOut)
 def emergency_stop(
-    assessment_id: str, payload: StopRequest, session: DbSession
+    assessment_id: str, payload: StopRequest, request: Request, session: DbSession
 ) -> EmergencyReportOut:
     """Trigger the emergency stop for an assessment (human-only, §12).
 
@@ -321,12 +334,16 @@ def emergency_stop(
     if SqlAlchemyAssessmentRepository(session).get(assessment_id) is None:
         raise HTTPException(status_code=404, detail="assessment not found")
 
-    audit = AuditService(SqlAlchemyAuditRepository(session))
-    stop = EmergencyStop(
-        permit_revoker=NullPermitRevoker(),
-        container_terminator=DockerContainerTerminator(),
-        audit=audit,
-    )
+    # Use the shared kill switch from the composition root (W2-A T6) so the
+    # background executor sees the triggered flag and refuses new assessments.
+    stop = getattr(request.app.state, "emergency_stop", None)
+    if stop is None:
+        # Fallback (older app without composition root): construct per-call.
+        stop = EmergencyStop(
+            permit_revoker=NullPermitRevoker(),
+            container_terminator=DockerContainerTerminator(),
+            audit=AuditService(SqlAlchemyAuditRepository(session)),
+        )
     report = stop.trigger(actor=payload.actor, reason=payload.reason)
     return EmergencyReportOut(
         triggered=report.triggered,

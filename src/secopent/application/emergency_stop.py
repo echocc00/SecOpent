@@ -16,7 +16,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from .audit import AuditService
+
+@runtime_checkable
+class AuditRecorder(Protocol):
+    """Append-only audit sink (AuditService or signed AuditChain both satisfy)."""
+
+    def record(
+        self, *, actor: str, action: str, resource_type: str,
+        resource_id: str, payload: dict[str, object],
+    ) -> object: ...
 
 
 @runtime_checkable
@@ -53,7 +61,7 @@ class EmergencyStop:
         *,
         permit_revoker: PermitRevoker,
         container_terminator: ContainerTerminator,
-        audit: AuditService,
+        audit: AuditRecorder,
     ) -> None:
         self._permit_revoker = permit_revoker
         self._container_terminator = container_terminator
