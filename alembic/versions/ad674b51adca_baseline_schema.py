@@ -290,6 +290,30 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_core_execution_plans_digest'), 'core_execution_plans', ['digest'], unique=False)
+    op.create_table('core_confirmed_findings',
+    sa.Column('candidate_id', sa.String(length=64), nullable=False),
+    sa.Column('vuln_type', sa.String(length=32), nullable=False),
+    sa.Column('evidence_ids', sa.JSON(), nullable=False),
+    sa.Column('verified_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('successes', sa.Integer(), nullable=False),
+    sa.Column('attempts', sa.Integer(), nullable=False),
+    sa.PrimaryKeyConstraint('candidate_id')
+    )
+    op.create_table('core_signed_audit_events',
+    sa.Column('seq', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('event_id', sa.String(length=64), nullable=False),
+    sa.Column('actor', sa.String(length=64), nullable=False),
+    sa.Column('action', sa.String(length=64), nullable=False),
+    sa.Column('resource_type', sa.String(length=64), nullable=False),
+    sa.Column('resource_id', sa.String(length=64), nullable=False),
+    sa.Column('payload', sa.JSON(), nullable=False),
+    sa.Column('previous_hash', sa.String(length=64), nullable=False),
+    sa.Column('event_hash', sa.String(length=80), nullable=False),
+    sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('signature', sa.String(length=256), nullable=False),
+    sa.PrimaryKeyConstraint('seq')
+    )
+    op.create_index(op.f('ix_core_signed_audit_events_event_id'), 'core_signed_audit_events', ['event_id'], unique=False)
     # ### end Alembic commands ###
 
 
@@ -338,4 +362,7 @@ def downgrade() -> None:
     op.drop_table('core_asset_nodes')
     op.drop_index(op.f('ix_core_appmodels_status'), table_name='core_appmodels')
     op.drop_table('core_appmodels')
+    op.drop_index(op.f('ix_core_signed_audit_events_event_id'), table_name='core_signed_audit_events')
+    op.drop_table('core_signed_audit_events')
+    op.drop_table('core_confirmed_findings')
     # ### end Alembic commands ###
