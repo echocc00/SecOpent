@@ -85,6 +85,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="VACUUM the SQLite DB to reclaim space (stop the API first).",
     )
     vacuum.add_argument("--db", required=True, help="Path to the SQLite database file.")
+    db = subparsers.add_parser(
+        "db",
+        help="Manage the DB schema via alembic (upgrade/stamp/current).",
+    )
+    db_sub = db.add_subparsers(dest="db_action", required=True)
+    for _action, _help in (
+        ("upgrade", "Apply alembic migrations to head (creates schema on a fresh DB)."),
+        ("stamp", "Mark an existing schema as being at head (no migration run)."),
+        ("current", "Print the current alembic revision."),
+    ):
+        _p = db_sub.add_parser(_action, help=_help)
+        _p.add_argument(
+            "--db",
+            required=True,
+            help="Database URL (postgresql://...) or SQLite path.",
+        )
     return parser
 
 
@@ -319,6 +335,48 @@ def _cmd_doctor() -> int:
     return 0
 
 
+def _cmd_db(action: str, db_url: str) -> int:
+    """Run an alembic action (upgrade/stamp/current) against the DB (W4-D T2).
+
+    Sets ``SECOPTENT_DB_URL`` so ``alembic/env.py`` targets the given DB. A bare
+    path (no ``://``) is treated as SQLite. Production runs ``db upgrade``
+    before boot; ``db stamp`` marks an existing ``create_all``-bootstrapped DB
+    as being at head so subsequent upgrades know the starting point.
+    """
+    import secopent
+
+    pkg_file = getattr(secopent, "__file__", None)
+    if pkg_file is None:
+        print("error: cannot locate secopent package source (editable install required)")
+        return 1
+    ini = Path(pkg_file).resolve().parents[2] / "alembic.ini"
+    if not ini.exists():
+        print(f"error: alembic.ini not found at {ini}")
+        return 1
+
+    url = db_url if "://" in db_url else f"sqlite:///{db_url}"
+    os.environ["SECOPTENT_DB_URL"] = url
+
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(ini))
+    try:
+        if action == "upgrade":
+            command.upgrade(cfg, "head")
+        elif action == "stamp":
+            command.stamp(cfg, "head")
+        elif action == "current":
+            command.current(cfg)
+        else:
+            print(f"error: unknown db action: {action}")
+            return 1
+    except Exception as exc:  # noqa: BLE001 - CLI surfaces the alembic failure
+        print(f"error: alembic {action} failed: {exc}")
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -343,6 +401,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "vacuum":
         return _cmd_vacuum(args.db)
+    if args.command == "db":
+        return _cmd_db(args.db_action, args.db)
     parser.print_help()
     return 1
 
