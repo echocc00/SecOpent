@@ -11,7 +11,6 @@ from __future__ import annotations
 from datetime import UTC
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from ...application.audit_chain import SignedAuditEvent
 from ...domain.audit.models import AuditEvent

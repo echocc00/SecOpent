@@ -95,4 +95,5 @@ secopent restore --db <sqlite文件> --from <备份文件>
 - [ ] 签名密钥轮换流程演练（rotate 后旧签可验、新签可用）
 - [ ] `secopent backup` 定时 + 恢复 round-trip 验证
 - [ ] 审计链启用 HMAC（防篡改要求时）
+- [ ] 签名审计链持久化（H6，W3-C）：`SECOPTENT_AUDIT_KEY_PATH` 指向 0600 审计签名密钥文件（首启自动生成；跨重启签名链可复验）；签名事件落 `core_signed_audit_events` 表
 - [ ] Docker / 镜像 digest-pin / 靶场 / Interactsh / LLM key 按 `environment-setup.md` 就绪
