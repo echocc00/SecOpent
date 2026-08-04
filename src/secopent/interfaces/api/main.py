@@ -93,6 +93,7 @@ from .routers import (
     findings_router,
     intel_router,
     jobs_router,
+    peer_agents_router,
     plans_router,
     projects_router,
     reports_router,
@@ -245,6 +246,7 @@ def _register_api(app: FastAPI) -> None:
     app.include_router(appmodels_router)
     app.include_router(signing_keys_router)
     app.include_router(catalog_router)
+    app.include_router(peer_agents_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
