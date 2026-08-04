@@ -3,8 +3,19 @@
 # Extends gitleaks' default rule set. The allowlist scopes secret scanning away
 # from intentional fake data (adapter test fixtures + test suites) so the scan
 # stays green on sample tool output, while real source/config remains scanned.
-# Note: minimax-key.txt and 云主机.txt are gitignored and never committed, so
-# they are not present in the git history that gitleaks scans.
+#
+# Local-only credential files (minimax-key.txt, 云主机.txt) are gitignored and
+# must never be committed. They are intentionally NOT allowlisted here, so a
+# future leak into a commit remains scannable. Caveat: gitleaks' default rules
+# target API-key/token formats (sk-*, AKIA*, ghp_*, etc.) and do NOT detect
+# arbitrary ip/user/password tuples like 云主机.txt -- operator must keep such
+# files out of git by auditing `git status` before every commit.
+#
+# Remediation history: 云主机.txt was committed in 78cc7cd (2026-07-26) and
+# remained tracked until untracked in this change. The cloud password it
+# contained MUST be rotated (it was exposed on the remote). History scrub via
+# git-filter-repo + force-push is pending; until then the old blob remains in
+# git history.
 
 [allowlist]
 description = "Test fixtures and test suites contain intentional fake data"
