@@ -197,6 +197,7 @@ def _seed_approved_ip_scope(repos, *, target: str) -> None:
         approved_risks=frozenset({RiskClass.LOW}),
         approved_capabilities=frozenset(), scope_digest="sha256:scope-ip",
     )
+    return repos.assessments.get(assessment.id)
 
 
 class _NullDnsResolver:
@@ -318,3 +319,81 @@ def test_egress_guard_denies_cloud_metadata_target(memory_repositories) -> None:
     assert assessment.status is AssessmentStatus.FAILED
     actions = [e.action for e in memory_repositories.audit.events]
     assert "assessment.blocked.egress_denied" in actions
+
+
+# --- T8: End-to-end auth chain integration ----------------------------------
+
+
+def test_full_auth_chain_integration_and_emergency_stop(memory_repositories) -> None:
+    """All W2-A components wired together: permit signed + verified, scope +
+    egress enforced, signed audit chain valid, then emergency stop blocks the
+    next assessment."""
+    from secopent.application.audit_chain import AuditChain
+    from secopent.application.emergency_stop import EmergencyStop
+    from secopent.application.scope_enforcer import ScopeEnforcer
+    from secopent.infrastructure.audit.key_manager import AuditKeyManager
+    from secopent.infrastructure.egress.egress_guard import EgressGuard
+    from secopent.infrastructure.egress.nft_scope import SocketDnsResolver
+    from secopent.infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
+    from secopent.infrastructure.safety.emergency_infra import NullContainerTerminator
+
+    signer = PermitSigner()
+    registry = InMemoryPermitRevoker()
+    chain = AuditChain(AuditKeyManager())
+    stop = EmergencyStop(
+        permit_revoker=registry,
+        container_terminator=NullContainerTerminator(),
+        audit=AuditService(memory_repositories.audit),
+    )
+
+    # Assessment 1: full chain -> COMPLETED with signed audit + permit nonce.
+    a1 = _seed_approved_ip_scope(memory_repositories, target="http://10.0.0.1")
+    assert a1 is not None
+    AssessmentService(memory_repositories.assessments).start(a1.id)
+    execute_assessment(
+        assessment_id=a1.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        emergency_stop=stop,
+        permit_signer=signer,
+        permit_registry=registry,
+        permit_verifier=PermitVerifier(signer.public_key_bytes()),
+        scope_enforcer=ScopeEnforcer(_NullDnsResolver()),
+        egress_guard=EgressGuard(SocketDnsResolver()),
+        audit_chain=chain,
+    )
+    a1 = memory_repositories.assessments.get(a1.id)
+    assert a1 is not None
+    assert a1.status is AssessmentStatus.COMPLETED
+    assert chain.verify() is True
+    assert chain.permit_nonces()  # permit nonce recorded in signed chain
+
+    # Trigger the kill switch.
+    stop.trigger(actor="ops", reason="incident response")
+    assert stop.is_triggered
+
+    # Assessment 2: refused at the emergency-stop gate (before any dispatch).
+    a2 = _seed_approved_ip_scope(memory_repositories, target="http://10.0.0.1")
+    assert a2 is not None and a2.id != a1.id
+    AssessmentService(memory_repositories.assessments).start(a2.id)
+    execute_assessment(
+        assessment_id=a2.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        emergency_stop=stop,
+        permit_signer=signer,
+        permit_registry=registry,
+        permit_verifier=PermitVerifier(signer.public_key_bytes()),
+        audit_chain=chain,
+    )
+    a2 = memory_repositories.assessments.get(a2.id)
+    assert a2 is not None
+    assert a2.status is AssessmentStatus.FAILED
+    actions = [e.action for e in chain.events()]
+    assert "assessment.blocked.emergency_stop" in actions
