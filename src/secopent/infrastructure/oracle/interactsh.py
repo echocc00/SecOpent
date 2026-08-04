@@ -52,6 +52,16 @@ class InteractshClient:
         domain = self._transport.register()
         return f"{canary_token}.{domain}"
 
+    def allocate_correlated(self, canary_token: str) -> tuple[str, str]:
+        """Return ``(oob_subdomain, correlation_domain)`` for a canary (W3-E).
+
+        The subdomain ``<canary>.<correlation>`` is embedded in the probe; the
+        bare correlation domain is later passed to ``has_callback``. This closes
+        the API gap that ``allocate`` (which returns only the subdomain) leaves.
+        """
+        correlation_domain = self._transport.register()
+        return f"{canary_token}.{correlation_domain}", correlation_domain
+
     def collect(self, canary_token: str, correlation_domain: str) -> tuple[OobInteraction, ...]:
         """Return the interactions whose label is exactly this canary token."""
         records = self._transport.poll(correlation_domain)

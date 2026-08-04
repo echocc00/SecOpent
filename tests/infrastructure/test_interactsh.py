@@ -34,6 +34,20 @@ def test_allocate_embeds_canary_as_label() -> None:
     assert client.allocate("tok123") == "tok123.oast.example.com"
 
 
+def test_allocate_correlated_returns_subdomain_and_correlation() -> None:
+    """W3-E T1: allocate_correlated returns both the embeddable subdomain and
+    the bare correlation domain needed by has_callback."""
+    client = InteractshClient(FakeTransport("oast.example.com", []))
+    subdomain, correlation = client.allocate_correlated("tok123")
+    assert subdomain == "tok123.oast.example.com"
+    assert correlation == "oast.example.com"
+    # The returned correlation works with has_callback.
+    records = [{"unique_id": "tok123", "protocol": "dns", "raw": "x"}]
+    client2 = InteractshClient(FakeTransport("oast.example.com", records))
+    _, corr = client2.allocate_correlated("tok123")
+    assert client2.has_callback("tok123", corr) is True
+
+
 def test_collect_returns_matching_canary() -> None:
     records = [
         {"unique_id": "tok123", "protocol": "dns", "raw": "query tok123.oast"},
