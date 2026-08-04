@@ -1,10 +1,10 @@
-# src/secopent/application/ports/peer_runs.py
-"""In-memory PeerRunRepository implementation (P0).
+# src/secopent/infrastructure/peer_agents/in_memory_peer_runs.py
+"""In-memory PeerRunRepository (W3-B, moved out of application/ports/).
 
-The SQLite-backed implementation lands with P2 wiring (see plan #4); the
-in-memory repo serves Lite mode and all tests. Kept in application/ports
-alongside the Protocol usage, mirroring how other Lite-mode in-memory
-repositories are provided.
+Dict-backed reference implementation of the PeerRunRepository Protocol; serves
+Lite mode and all tests. Moved out of ports/ so application/ports/ holds only
+Protocols/DTOs - concrete implementations live in infrastructure (same pattern
+as InMemoryPermitRevoker in infrastructure/safety/).
 """
 from __future__ import annotations
 

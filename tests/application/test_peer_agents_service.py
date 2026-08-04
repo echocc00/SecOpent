@@ -9,7 +9,6 @@ from secopent.application.peer_agents import (
     PeerAgentService,
     PeerRunOutcome,
 )
-from secopent.application.ports.peer_runs import InMemoryPeerRunRepository
 from secopent.domain.catalog.models import AssetType, RequiredTestClass, TestCatalog
 from secopent.domain.peer_agents.models import (
     PeerAgentBudget,
@@ -26,6 +25,9 @@ from secopent.domain.peer_agents.models import (
 from secopent.domain.peer_agents.registry import PeerAgentRegistry
 from secopent.domain.policy.models import RiskClass
 from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
+from secopent.infrastructure.peer_agents.in_memory_peer_runs import (
+    InMemoryPeerRunRepository,
+)
 
 
 def _budget() -> PeerAgentBudget:

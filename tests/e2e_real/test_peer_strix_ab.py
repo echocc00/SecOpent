@@ -121,9 +121,11 @@ def test_strix_ab_on_juice_shop(record_property) -> None:  # type: ignore[no-unt
     import json
     from pathlib import Path
 
-    from secopent.application.ports.peer_runs import InMemoryPeerRunRepository
     from secopent.infrastructure.peer_agents.composition import (
         create_peer_agent_service,
+    )
+    from secopent.infrastructure.peer_agents.in_memory_peer_runs import (
+        InMemoryPeerRunRepository,
     )
 
     # --- Target: Juice Shop URL (matches conftest _TARGETS["juice_shop"]) ---

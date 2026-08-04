@@ -36,7 +36,9 @@ class TestStrixDescriptor:
 class TestCreatePeerAgentService:
     def _make_service(self, tmp_path: Path) -> PeerAgentService:
         from secopent.application.audit import AuditService
-        from secopent.application.ports.peer_runs import InMemoryPeerRunRepository
+        from secopent.infrastructure.peer_agents.in_memory_peer_runs import (
+            InMemoryPeerRunRepository,
+        )
 
         return create_peer_agent_service(
             audit=AuditService(repo=_FakeAuditRepo()),
@@ -91,7 +93,9 @@ class TestShannonRegistration:
 
     def _make_service(self, tmp_path: Path, **kwargs: object) -> PeerAgentService:
         from secopent.application.audit import AuditService
-        from secopent.application.ports.peer_runs import InMemoryPeerRunRepository
+        from secopent.infrastructure.peer_agents.in_memory_peer_runs import (
+            InMemoryPeerRunRepository,
+        )
 
         return create_peer_agent_service(
             audit=AuditService(repo=_FakeAuditRepo()),
