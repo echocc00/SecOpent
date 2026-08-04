@@ -19,7 +19,7 @@ import os
 import threading
 import time
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -63,6 +63,9 @@ from ...infrastructure.observability.metrics import render_metrics
 from ...infrastructure.observability.tracing import setup_tracing
 from ...infrastructure.oracle.verifier_factory import RescanVerifierFactory
 from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
+from ...infrastructure.repositories.sqlalchemy_audit_chain import (
+    SqlAlchemySignedAuditEventStore,
+)
 from ...infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -189,6 +192,35 @@ def _signing_key_metadata_path() -> Path | None:
     return Path(os.environ["SECOPTENT_SECRET_STORE_PATH"]).with_name(
         "signing_keys.json"
     )
+
+
+def _load_or_create_audit_keys() -> AuditKeyManager:
+    """Load the audit signing key from disk, or generate+persist it (H6).
+
+    The signed audit chain's tamper-evidence survives restart only if the
+    signing key is stable: a new key on each start would make the persisted
+    signatures unverifiable. When ``SECOPTENT_AUDIT_KEY_PATH`` is set, the key
+    is loaded from (or written 0600 to) that file; otherwise an ephemeral key
+    is used (dev/test - events still persist via the store, but signatures
+    can't be re-verified across a fresh process).
+    """
+    key_path_env = os.environ.get("SECOPTENT_AUDIT_KEY_PATH")
+    if key_path_env:
+        key_path = Path(key_path_env)
+        if key_path.exists():
+            material = key_path.read_text(encoding="utf-8").strip()
+            if material:
+                try:
+                    return AuditKeyManager.from_private_material(material)
+                except Exception:  # noqa: BLE001 - corrupt file -> regenerate
+                    pass
+        keys = AuditKeyManager()
+        key_path.write_text(keys.export_private_material(), encoding="utf-8")
+        if os.name == "posix":
+            with suppress(OSError):
+                os.chmod(key_path, 0o600)
+        return keys
+    return AuditKeyManager()
 
 
 def _register_api(app: FastAPI) -> None:
@@ -336,7 +368,9 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # same kill-switch flag, permit registry, and signed audit chain.
     permit_signer = PermitSigner()
     permit_registry = InMemoryPermitRevoker()
-    audit_chain = AuditChain(AuditKeyManager())
+    audit_keys = _load_or_create_audit_keys()
+    audit_store = SqlAlchemySignedAuditEventStore(app.state.db)
+    audit_chain = AuditChain(audit_keys, store=audit_store)
     app.state.permit_signer = permit_signer
     app.state.permit_verifier = PermitVerifier(permit_signer.public_key_bytes())
     app.state.permit_registry = permit_registry

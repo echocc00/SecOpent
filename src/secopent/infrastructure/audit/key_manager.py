@@ -8,6 +8,8 @@ chain alongside the report.
 """
 from __future__ import annotations
 
+import base64
+
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -37,6 +39,27 @@ class AuditKeyManager:
         return self._private.public_key().public_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
+        )
+
+    def export_private_material(self) -> str:
+        """Base64 raw 32-byte seed for at-rest persistence (H6 restart survival).
+
+        Store encrypted at rest (0600 file or SecretStore). A persisted key lets
+        the signed audit chain be re-verified after restart - without it the
+        persisted signatures are unverifiable.
+        """
+        private_bytes = self._private.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return base64.b64encode(private_bytes).decode("ascii")
+
+    @staticmethod
+    def from_private_material(material: str) -> AuditKeyManager:
+        """Reconstruct from a base64 raw seed produced by export_private_material."""
+        return AuditKeyManager(
+            Ed25519PrivateKey.from_private_bytes(base64.b64decode(material))
         )
 
     @staticmethod
