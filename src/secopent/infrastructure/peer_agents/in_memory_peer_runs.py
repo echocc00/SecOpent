@@ -25,3 +25,10 @@ class InMemoryPeerRunRepository:
 
     def get(self, run_id: str) -> PeerAgentRun | None:
         return self._runs.get(run_id)
+
+    def list_for_assessment(
+        self, assessment_id: str
+    ) -> tuple[PeerAgentRun, ...]:
+        return tuple(
+            run for run in self._runs.values() if run.assessment_id == assessment_id
+        )
