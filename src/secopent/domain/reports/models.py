@@ -9,10 +9,11 @@ unverified findings, coverage matrix green, evidence digests present.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from ..common.canonical import canonical_digest
+from ..common.errors import DomainValidationError
 
 
 class ReportStatus(StrEnum):
@@ -63,3 +64,23 @@ class Report:
                 "coverage_rate": self.coverage_rate,
             }
         )
+
+    def approve(self) -> Report:
+        """RENDERED -> APPROVED (reviewer signs off). No backward transitions."""
+        if self.status is not ReportStatus.RENDERED:
+            raise DomainValidationError(
+                f"cannot approve a report in {self.status.value} state"
+            )
+        return replace(self, status=ReportStatus.APPROVED)
+
+    def release(self) -> Report:
+        """APPROVED -> RELEASED. Requires completeness_ok (release gate)."""
+        if self.status is not ReportStatus.APPROVED:
+            raise DomainValidationError(
+                f"cannot release a report in {self.status.value} state"
+            )
+        if not self.completeness_ok:
+            raise DomainValidationError(
+                "cannot release an incomplete report (completeness_ok is False)"
+            )
+        return replace(self, status=ReportStatus.RELEASED)
