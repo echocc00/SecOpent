@@ -9,8 +9,6 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-08-06
-
 `Schema: yes | Deps: no | Breaking: no` - architecture release: eradicate the
 "implicit cross-boundary" bug class (v3 race / v4 lock / v5 leaks) at the root,
 per `docs/architecture/postmortems/v0.2.0-implicit-boundaries.md` and the
