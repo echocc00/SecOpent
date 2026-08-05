@@ -140,6 +140,20 @@ def _audit_record(
         )
 
 
+def _phase_commit(audit_repo: object) -> None:
+    """Commit the caller-owned session at a phase boundary (v0.3.0 T3).
+
+    No-ops for in-memory repos (no bound session). In production this ends
+    the current short transaction, releasing the SQLite WAL write lock, and
+    the next write implicitly opens a fresh transaction. Called around the
+    long-running phases (scan, oracle) so emergency stops and other writers
+    are never blocked for the duration of an assessment (v4 root cause).
+    """
+    session = getattr(audit_repo, "session", None)
+    if session is not None:
+        session.commit()
+
+
 def _verify_permit(
     permit: ExecutionPermit | None,
     verifier: PermitVerifierProtocol | None,
@@ -355,6 +369,10 @@ def execute_assessment(
                     assessment_id=assessment_id, error=str(exc),
                 )
 
+        # v0.3.0 T3: release the WAL write lock before the long scan phase -
+        # everything up to here (RUNNING + permit + scope audits) is durable.
+        _phase_commit(audit_repo)
+
         step_runner = step_runner_factory(scope)
         jobs = JobService()
         orchestrator = Orchestrator(jobs, step_runner, max_workers=max_workers)
@@ -365,6 +383,8 @@ def execute_assessment(
         findings = FindingCorrelation().correlate(observations)
         for finding in findings:
             finding_repo.add(replace(finding, assessment_id=assessment_id))
+        # v0.3.0 T3: findings durable before the (minutes-long) oracle phase.
+        _phase_commit(audit_repo)
 
         if oracle is not None and confirmed_finding_repo is not None and findings:
             try:
@@ -399,6 +419,8 @@ def execute_assessment(
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"reason": str(exc)},
                 )
+        # v0.3.0 T3: oracle-phase writes durable before completion bookkeeping.
+        _phase_commit(audit_repo)
 
         service.complete(assessment_id)  # RUNNING -> COMPLETED
         coverage_rate, uncovered = _compute_coverage(catalog, asset_types, observations)

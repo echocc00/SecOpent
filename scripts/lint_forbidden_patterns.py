@@ -22,7 +22,7 @@ on violations (each printed as ``path:line: [rule] message``).
 
 Allowlist entries shrink as the v0.3.0 refactor lands:
   - R1 allow ``routers/assessments.py``  -> removed by T5 (BackgroundTasks)
-  - R2 allow ``routers/assessments.py``  -> removed by T3 (UnitOfWork)
+  - R2 allow ``routers/assessments.py``  -> removed by T3 (UnitOfWork) ✔ done
 """
 from __future__ import annotations
 
@@ -60,7 +60,6 @@ LINE_RULES: tuple[LineRule, ...] = (
             "infrastructure/audit/database_recorder.py",  # session-per-call recorder
             "infrastructure/repositories/sqlalchemy_audit_chain.py",
             "interfaces/api/main.py",  # SSE snapshot polls (short-lived)
-            "interfaces/api/routers/assessments.py",  # T3 removes (UnitOfWork)
         }),
         message=".open_session() outside sanctioned modules (v4 hot-path connection class)",
     ),

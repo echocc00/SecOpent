@@ -103,6 +103,52 @@ def _stamp_head(engine: Engine) -> None:
         pass
 
 
+class UnitOfWork:
+    """Explicit transaction boundary: one UoW = one session = one commit point.
+
+    Commits on clean exit, rolls back on exception, and always closes the
+    session. Background/batch work (the assessment daemon, the outbox worker)
+    uses one UoW per run plus explicit ``commit()`` calls at phase boundaries,
+    so the SQLite WAL write lock is never held across the multi-minute scan
+    phases (v4 root cause; v0.3.0 T3).
+    """
+
+    def __init__(self, factory: sessionmaker[Session]) -> None:
+        self._factory = factory
+        self._session: Session | None = None
+
+    def __enter__(self) -> UnitOfWork:
+        self._session = self._factory()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        session = self._session
+        assert session is not None, "UnitOfWork exited without entering"
+        try:
+            if exc_type is None:
+                session.commit()
+            else:
+                session.rollback()
+        finally:
+            session.close()
+            self._session = None
+
+    @property
+    def session(self) -> Session:
+        if self._session is None:
+            raise RuntimeError("UnitOfWork used outside its context block")
+        return self._session
+
+    def commit(self) -> None:
+        """Explicit phase commit; the session stays open for the next phase."""
+        self.session.commit()
+
+
 class Database:
     """Holds a session factory and yields request-scoped sessions."""
 
@@ -131,3 +177,12 @@ class Database:
         session rather than holding one for the stream's whole lifetime.
         """
         return self._factory()
+
+    def unit_of_work(self) -> UnitOfWork:
+        """Explicit transaction boundary for background/batch work.
+
+        Request handlers use the ``session()`` dependency instead; this is
+        for code paths that outlive a single request (the assessment daemon,
+        the outbox worker). Use as ``with db.unit_of_work() as uow: ...``.
+        """
+        return UnitOfWork(self._factory)

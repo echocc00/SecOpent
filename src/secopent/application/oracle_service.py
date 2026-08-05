@@ -165,6 +165,14 @@ class OracleService:
                 "reason": result.reason,
             },
         )
+        # v0.3.0 T3: per-finding phase commit. Each verification triggers N
+        # rescans (minutes); holding the write lock across the whole oracle
+        # batch would reintroduce the v4 contention. All of this finding's
+        # writes (confirmed + verdict + audits) share the daemon's session,
+        # so one commit makes them durable together.
+        _session = getattr(getattr(audit, "_repo", None), "session", None)
+        if _session is not None:
+            _session.commit()
         return result.status
 
     def _audit(

@@ -255,8 +255,8 @@ def start_assessment(
 
     # v3 fix: explicitly commit so the daemon's new connection sees QUEUED.
     # session.flush() is NOT enough - SQLite WAL hides uncommitted writes from
-    # new connections. The daemon opens its own session via db.open_session()
-    # in _run(); without this commit it would read stale APPROVED and
+    # new connections. The daemon opens its own session (UnitOfWork, v0.3.0
+    # T3) in _run(); without this commit it would read stale APPROVED and
     # mark_running would raise "cannot run from approved".
     session.commit()
 
@@ -284,66 +284,65 @@ def start_assessment(
         if active is not None and lock is not None:
             with lock:
                 active.add(thread)
-        bg_session = db.open_session()
         netns_handle = None
         try:
-            # Compute coverage inputs (catalog + asset types) for the report.
-            catalog = SqlAlchemyCatalogRepository(bg_session).latest_catalog()
-            assessment = SqlAlchemyAssessmentRepository(bg_session).get(assessment_id)
-            scope = (
-                SqlAlchemyScopeRepository(bg_session).get_snapshot(
-                    assessment.scope_snapshot_id
-                )
-                if assessment
-                else None
-            )
-            asset_types = tuple(_classify_asset_types(scope)) if scope else ()
-            # Per-assessment netns (W4-B T2): on Linux, isolate nft egress rules
-            # in a dedicated netns for this assessment; on non-Linux dev hosts
-            # is_supported() is False and the enforcer runs in the default netns
-            # (best-effort, same as before). The netns is destroyed in finally.
-            if (
-                netns_isolator is not None
-                and netns_isolator.is_supported()
-                and make_nft_enforcer is not None
-            ):
-                netns_handle = netns_isolator.create(assessment_id)
-                enforcer = make_nft_enforcer(netns_handle.name)
-            elif make_nft_enforcer is not None:
-                enforcer = make_nft_enforcer(None)
-            else:
-                enforcer = nft_scope_enforcer
-            execute_assessment(
-                assessment_id=assessment_id,
-                assessment_repo=SqlAlchemyAssessmentRepository(bg_session),
-                scope_repo=SqlAlchemyScopeRepository(bg_session),
-                finding_repo=SqlAlchemyFindingRepository(bg_session),
-                audit_repo=SqlAlchemyAuditRepository(bg_session),
-                step_runner_factory=_production_step_runner,
-                catalog=catalog,
-                asset_types=asset_types,
-                max_workers=_orchestrator_max_workers(),
-                emergency_stop=emergency_stop,
-                permit_signer=permit_signer,
-                permit_registry=permit_registry,
-                permit_verifier=permit_verifier,
-                scope_enforcer=scope_enforcer,
-                egress_guard=egress_guard,
-                nft_scope_enforcer=enforcer,
-                audit_chain=audit_chain,
-                oracle=oracle,
-                confirmed_finding_repo=(
-                    SqlAlchemyConfirmedFindingRepository(bg_session)
-                    if oracle is not None
+            # v0.3.0 T3: explicit UnitOfWork replaces manual
+            # commit/rollback/close. Phase commits inside execute_assessment
+            # keep the transactions short so the WAL write lock is released
+            # during the multi-minute scan phases (v4 root cause).
+            with db.unit_of_work() as uow:
+                # Compute coverage inputs (catalog + asset types) for the report.
+                catalog = SqlAlchemyCatalogRepository(uow.session).latest_catalog()
+                assessment = SqlAlchemyAssessmentRepository(uow.session).get(assessment_id)
+                scope = (
+                    SqlAlchemyScopeRepository(uow.session).get_snapshot(
+                        assessment.scope_snapshot_id
+                    )
+                    if assessment
                     else None
-                ),
-            )
-            bg_session.commit()
-        except Exception:
-            bg_session.rollback()
-            raise
+                )
+                asset_types = tuple(_classify_asset_types(scope)) if scope else ()
+                # Per-assessment netns (W4-B T2): on Linux, isolate nft egress rules
+                # in a dedicated netns for this assessment; on non-Linux dev hosts
+                # is_supported() is False and the enforcer runs in the default netns
+                # (best-effort, same as before). The netns is destroyed in finally.
+                if (
+                    netns_isolator is not None
+                    and netns_isolator.is_supported()
+                    and make_nft_enforcer is not None
+                ):
+                    netns_handle = netns_isolator.create(assessment_id)
+                    enforcer = make_nft_enforcer(netns_handle.name)
+                elif make_nft_enforcer is not None:
+                    enforcer = make_nft_enforcer(None)
+                else:
+                    enforcer = nft_scope_enforcer
+                execute_assessment(
+                    assessment_id=assessment_id,
+                    assessment_repo=SqlAlchemyAssessmentRepository(uow.session),
+                    scope_repo=SqlAlchemyScopeRepository(uow.session),
+                    finding_repo=SqlAlchemyFindingRepository(uow.session),
+                    audit_repo=SqlAlchemyAuditRepository(uow.session),
+                    step_runner_factory=_production_step_runner,
+                    catalog=catalog,
+                    asset_types=asset_types,
+                    max_workers=_orchestrator_max_workers(),
+                    emergency_stop=emergency_stop,
+                    permit_signer=permit_signer,
+                    permit_registry=permit_registry,
+                    permit_verifier=permit_verifier,
+                    scope_enforcer=scope_enforcer,
+                    egress_guard=egress_guard,
+                    nft_scope_enforcer=enforcer,
+                    audit_chain=audit_chain,
+                    oracle=oracle,
+                    confirmed_finding_repo=(
+                        SqlAlchemyConfirmedFindingRepository(uow.session)
+                        if oracle is not None
+                        else None
+                    ),
+                )
         finally:
-            bg_session.close()
             if netns_handle is not None and netns_isolator is not None:
                 try:
                     netns_isolator.destroy(netns_handle)
