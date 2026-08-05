@@ -253,6 +253,13 @@ def start_assessment(
     except AssessmentPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
+    # v3 fix: explicitly commit so the daemon's new connection sees QUEUED.
+    # session.flush() is NOT enough - SQLite WAL hides uncommitted writes from
+    # new connections. The daemon opens its own session via db.open_session()
+    # in _run(); without this commit it would read stale APPROVED and
+    # mark_running would raise "cannot run from approved".
+    session.commit()
+
     # The background thread owns its own session; the request session is closed
     # after the response, so we reconstruct repos against app.state.db there.
     db = request.app.state.db
