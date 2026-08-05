@@ -46,6 +46,8 @@ from ...domain.verification.registry import default_registry
 from ...infrastructure.adapters.real_scan import RealScanRunner
 from ...infrastructure.audit.database_recorder import DatabaseAuditRecorder
 from ...infrastructure.audit.key_manager import AuditKeyManager
+from ...infrastructure.audit.outbox_recorder import OutboxRecorder
+from ...infrastructure.audit.outbox_worker import OutboxWorker
 from ...infrastructure.catalog.default_catalog import build_default_catalog
 from ...infrastructure.db.engine import (
     configured_database_url,
@@ -154,15 +156,33 @@ def _drain_active_executions(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """App lifespan: drain in-flight assessments on shutdown (SIGTERM grace).
+    """App lifespan: activate the outbox; drain in-flight work on shutdown.
 
     The execution-tracking state is initialized in ``create_app`` (not here) so
     it is present even when the app is constructed without a running server
     (e.g. TestClient-less unit tests that still hit the start endpoint).
+
+    Outbox activation (v0.3.0 T4) happens HERE, not in ``create_app``: the
+    crash-recovery drain runs before the first request, the worker thread
+    exists only while the app serves, and apps built without a lifespan
+    (bare ``TestClient(app)``) keep the legacy direct-audit path.
     """
+    worker: OutboxWorker | None = getattr(app.state, "outbox_worker", None)
+    recorder: OutboxRecorder | None = getattr(app.state, "outbox_recorder", None)
+    activation: dict[str, object] = app.state.outbox_activation
+    if worker is not None and recorder is not None:
+        worker.drain_pending()  # crash recovery: no permit-replay gap (D4)
+        activation["recorder"] = recorder  # routers now write outbox rows
+        threading.Thread(
+            target=worker.run_forever, daemon=True, name="outbox-worker"
+        ).start()
     yield
     app.state.shutdown_event.set()
     _drain_active_executions(app)
+    if worker is not None:
+        worker.stop()
+        with suppress(Exception):
+            worker.drain_pending()  # flush rows the drained executions wrote
 
 
 def _build_secret_backend() -> EncryptedFileBackend | PersistentEncryptedFileBackend:
@@ -387,6 +407,14 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     app.state.permit_verifier = PermitVerifier(permit_signer.public_key_bytes())
     app.state.permit_registry = permit_registry
     app.state.audit_chain = audit_chain
+    # Transactional outbox (v0.3.0 T4): the daemon writes ONE outbox row per
+    # audit event inside its short business transaction; this worker drains
+    # them to core_audit_events + core_signed_audit_events off the hot path.
+    # Activation (startup drain + worker thread + router visibility) happens
+    # in _lifespan; the shared dict bridges the main app and the /api sub-app.
+    app.state.outbox_worker = OutboxWorker(app.state.db, audit_chain)
+    app.state.outbox_recorder = OutboxRecorder(app.state.db)
+    app.state.outbox_activation = {}
     app.state.scope_enforcer = ScopeEnforcer(SocketDnsResolver())
     app.state.emergency_stop = EmergencyStop(
         permit_revoker=permit_registry,
@@ -512,6 +540,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.make_nft_enforcer = app.state.make_nft_enforcer
     api.state.canary = app.state.canary
     api.state.oracle = app.state.oracle
+    api.state.outbox_activation = app.state.outbox_activation
     api.state.peer_agent_service = app.state.peer_agent_service
     _register_api(api)
     app.mount("/api", api)

@@ -275,6 +275,9 @@ def start_assessment(
     netns_isolator = getattr(request.app.state, "netns_isolator", None)
     make_nft_enforcer = getattr(request.app.state, "make_nft_enforcer", None)
     oracle = getattr(request.app.state, "oracle", None)
+    # v0.3.0 T4: present only once the lifespan activated the outbox (drain
+    # done + worker running); None keeps the legacy direct-audit path.
+    audit_outbox = getattr(request.app.state, "outbox_activation", {}).get("recorder")
 
     def _run() -> None:
         thread = threading.current_thread()
@@ -335,6 +338,7 @@ def start_assessment(
                     egress_guard=egress_guard,
                     nft_scope_enforcer=enforcer,
                     audit_chain=audit_chain,
+                    audit_outbox=audit_outbox,
                     oracle=oracle,
                     confirmed_finding_repo=(
                         SqlAlchemyConfirmedFindingRepository(uow.session)

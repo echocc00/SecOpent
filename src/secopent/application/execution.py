@@ -120,19 +120,32 @@ def _audit_record(
     resource_id: str,
     payload: dict[str, object],
     permit_nonce: str | None = None,
+    outbox: object | None = None,
 ) -> None:
-    """Record to the DB-backed queryable audit log AND the signed AuditChain in
-    the SAME transaction (v4 refactor). The queryable log uses the repo's bound
-    session; the signed chain is passed that same session so both INSERTs join
-    one transaction, one WAL frame, one commit (caller commits). This eliminates
-    the cross-connection double-write that caused v4's SQLite lock contention.
+    """Record an audit event for the execution.
+
+    With ``outbox`` wired (production, v0.3.0 T4) ONE outbox row is written
+    in the caller's transaction and the OutboxWorker fans it out to both
+    audit tables asynchronously - audit is off the hot path. Events carrying
+    a ``permit_nonce`` always take the direct path so replay-detection state
+    is never async. Without an outbox (tests) the event is recorded to the
+    DB-backed queryable audit log AND the signed AuditChain in the SAME
+    transaction (v4 refactor): the queryable log uses the repo's bound
+    session; the signed chain is passed that same session so both INSERTs
+    join one transaction, one WAL frame, one commit (caller commits).
     """
+    session = getattr(audit_repo, "session", None)
+    if outbox is not None and permit_nonce is None:
+        outbox.record(  # type: ignore[attr-defined]
+            actor=actor, action=action, resource_type=resource_type,
+            resource_id=resource_id, payload=payload, session=session,
+        )
+        return
     AuditService(audit_repo).record(  # type: ignore[arg-type]
         actor=actor, action=action, resource_type=resource_type,
         resource_id=resource_id, payload=payload,
     )
     if audit_chain is not None:
-        session = getattr(audit_repo, "session", None)
         audit_chain.record(
             actor=actor, action=action, resource_type=resource_type,
             resource_id=resource_id, payload=payload,
@@ -162,6 +175,7 @@ def _verify_permit(
     assessment_id: str,
     service: AssessmentService,
     audit_repo: object,
+    audit_outbox: object | None = None,
 ) -> bool | None:
     """Verify the signed permit (signature + expiry + replay + worker).
 
@@ -187,6 +201,7 @@ def _verify_permit(
             action="assessment.blocked.permit_invalid",
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
+            outbox=audit_outbox,
         )
         _logger.warning(
             "permit verification failed", assessment_id=assessment_id, error=str(exc),
@@ -207,6 +222,7 @@ def _check_plan_scope(
     assessment_id: str,
     service: AssessmentService,
     audit_repo: object,
+    audit_outbox: object | None = None,
 ) -> bool:
     """Pre-check every plan target against the scope + egress before dispatch.
 
@@ -229,6 +245,7 @@ def _check_plan_scope(
                     action="assessment.blocked.egress_denied",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"target": target, "reason": egress_decision.reason},
+                    outbox=audit_outbox,
                 )
                 _logger.warning(
                     "egress denied", assessment_id=assessment_id,
@@ -252,6 +269,7 @@ def _check_plan_scope(
                     action="assessment.blocked.scope_violation",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"target": target, "reason": decision.reason},
+                    outbox=audit_outbox,
                 )
                 _logger.warning(
                     "scope violation", assessment_id=assessment_id,
@@ -280,6 +298,7 @@ def execute_assessment(
     egress_guard: EgressGuardProtocol | None = None,
     nft_scope_enforcer: NftScopeEnforcerProtocol | None = None,
     audit_chain: AuditChain | None = None,
+    audit_outbox: object | None = None,
     oracle: OracleService | None = None,
     confirmed_finding_repo: object | None = None,
 ) -> None:
@@ -309,6 +328,7 @@ def execute_assessment(
                 action="assessment.blocked.emergency_stop",
                 resource_type="assessment", resource_id=assessment_id,
                 payload={"reason": "emergency_stop_triggered"},
+                outbox=audit_outbox,
             )
             _logger.warning(
                 "assessment blocked by emergency stop", assessment_id=assessment_id,
@@ -330,7 +350,7 @@ def execute_assessment(
 
         permit_valid = _verify_permit(
             permit, permit_verifier, permit_registry, audit_chain,
-            assessment_id, service, audit_repo,
+            assessment_id, service, audit_repo, audit_outbox,
         )
         if permit_valid is None:
             return  # verification failed: assessment already FAILED + audited
@@ -345,12 +365,13 @@ def execute_assessment(
             audit_repo, audit_chain, actor="system", action="assessment.started",
             resource_type="assessment", resource_id=assessment_id,
             payload={"permit_nonce": permit.nonce} if permit is not None else {},
+            outbox=audit_outbox,
         )
         _logger.info("assessment started", assessment_id=assessment_id)
 
         if not _check_plan_scope(
             scope_enforcer, egress_guard, plan, scope, permit_valid, audit_chain,
-            assessment_id, service, audit_repo,
+            assessment_id, service, audit_repo, audit_outbox,
         ):
             return  # out-of-scope/egress-denied target: assessment already FAILED + audited
 
@@ -408,6 +429,7 @@ def execute_assessment(
                         "skipped": summary.skipped,
                         "failed": summary.failed,
                     },
+                    outbox=audit_outbox,
                 )
             except Exception as exc:  # noqa: BLE001 - oracle is best-effort
                 _logger.warning(
@@ -418,6 +440,7 @@ def execute_assessment(
                     audit_repo, audit_chain, actor="system", action="oracle.batch_failed",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"reason": str(exc)},
+                    outbox=audit_outbox,
                 )
         # v0.3.0 T3: oracle-phase writes durable before completion bookkeeping.
         _phase_commit(audit_repo)
@@ -432,6 +455,7 @@ def execute_assessment(
                 "coverage_rate": coverage_rate,
                 "uncovered_classes": list(uncovered),
             },
+            outbox=audit_outbox,
         )
         _logger.info(
             "assessment completed",
@@ -449,6 +473,7 @@ def execute_assessment(
             audit_repo, audit_chain, actor="system", action="assessment.failed",
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
+            outbox=audit_outbox,
         )
     finally:
         # Flush the nft allow/block sets so the next assessment starts clean
