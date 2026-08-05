@@ -9,6 +9,58 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+`Schema: no | Deps: no | Breaking: no` - hotfix: unblock v0.2.0 NAS deployment.
+Fixes the two High bugs surfaced by the v0.2.0 NAS rollout (postmortem at
+`docs/architecture/postmortems/v0.2.0-implicit-boundaries.md`):
+**v3 race** (assessment blocked) + **v4 lock** (database is locked).
+
+### Fixed
+- **v3 race** (T1): `start_assessment` now explicitly commits the session
+  before spawning the daemon thread. Previously the daemon opened a fresh
+  SQLite connection and read stale `APPROVED` status because the main
+  thread's `APPROVED -> QUEUED` write had not yet committed (`session.flush()`
+  is not enough - SQLite WAL hides uncommitted writes from new connections).
+  Regression test: `tests/interfaces/test_start_assessment_race.py`.
+- **v4 root-cause fix** (T3, full refactor): `_audit_record` now writes both
+  `core_audit_events` + `core_signed_audit_events` in the SAME session / SAME
+  transaction. Previously the signed store opened its own connection per event
+  (cross-connection double-write), causing SQLite WAL lock contention under
+  the high-frequency audit storm. The refactor: `SqlAlchemySignedAuditEventStore.append`
+  + `AuditChain.record` + `DatabaseAuditRecorder.record` all accept an optional
+  `session=` kwarg; `_audit_record` passes the daemon's `bg_session` so both
+  INSERTs join one transaction, one WAL frame, one commit. The local
+  `audit = AuditService(audit_repo)` shadowing in `execute_assessment` is
+  removed. This eliminates the cross-connection contention at the root.
+- **v4 mitigation** (T2): `busy_timeout` bumped 5s -> 60s (belt-and-suspenders
+  after T3; covers edge cases under heavier load).
+- **W4-A same-class prevention** (T4): `DatabaseAuditRecorder.record` accepts
+  optional `session=`. Peer-agent audit (high-frequency during a peer run)
+  used the same "open_session per call" pattern that caused v4; this API
+  change prevents the same bug from biting W4-A when peer-agents are enabled.
+
+### Added
+- **Production-realism test tier** (T5): `@pytest.mark.realism` marker
+  (opt-in, gated to release CI) + `tests/infrastructure/test_realism_concurrent_audit.py`
+  (merged-transaction audit path: N events -> N rows in both tables, no
+  OperationalError; + concurrent store append storm). The existing 1315 unit
+  tests used in-memory SQLite + StaticPool (single connection, no contention),
+  which fully masked v3 and v4. The new tier uses `tmp_path` real files +
+  the default file-based pool - production-realism. Run with `pytest -m realism`.
+
+### Deferred to v0.3.0
+- **Transactional Outbox** (the proper "ultimate" root-cause fix): business
+  write + outbox row in same transaction; background worker drains to both
+  audit tables. v0.2.0.1's T3 refactor already merges the two audit tables
+  into the same transaction (eliminates the cross-connection contention), so
+  the Outbox mainly adds async/queue semantics (retries, decoupling).
+- **FastAPI BackgroundTasks** (replaces `threading.Thread` daemon; eliminates
+  the entire v3 race class).
+- **Unit of Work pattern** (explicit transaction boundaries).
+- **State machines as data** (typed transitions; `mark_running` compile-time-enforced).
+- **Integration graph** (`docs/architecture/integration-graph.md`) as a PR gate.
+- **AuditChain thread-safety** (`threading.Lock` on `_counter`/`_tail`) if
+  concurrent recorders become a goal (currently single-threaded by design).
+
 ## [0.2.0] - 2026-08-04
 
 `Schema: yes | Deps: no | Breaking: no` - architecture cleanup + release-readiness.
