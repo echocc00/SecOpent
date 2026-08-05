@@ -9,6 +9,52 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+`Schema: no | Deps: no | Breaking: no` - hotfix: complete the v4 same-tx refactor.
+v0.2.0.1's T3 refactor threaded `session` through `_audit_record` but missed 4
+other audit-write paths on the daemon (issue v5). All 4 now thread `session`
+through the daemon's `bg_session` so every audit INSERT joins one transaction.
+
+### Fixed
+- **v5 Leak 1** (commit `99ceb57`): `AuditChain.record_permit_nonce` now
+  accepts + passes `session=`; `execute_assessment` passes `bg_session`. The
+  `permit.used` signed audit event (2nd event after `assessment.started`) was
+  opening its own connection -> `database is locked`.
+- **v5 Leak 2** (commit `99ceb57`): `NftScopeEnforcer._record` /
+  `AuditSink.record` Protocol now accept `session=`; `apply_scope` +
+  `_classify_network` thread it through. The `egress.rejected_rebinding` /
+  `egress.denied_blocked` / `egress.allowed` audit events (scope pre-check)
+  were opening their own connections -> `database is locked`.
+- **v5 Leak 3** (commit `068926e`): `CanaryTokenManager.generate` +
+  `verify_echo` now accept `session=`; `OracleEngine.verify` +
+  `OracleVerifier.reproduce` Protocol + `OracleService.verify_findings` +
+  `_verify_one` thread it through. The `canary.generated` / `canary.verified`
+  audit events (oracle verification phase) were opening their own connections.
+- **v5 Leak 4** (commit `068926e`): `OracleService._audit` now extracts the
+  session from the `audit` param (AuditService -> repo -> session) and passes
+  it to `audit_chain.record(session=...)`. The `oracle.verified` /
+  `oracle.verification_failed` signed audit events were opening their own
+  connections.
+- **AuditRecorder Protocol** (commit `068926e`): `AuditRecorder.record` +
+  `AuditService.record` now accept `session: Any = None` for Protocol
+  compatibility. `AuditService` ignores it (the repo is already bound to the
+  correct session); `AuditChain` uses it (same-tx merge).
+
+### Root cause (incomplete refactor)
+v0.2.0.1's T3 refactor (commit `d95f7d3`) threaded `session` through
+`_audit_record` (the main audit path) but the daemon has **4 other
+audit-write paths** that call `audit_chain.record(...)` or `self._audit.record(...)`
+directly, bypassing `_audit_record`. Each opened its own SQLite connection
+while the daemon's `bg_session` held the WAL RESERVED lock -> `database is
+locked`. The `@pytest.mark.realism` tier (v0.2.0.1 T5) covered `_audit_record`
++ `AuditChain.record` but NOT `record_permit_nonce`, `nft_scope._record`,
+`canary.generate/verify_echo`, or `oracle._audit` -- the test gap that masked
+all 4 leaks.
+
+### Verified
+- 1324 tests passed, ruff/mypy strict/bandit -ll all clean.
+- Realism tier (`-m realism`): merged-tx audit path + concurrent store append
+  both pass.
+
 ## [0.2.0.1] - 2026-08-05
 
 `Schema: no | Deps: no | Breaking: no` - hotfix: unblock v0.2.0 NAS deployment.
