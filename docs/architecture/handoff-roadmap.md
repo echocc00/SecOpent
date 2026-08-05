@@ -1,6 +1,6 @@
 # SecOpent 交接方案：未落实计划与设计 (v0.3.0+)
 
-> **日期**: 2026-08-05
+> **日期**: 2026-08-05（2026-08-06 更新：Phase 1 已实施）
 > **基线**: v0.2.0.2 (commit `4018064`)
 > **受众**: 接手后续开发的工程师
 > **前置阅读**: `docs/architecture/postmortems/v0.2.0-implicit-boundaries.md` + memory `secopent-implicit-boundaries-bug-class`
@@ -9,18 +9,35 @@
 
 ## 总览
 
-| 阶段 | 主题 | 项数 | 总工时估计 | 优先级 |
-|---|---|---|---|---|
-| Phase 1 | v0.3.0 架构重构（消除"隐式跨边界"） | 7 | ~15 天 | P0 |
-| Phase 2 | M5 里程碑（容器构建 + 真实 E2E） | 10 | ~20 天 | P1 |
-| Phase 3 | 功能缺口（设计存在但未激活） | 6 | ~8 天 | P2 |
-| Phase 4 | 部署/运维 + C1 安全 | 17 | operator 动作 | P3 |
+| 阶段 | 主题 | 项数 | 总工时估计 | 优先级 | 状态 |
+|---|---|---|---|---|---|
+| Phase 1 | v0.3.0 架构重构（消除"隐式跨边界"） | 7 | ~15 天 | P0 | ✅ **已发布 v0.3.0**（2026-08-06，见下方勘误） |
+| Phase 2 | M5 里程碑（容器构建 + 真实 E2E） | 10 | ~20 天 | P1 | 未开始 |
+| Phase 3 | 功能缺口（设计存在但未激活） | 6 | ~8 天 | P2 | 未开始 |
+| Phase 4 | 部署/运维 + C1 安全 | 17 | operator 动作 | P3 | 未开始（4.2 C1 仍是 urgent 用户动作） |
 
 ---
 
 # Phase 1: v0.3.0 架构重构
 
+> ✅ **已实施并发布为 v0.3.0**（2026-08-06，commit 链 `b6ad140`..`d6a8501` + 发布提交）。
+> 实施计划全文：`docs/superpowers/plans/2026-08-05-v0.3.0-architecture-refactor.md`。
+> 验收：1508 默认测试 + 5 realism 测试通过，coverage 92.41%，ruff/mypy strict/bandit -ll/forbidden linter 全绿。
+
 > **目标**: 彻底消除"隐式事务/连接边界 + 同步热路径副作用"这一 bug 类别（postmortem 根因）。v0.2.0.x 是治标（thread session through every path），v0.3.0 是治本（架构层消除）。
+
+## 实施勘误（与本文件原设计的偏差）
+
+原设计有几处与代码现实冲突，实施时按以下方式修正（均已验证）：
+
+1. **UoW 位置**（1.1）：原稿让 `execute_assessment(db=Database)` 并在 application 层引用 SqlAlchemy 仓库 —— 会击穿全部 in-memory 测试且违反项目 DDD 边界。实际：`Database.unit_of_work()` 在 infrastructure，router 的 daemon 函数使用；`execute_assessment` 保持 repo 注入签名不变。
+2. **相位提交零新参数**（1.1）：原稿未明确短事务机制。实际：相位提交通过已有 session 完成（`_phase_commit(audit_repo)` + oracle per-finding commit），不做任何新的参数线程化 —— v5 教训是"线程化新参数必漏路径"。
+3. **Outbox 范围**（1.2）：只收编 `_audit_record` 路径；`record_permit_nonce` 保持同步直写（replay 检测不允许异步）；emergency-stop/请求路径保持直写。携带 `permit_nonce` 的事件强制走直写路径。
+4. **启动 drain 时序**（1.2）：lifespan 启动时先同步 `drain_pending()` 再放行请求 + 激活 recorder（D4），防 crash+重启后的 replay 检测窗口。
+5. **AuditChain 锁含 store.append**（1.6）：原稿把 append 放锁外 —— 那会允许乱序持久化，破坏 `_load_from_store` 重建。实际整段持锁（D5）。
+6. **保留显式 commit**（1.3）：FastAPI 0.115 的 yield 依赖 teardown 在 background task 之后执行，所以 v3 的 `session.commit()` 必须保留（D6），不能依赖 BackgroundTasks 的"自动提交"。
+7. **Outbox 仅在 lifespan 激活**：裸 `TestClient(app)`（无 lifespan）保持 v0.2.0.2 直写路径，避免测试计时敏感化与 worker 线程堆积；生产（uvicorn）必然走 lifespan。
+8. **状态机形态**（1.4）：用户确认为"数据驱动转换表"（保留 enum + `ALLOWED_TRANSITIONS` + `assert_transition`），不做 per-state 类重写。顺带修复了勘察发现的 `attach_plan`/`approve` 两处守门缺失（安全相关）。
 
 ## 1.1 Unit of Work 模式
 

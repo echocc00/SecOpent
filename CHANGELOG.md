@@ -9,6 +9,75 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-06
+
+`Schema: yes | Deps: no | Breaking: no` - architecture release: eradicate the
+"implicit cross-boundary" bug class (v3 race / v4 lock / v5 leaks) at the root,
+per `docs/architecture/postmortems/v0.2.0-implicit-boundaries.md` and the
+handoff roadmap Phase 1. v0.2.0.x treated the symptoms (threading `session`
+through every path); v0.3.0 removes the class by construction.
+
+### Added
+- **Transactional Outbox** (`core_audit_outbox` + alembic migration
+  `811a5b9a583d`): the daemon writes ONE outbox row inside its short business
+  transaction; a background `OutboxWorker` (1s poll, per-row transactions,
+  id-order drain) fans each row out to `core_audit_events` +
+  `core_signed_audit_events`. Audit leaves the hot path; failed rows are
+  flagged, never dropped. Lifespan startup drains pending rows BEFORE serving
+  (no permit-replay gap after crash+restart). Known trade-off: the queryable
+  audit API is eventually consistent (delay <= poll interval); the signed
+  chain stays complete and ordered. Permit nonces always take the direct
+  synchronous path (replay detection never lags).
+- **UnitOfWork** (`Database.unit_of_work()`): explicit transaction boundary -
+  commit on clean exit, rollback on exception, always close. The assessment
+  daemon uses it instead of manual commit/rollback/close.
+- **Forbidden-pattern linter** (`scripts/lint_forbidden_patterns.py`, wired
+  into CI): no raw `threading.Thread` in routers, no `.open_session()` on hot
+  paths, audit `.record()` calls must thread `session=` (AST-based).
+- **Integration graph** (`docs/architecture/integration-graph.md`): Mermaid
+  source of truth for the assessment execution chain with a per-edge
+  test-coverage table; PR template makes updating it a merge checklist item.
+- Startup-recovery test (`tests/interfaces/test_startup_recovery.py`) - the
+  one coverage GAP the integration graph surfaced.
+
+### Changed
+- **BackgroundTasks replace the daemon thread**: `POST /assessments/{id}/start`
+  schedules a module-level `_run_assessment_daemon` via FastAPI BackgroundTasks
+  (nothing captured from the request scope). The explicit `session.commit()`
+  is kept - FastAPI 0.115 runs yield-dependency teardown AFTER background
+  tasks, so the daemon's fresh session still needs the committed QUEUED row.
+  SIGTERM drain semantics unchanged (threadpool threads register in
+  `active_executions`).
+- **Per-phase commits**: the daemon commits at phase boundaries through the
+  already-threaded session (before the scan, after findings persist, after
+  the oracle block, and per oracle finding) - the SQLite WAL write lock is
+  released during the multi-minute scan/oracle phases instead of being held
+  for the whole 8-15 min assessment (v4 root cause). Proven by a realism
+  test: a second connection with a 1s busy timeout can write mid-scan;
+  pre-v0.3.0 it raised `database is locked`.
+- **AuditChain is thread-safe**: `record()` holds an RLock across the
+  counter/tail/events mutation AND the store append (concurrent recorders -
+  daemon, emergency-stop request threads, outbox worker - can no longer mint
+  duplicate ids or persist out of order); readers snapshot under the lock.
+- **Assessment state machine as data**: `ALLOWED_TRANSITIONS`
+  (`domain/assessments/transitions.py`) is the single source of truth; every
+  `AssessmentService` mutating method routes through `assert_transition`.
+
+### Fixed
+- **Guard gaps** (security-relevant): `attach_plan` and `approve` performed
+  NO status check - a plan could be re-attached to an APPROVED assessment and
+  a REJECTED assessment could be approved again. Both now enforce the
+  transition table. Pinned by an exhaustive 12x12 transition-matrix test
+  (144 cases) + service-level regressions.
+- Outbox recorder joins the caller's transaction atomically - the audit row
+  commits or rolls back with the business write (no orphaned audit for
+  rolled-back work, no missing audit for committed work).
+
+### Verified
+- 1508 tests passed (default tier), 5 realism tests passed, coverage 92.41%
+  (gate 80%), ruff / mypy strict (284 files) / bandit -ll / forbidden-pattern
+  linter all clean.
+
 ## [0.2.0.2] - 2026-08-05
 
 `Schema: no | Deps: no | Breaking: no` - hotfix: complete the v4 same-tx refactor.
