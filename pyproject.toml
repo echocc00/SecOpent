@@ -74,11 +74,12 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 # Real-target E2E and browser tests are opt-in (slow, environment-dependent);
 # run them explicitly with `pytest -m e2e_real` / `pytest -m browser` /
-# `pytest -m perf`.
-addopts = "-m \"not e2e_real and not browser and not perf\""
+# `pytest -m perf` / `pytest -m realism`.
+addopts = "-m \"not e2e_real and not browser and not perf and not realism\""
 markers = [
     "integration: requires Docker + real tools (slow)",
     "e2e_real: requires Docker + target ranges (slow)",
     "browser: requires Playwright browser",
     "perf: performance regression benchmarks (opt-in)",
+    "realism: production-realism tests (file DB + NullPool + concurrent/long); gated to release CI",
 ]
