@@ -101,7 +101,11 @@ def create_sqlite_engine(path: Path) -> Engine:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=5000")
+        # v4 mitigation: high-frequency signed-audit INSERT storm (W3-C) doubled
+        # the per-event write count; 5s was too short under realistic workload.
+        # 60s buys time for the same-tx merge (T3) + covers edge cases under
+        # heavier load. The proper root-cause fix (Outbox) is deferred to v0.3.0.
+        cursor.execute("PRAGMA busy_timeout=60000")
         # §3.5 performance: synchronous=NORMAL is durable under WAL (only the
         # final commit fsync is skipped) and much faster than FULL; cap the WAL
         # file so a long-running assessment cannot grow it without bound.
