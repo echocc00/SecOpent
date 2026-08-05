@@ -64,16 +64,6 @@ def test_start_passes_activated_outbox_to_executor(
 
     monkeypatch.setattr(assessments_mod, "execute_assessment", _fake_execute)
 
-    class _InlineThread:
-        def __init__(self, target=None, **kwargs: object) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            if self._target is not None:
-                self._target()
-
-    monkeypatch.setattr(assessments_mod.threading, "Thread", _InlineThread)
-
     aid = _approved_assessment(client)
     resp = client.post(f"/assessments/{aid}/start", json={"actor_role": "human"})
     assert resp.status_code == 200
@@ -94,16 +84,6 @@ def test_outbox_stays_inactive_without_lifespan(
         captured.update(kwargs)
 
     monkeypatch.setattr(assessments_mod, "execute_assessment", _fake_execute)
-
-    class _InlineThread:
-        def __init__(self, target=None, **kwargs: object) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            if self._target is not None:
-                self._target()
-
-    monkeypatch.setattr(assessments_mod.threading, "Thread", _InlineThread)
 
     aid = _approved_assessment(bare_client)
     resp = bare_client.post(

@@ -64,20 +64,9 @@ def test_start_threads_oracle_and_confirmed_repo(
 
     monkeypatch.setattr(assessments_mod, "execute_assessment", _fake_execute)
 
-    # Run the background target inline so the captured kwargs are visible
-    # before the test exits.
-    class _InlineThread:
-        def __init__(self, target: object, **_kw: object) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            # type: ignore[operator]
-            self._target()  # type: ignore[operator]
-
-        def join(self, *_a: object, **_k: object) -> None:
-            return None
-
-    monkeypatch.setattr(assessments_mod.threading, "Thread", _InlineThread)
+    # v0.3.0 T5: the executor runs as a FastAPI background task; TestClient
+    # executes background tasks synchronously before returning the response,
+    # so the captured kwargs are visible right after the POST.
 
     resp = client.post(f"/assessments/{aid}/start", json={"actor_role": "human"})
     assert resp.status_code == 200
@@ -104,18 +93,6 @@ def test_start_without_oracle_in_state_passes_none(
     import secopent.interfaces.api.routers.assessments as assessments_mod
 
     monkeypatch.setattr(assessments_mod, "execute_assessment", _fake_execute)
-
-    class _InlineThread:
-        def __init__(self, target: object, **_kw: object) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            self._target()  # type: ignore[operator]
-
-        def join(self, *_a: object, **_k: object) -> None:
-            return None
-
-    monkeypatch.setattr(assessments_mod.threading, "Thread", _InlineThread)
 
     resp = client.post(f"/assessments/{aid}/start", json={"actor_role": "human"})
     assert resp.status_code == 200

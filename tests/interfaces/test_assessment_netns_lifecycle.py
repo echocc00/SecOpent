@@ -47,22 +47,6 @@ def _approved_assessment(client: TestClient) -> str:
     return assessment["id"]
 
 
-def _inline_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    import secopent.interfaces.api.routers.assessments as assessments_mod
-
-    class _InlineThread:
-        def __init__(self, target: object, **_kw: object) -> None:
-            self._target = target
-
-        def start(self) -> None:
-            self._target()  # type: ignore[operator]
-
-        def join(self, *_a: object, **_k: object) -> None:
-            return None
-
-    monkeypatch.setattr(assessments_mod.threading, "Thread", _InlineThread)
-
-
 def _fake_execute_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     import secopent.interfaces.api.routers.assessments as assessments_mod
 
@@ -100,7 +84,6 @@ def test_netns_created_and_destroyed_on_linux(
 
     client.app.state.make_nft_enforcer = _rec_make
     _fake_execute_noop(monkeypatch)
-    _inline_thread(monkeypatch)
 
     resp = client.post(f"/assessments/{aid}/start", json={"actor_role": "human"})
     assert resp.status_code == 200
@@ -126,7 +109,6 @@ def test_netns_not_created_on_non_linux(
 
     client.app.state.make_nft_enforcer = _rec_make
     _fake_execute_noop(monkeypatch)
-    _inline_thread(monkeypatch)
 
     resp = client.post(f"/assessments/{aid}/start", json={"actor_role": "human"})
     assert resp.status_code == 200
@@ -145,7 +127,6 @@ def test_netns_destroyed_even_when_execute_raises(
         monkeypatch.setattr(NetnsIsolator, "is_supported", lambda self: True)
         isolator = _RecordingIsolator()
         client.app.state.netns_isolator = isolator
-        _inline_thread(monkeypatch)
 
         import secopent.interfaces.api.routers.assessments as assessments_mod
 
@@ -156,9 +137,10 @@ def test_netns_destroyed_even_when_execute_raises(
         )
 
         resp = client.post(f"/assessments/{aid}/start", json={"actor_role": "human"})
-        # The inline thread re-raised into the route -> 500, but the finally
-        # destroyed the netns before the exception propagated.
-        assert resp.status_code == 500
+        # v0.3.0 T5: the response is flushed BEFORE the background task runs,
+        # so a task failure cannot turn it into a 500 - what matters is that
+        # the finally-block cleanup still destroyed the netns.
+        assert resp.status_code == 200
         assert len(isolator.created) == 1
         assert isolator.destroyed == isolator.created
 

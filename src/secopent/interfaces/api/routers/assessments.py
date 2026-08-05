@@ -7,8 +7,9 @@ import logging
 import os
 import threading
 import uuid
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ....application.assessments import AssessmentPermissionError, AssessmentService
 from ....application.execution import execute_assessment
@@ -20,6 +21,7 @@ from ....domain.policy.models import ExecutionMode
 from ....domain.scope.models import ScopeSnapshot
 from ....infrastructure.adapters.real_scan import RealScanRunner
 from ....infrastructure.adapters.step_runner import AdapterStepRunner, ScanContext
+from ....infrastructure.db.session import Database
 from ....infrastructure.repositories.sqlalchemy_catalog import (
     SqlAlchemyCatalogRepository,
 )
@@ -230,17 +232,125 @@ def _orchestrator_max_workers() -> int:
         return 1
 
 
+def _run_assessment_daemon(
+    *,
+    db: Database,
+    assessment_id: str,
+    active_executions: Any = None,
+    active_executions_lock: Any = None,
+    emergency_stop: Any = None,
+    permit_signer: Any = None,
+    permit_registry: Any = None,
+    permit_verifier: Any = None,
+    scope_enforcer: Any = None,
+    audit_chain: Any = None,
+    egress_guard: Any = None,
+    nft_scope_enforcer: Any = None,
+    netns_isolator: Any = None,
+    make_nft_enforcer: Any = None,
+    oracle: Any = None,
+    audit_outbox: Any = None,
+) -> None:
+    """Run one assessment to completion in the background (v0.3.0 T5).
+
+    Module-level on purpose: FastAPI runs background tasks AFTER the request
+    scope is torn down, so nothing may be captured from the request or its
+    session - every dependency is passed explicitly. Executes on the Starlette
+    threadpool; that thread registers for SIGTERM drain (lifespan shutdown).
+    """
+    thread = threading.current_thread()
+    # Register so SIGTERM grace (lifespan shutdown) can drain this thread.
+    if active_executions is not None and active_executions_lock is not None:
+        with active_executions_lock:
+            active_executions.add(thread)
+    netns_handle = None
+    try:
+        # v0.3.0 T3: explicit UnitOfWork replaces manual
+        # commit/rollback/close. Phase commits inside execute_assessment
+        # keep the transactions short so the WAL write lock is released
+        # during the multi-minute scan phases (v4 root cause).
+        with db.unit_of_work() as uow:
+            # Compute coverage inputs (catalog + asset types) for the report.
+            catalog = SqlAlchemyCatalogRepository(uow.session).latest_catalog()
+            assessment = SqlAlchemyAssessmentRepository(uow.session).get(assessment_id)
+            scope = (
+                SqlAlchemyScopeRepository(uow.session).get_snapshot(
+                    assessment.scope_snapshot_id
+                )
+                if assessment
+                else None
+            )
+            asset_types = tuple(_classify_asset_types(scope)) if scope else ()
+            # Per-assessment netns (W4-B T2): on Linux, isolate nft egress rules
+            # in a dedicated netns for this assessment; on non-Linux dev hosts
+            # is_supported() is False and the enforcer runs in the default netns
+            # (best-effort, same as before). The netns is destroyed in finally.
+            if (
+                netns_isolator is not None
+                and netns_isolator.is_supported()
+                and make_nft_enforcer is not None
+            ):
+                netns_handle = netns_isolator.create(assessment_id)
+                enforcer = make_nft_enforcer(netns_handle.name)
+            elif make_nft_enforcer is not None:
+                enforcer = make_nft_enforcer(None)
+            else:
+                enforcer = nft_scope_enforcer
+            execute_assessment(
+                assessment_id=assessment_id,
+                assessment_repo=SqlAlchemyAssessmentRepository(uow.session),
+                scope_repo=SqlAlchemyScopeRepository(uow.session),
+                finding_repo=SqlAlchemyFindingRepository(uow.session),
+                audit_repo=SqlAlchemyAuditRepository(uow.session),
+                step_runner_factory=_production_step_runner,
+                catalog=catalog,
+                asset_types=asset_types,
+                max_workers=_orchestrator_max_workers(),
+                emergency_stop=emergency_stop,
+                permit_signer=permit_signer,
+                permit_registry=permit_registry,
+                permit_verifier=permit_verifier,
+                scope_enforcer=scope_enforcer,
+                egress_guard=egress_guard,
+                nft_scope_enforcer=enforcer,
+                audit_chain=audit_chain,
+                audit_outbox=audit_outbox,
+                oracle=oracle,
+                confirmed_finding_repo=(
+                    SqlAlchemyConfirmedFindingRepository(uow.session)
+                    if oracle is not None
+                    else None
+                ),
+            )
+    finally:
+        if netns_handle is not None and netns_isolator is not None:
+            try:
+                netns_isolator.destroy(netns_handle)
+            except Exception:  # noqa: BLE001 - cleanup must not mask the real error
+                logger.exception(
+                    "netns destroy failed for %s", netns_handle.name
+                )
+        if active_executions is not None and active_executions_lock is not None:
+            with active_executions_lock:
+                active_executions.discard(thread)
+
+
 @router.post("/{assessment_id}/start", response_model=AssessmentOut)
 def start_assessment(
-    assessment_id: str, payload: StartRequest, request: Request, session: DbSession
+    assessment_id: str,
+    payload: StartRequest,
+    request: Request,
+    session: DbSession,
+    background_tasks: BackgroundTasks,
 ) -> AssessmentOut:
     """Trigger assessment execution: APPROVED -> QUEUED, then run in background.
 
-    Human-only (triggers real scans). The Orchestrator runs in a daemon thread
-    (``application.execution.execute_assessment``); this endpoint returns
-    immediately with status=QUEUED. Progress streams via the SSE endpoint
-    (``GET /assessments/{id}/events``) which polls ``assessment.status``.
-    Findings are persisted with ``assessment_id`` as they are correlated.
+    Human-only (triggers real scans). The Orchestrator runs as a FastAPI
+    background task (``application.execution.execute_assessment``); this
+    endpoint returns immediately with status=QUEUED. Progress streams via the
+    SSE endpoint (``GET /assessments/{id}/events``) which polls
+    ``assessment.status``. Findings are persisted with ``assessment_id`` as
+    they are correlated.
     """
     assessment_repo = SqlAlchemyAssessmentRepository(session)
     service = AssessmentService(assessment_repo)
@@ -253,112 +363,38 @@ def start_assessment(
     except AssessmentPermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    # v3 fix: explicitly commit so the daemon's new connection sees QUEUED.
-    # session.flush() is NOT enough - SQLite WAL hides uncommitted writes from
-    # new connections. The daemon opens its own session (UnitOfWork, v0.3.0
-    # T3) in _run(); without this commit it would read stale APPROVED and
-    # mark_running would raise "cannot run from approved".
+    # v3 fix kept (v0.3.0 T5, D6): FastAPI runs yield-dependency teardown
+    # (the DbSession commit) AFTER background tasks, so without this explicit
+    # commit the daemon's fresh connection would read stale APPROVED and
+    # mark_running would raise "cannot run from approved". SQLite WAL hides
+    # uncommitted writes from new connections - session.flush() is NOT enough.
     session.commit()
 
-    # The background thread owns its own session; the request session is closed
-    # after the response, so we reconstruct repos against app.state.db there.
-    db = request.app.state.db
-    # Security components (W2-A T6): shared singletons from the composition root.
-    emergency_stop = getattr(request.app.state, "emergency_stop", None)
-    permit_signer = getattr(request.app.state, "permit_signer", None)
-    permit_registry = getattr(request.app.state, "permit_registry", None)
-    permit_verifier = getattr(request.app.state, "permit_verifier", None)
-    scope_enforcer = getattr(request.app.state, "scope_enforcer", None)
-    audit_chain = getattr(request.app.state, "audit_chain", None)
-    egress_guard = getattr(request.app.state, "egress_guard", None)
-    nft_scope_enforcer = getattr(request.app.state, "nft_scope_enforcer", None)
-    netns_isolator = getattr(request.app.state, "netns_isolator", None)
-    make_nft_enforcer = getattr(request.app.state, "make_nft_enforcer", None)
-    oracle = getattr(request.app.state, "oracle", None)
-    # v0.3.0 T4: present only once the lifespan activated the outbox (drain
-    # done + worker running); None keeps the legacy direct-audit path.
-    audit_outbox = getattr(request.app.state, "outbox_activation", {}).get("recorder")
-
-    def _run() -> None:
-        thread = threading.current_thread()
-        # Register so SIGTERM grace (lifespan shutdown) can drain this thread.
-        active = getattr(request.app.state, "active_executions", None)
-        lock = getattr(request.app.state, "active_executions_lock", None)
-        if active is not None and lock is not None:
-            with lock:
-                active.add(thread)
-        netns_handle = None
-        try:
-            # v0.3.0 T3: explicit UnitOfWork replaces manual
-            # commit/rollback/close. Phase commits inside execute_assessment
-            # keep the transactions short so the WAL write lock is released
-            # during the multi-minute scan phases (v4 root cause).
-            with db.unit_of_work() as uow:
-                # Compute coverage inputs (catalog + asset types) for the report.
-                catalog = SqlAlchemyCatalogRepository(uow.session).latest_catalog()
-                assessment = SqlAlchemyAssessmentRepository(uow.session).get(assessment_id)
-                scope = (
-                    SqlAlchemyScopeRepository(uow.session).get_snapshot(
-                        assessment.scope_snapshot_id
-                    )
-                    if assessment
-                    else None
-                )
-                asset_types = tuple(_classify_asset_types(scope)) if scope else ()
-                # Per-assessment netns (W4-B T2): on Linux, isolate nft egress rules
-                # in a dedicated netns for this assessment; on non-Linux dev hosts
-                # is_supported() is False and the enforcer runs in the default netns
-                # (best-effort, same as before). The netns is destroyed in finally.
-                if (
-                    netns_isolator is not None
-                    and netns_isolator.is_supported()
-                    and make_nft_enforcer is not None
-                ):
-                    netns_handle = netns_isolator.create(assessment_id)
-                    enforcer = make_nft_enforcer(netns_handle.name)
-                elif make_nft_enforcer is not None:
-                    enforcer = make_nft_enforcer(None)
-                else:
-                    enforcer = nft_scope_enforcer
-                execute_assessment(
-                    assessment_id=assessment_id,
-                    assessment_repo=SqlAlchemyAssessmentRepository(uow.session),
-                    scope_repo=SqlAlchemyScopeRepository(uow.session),
-                    finding_repo=SqlAlchemyFindingRepository(uow.session),
-                    audit_repo=SqlAlchemyAuditRepository(uow.session),
-                    step_runner_factory=_production_step_runner,
-                    catalog=catalog,
-                    asset_types=asset_types,
-                    max_workers=_orchestrator_max_workers(),
-                    emergency_stop=emergency_stop,
-                    permit_signer=permit_signer,
-                    permit_registry=permit_registry,
-                    permit_verifier=permit_verifier,
-                    scope_enforcer=scope_enforcer,
-                    egress_guard=egress_guard,
-                    nft_scope_enforcer=enforcer,
-                    audit_chain=audit_chain,
-                    audit_outbox=audit_outbox,
-                    oracle=oracle,
-                    confirmed_finding_repo=(
-                        SqlAlchemyConfirmedFindingRepository(uow.session)
-                        if oracle is not None
-                        else None
-                    ),
-                )
-        finally:
-            if netns_handle is not None and netns_isolator is not None:
-                try:
-                    netns_isolator.destroy(netns_handle)
-                except Exception:  # noqa: BLE001 - cleanup must not mask the real error
-                    logger.exception(
-                        "netns destroy failed for %s", netns_handle.name
-                    )
-            if active is not None and lock is not None:
-                with lock:
-                    active.discard(thread)
-
-    threading.Thread(target=_run, daemon=False, name=f"assess-{assessment_id}").start()
+    # The background task owns its own UnitOfWork (its own session); the
+    # request session is closed after the response, so repos are constructed
+    # against app.state.db inside the task. All singletons come from the
+    # composition root (W2-A T6); the outbox recorder only once the lifespan
+    # activated it (T4).
+    app_state = request.app.state
+    background_tasks.add_task(
+        _run_assessment_daemon,
+        db=app_state.db,
+        assessment_id=assessment_id,
+        active_executions=getattr(app_state, "active_executions", None),
+        active_executions_lock=getattr(app_state, "active_executions_lock", None),
+        emergency_stop=getattr(app_state, "emergency_stop", None),
+        permit_signer=getattr(app_state, "permit_signer", None),
+        permit_registry=getattr(app_state, "permit_registry", None),
+        permit_verifier=getattr(app_state, "permit_verifier", None),
+        scope_enforcer=getattr(app_state, "scope_enforcer", None),
+        audit_chain=getattr(app_state, "audit_chain", None),
+        egress_guard=getattr(app_state, "egress_guard", None),
+        nft_scope_enforcer=getattr(app_state, "nft_scope_enforcer", None),
+        netns_isolator=getattr(app_state, "netns_isolator", None),
+        make_nft_enforcer=getattr(app_state, "make_nft_enforcer", None),
+        oracle=getattr(app_state, "oracle", None),
+        audit_outbox=getattr(app_state, "outbox_activation", {}).get("recorder"),
+    )
     return _to_out(assessment)
 
 

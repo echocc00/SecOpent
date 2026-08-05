@@ -21,7 +21,7 @@ a tmp tree); the default is the real source tree. Exits 0 when clean and 1
 on violations (each printed as ``path:line: [rule] message``).
 
 Allowlist entries shrink as the v0.3.0 refactor lands:
-  - R1 allow ``routers/assessments.py``  -> removed by T5 (BackgroundTasks)
+  - R1 allow ``routers/assessments.py``  -> removed by T5 (BackgroundTasks) ✔ done
   - R2 allow ``routers/assessments.py``  -> removed by T3 (UnitOfWork) ✔ done
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ LINE_RULES: tuple[LineRule, ...] = (
         rule_id="R1",
         pattern=r"threading\.Thread\(",
         scope=("interfaces/api/routers/",),
-        allow=frozenset({"interfaces/api/routers/assessments.py"}),  # T5 removes
+        allow=frozenset(),  # T5 done: routers use BackgroundTasks
         message="raw threading.Thread in a router (use BackgroundTasks; v3 race class)",
     ),
     LineRule(
