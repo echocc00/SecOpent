@@ -176,15 +176,16 @@ class OracleService:
         action: str,
         payload: dict[str, object],
     ) -> None:
+        _session = getattr(getattr(audit, "_repo", None), "session", None)
         audit.record(
             actor=actor,
             action=action,
             resource_type="finding",
             resource_id=finding_id,
             payload=payload,
+            session=_session,
         )
         if audit_chain is not None:
-            _session = getattr(getattr(audit, "_repo", None), "session", None)
             audit_chain.record(
                 actor=actor,
                 action=action,

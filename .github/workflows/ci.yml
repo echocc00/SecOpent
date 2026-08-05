@@ -19,6 +19,8 @@ jobs:
           pip install -e ".[dev]"
       - name: Ruff (whole repo, matches local gate)
         run: ruff check .
+      - name: Forbidden patterns (v3/v4/v5 bug-class guard)
+        run: python scripts/lint_forbidden_patterns.py
       - name: Encoding hygiene (no BOM / stray control chars)
         run: |
           ! grep -rlP '\xEF\xBB\xBF' src tests || (echo "BOM found" && exit 1)
