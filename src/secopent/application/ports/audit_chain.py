@@ -6,7 +6,7 @@ the composition root supplies a SqlAlchemy implementation backed by the Database
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ..audit_chain import SignedAuditEvent
@@ -16,5 +16,10 @@ if TYPE_CHECKING:
 class SignedAuditEventStore(Protocol):
     """Append-only store for signed audit events, loadable in chain order."""
 
-    def append(self, signed: SignedAuditEvent) -> None: ...
+    def append(
+        self,
+        signed: SignedAuditEvent,
+        *,
+        session: Any = None,
+    ) -> None: ...
     def load_all(self) -> tuple[SignedAuditEvent, ...]: ...

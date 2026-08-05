@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import UTC
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ...application.audit_chain import SignedAuditEvent
 from ...domain.audit.models import AuditEvent
@@ -59,10 +60,24 @@ class SqlAlchemySignedAuditEventStore:
     def __init__(self, database: Database) -> None:
         self._database = database
 
-    def append(self, signed: SignedAuditEvent) -> None:
-        with self._database.open_session() as session:
+    def append(
+        self,
+        signed: SignedAuditEvent,
+        *,
+        session: Session | None = None,
+    ) -> None:
+        """Append a signed event. When ``session`` is provided, use it and do
+        NOT commit (the caller owns the transaction - v4 same-tx refactor so
+        the signed audit insert joins the caller's business-write transaction,
+        eliminating the cross-connection double-write that caused v4). When
+        omitted (legacy path), open a short-lived session and commit immediately.
+        """
+        if session is not None:
             session.add(_to_row(signed))
-            session.commit()
+            return
+        with self._database.open_session() as new_session:
+            new_session.add(_to_row(signed))
+            new_session.commit()
 
     def load_all(self) -> tuple[SignedAuditEvent, ...]:
         with self._database.open_session() as session:

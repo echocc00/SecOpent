@@ -11,7 +11,7 @@ commitment and recording the deletion in the chain itself.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..domain.audit.models import GENESIS_HASH, AuditEvent
 from .ports.audit_chain import SignedAuditEventStore
@@ -76,8 +76,15 @@ class AuditChain:
         resource_id: str,
         payload: dict[str, object],
         permit_nonce: str | None = None,
+        session: Any = None,
     ) -> SignedAuditEvent:
-        """Append a signed event, continuing the hash chain."""
+        """Append a signed event, continuing the hash chain.
+
+        When ``session`` is provided, the signed event is appended via that
+        session WITHOUT committing (v4 same-tx refactor - the caller owns the
+        transaction so the signed audit insert joins the business-write
+        transaction, eliminating cross-connection double-write contention).
+        """
         self._counter += 1
         body = dict(payload)
         if permit_nonce is not None:
@@ -96,7 +103,7 @@ class AuditChain:
         self._events.append(signed)
         self._tail = event.event_hash.removeprefix("sha256:")
         if self._store is not None:
-            self._store.append(signed)
+            self._store.append(signed, session=session)
         return signed
 
     def record_permit_nonce(
