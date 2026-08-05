@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.0.1] - 2026-08-05
+
 `Schema: no | Deps: no | Breaking: no` - hotfix: unblock v0.2.0 NAS deployment.
 Fixes the two High bugs surfaced by the v0.2.0 NAS rollout (postmortem at
 `docs/architecture/postmortems/v0.2.0-implicit-boundaries.md`):
