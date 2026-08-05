@@ -10,6 +10,7 @@ commitment and recording the deletion in the chain itself.
 """
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, replace
 from typing import Any, Protocol, runtime_checkable
 
@@ -49,6 +50,10 @@ class AuditChain:
         self._tail = GENESIS_HASH  # bare hex of the last event hash
         self._counter = 0
         self._redactions: dict[str, frozenset[str]] = {}
+        # v0.3.0 T2: recorders are concurrent by design (daemon thread,
+        # request threads via emergency stop, outbox worker). RLock so
+        # redact_pii can mutate _redactions and then delegate to record().
+        self._lock = threading.RLock()
         if store is not None:
             self._load_from_store(store)
 
@@ -80,31 +85,38 @@ class AuditChain:
     ) -> SignedAuditEvent:
         """Append a signed event, continuing the hash chain.
 
+        Thread-safe (v0.3.0 T2): the counter/tail/events mutations AND the
+        store append happen under one lock. Concurrent recorders must never
+        interleave - an out-of-order store append would corrupt the persisted
+        row order that ``_load_from_store`` rebuilds the chain from on
+        restart.
+
         When ``session`` is provided, the signed event is appended via that
         session WITHOUT committing (v4 same-tx refactor - the caller owns the
         transaction so the signed audit insert joins the business-write
         transaction, eliminating cross-connection double-write contention).
         """
-        self._counter += 1
-        body = dict(payload)
-        if permit_nonce is not None:
-            body["permit_nonce"] = permit_nonce
-        event = AuditEvent.create(
-            event_id=f"evt-{self._counter}",
-            actor=actor,
-            action=action,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            payload=body,
-            previous_hash=self._tail,
-        )
-        signature = self._signer.sign(event.event_hash.encode("utf-8"))
-        signed = SignedAuditEvent(event=event, signature=signature)
-        self._events.append(signed)
-        self._tail = event.event_hash.removeprefix("sha256:")
-        if self._store is not None:
-            self._store.append(signed, session=session)
-        return signed
+        with self._lock:
+            self._counter += 1
+            body = dict(payload)
+            if permit_nonce is not None:
+                body["permit_nonce"] = permit_nonce
+            event = AuditEvent.create(
+                event_id=f"evt-{self._counter}",
+                actor=actor,
+                action=action,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                payload=body,
+                previous_hash=self._tail,
+            )
+            signature = self._signer.sign(event.event_hash.encode("utf-8"))
+            signed = SignedAuditEvent(event=event, signature=signature)
+            self._events.append(signed)
+            self._tail = event.event_hash.removeprefix("sha256:")
+            if self._store is not None:
+                self._store.append(signed, session=session)
+            return signed
 
     def record_permit_nonce(
         self, *, actor: str, job_id: str, permit_nonce: str,
@@ -123,20 +135,24 @@ class AuditChain:
 
     def permit_nonces(self) -> set[str]:
         """All permit nonces recorded in the chain."""
+        with self._lock:
+            events = list(self._events)
         return {
             str(e.event.payload["permit_nonce"])
-            for e in self._events
+            for e in events
             if "permit_nonce" in e.event.payload
         }
 
     def verify(self) -> bool:
         """Verify the hash chain AND every event signature."""
-        events = [s.event for s in self._events]
+        with self._lock:
+            signed = list(self._events)
+        events = [s.event for s in signed]
         if not AuditEvent.verify_chain(events):
             return False
         return all(
             self._signer.verify(s.event.event_hash.encode("utf-8"), s.signature)
-            for s in self._events
+            for s in signed
         )
 
     def rotate(self) -> SignedAuditEvent:
@@ -151,7 +167,8 @@ class AuditChain:
 
     def redact_pii(self, event_id: str, *, keys: frozenset[str]) -> SignedAuditEvent:
         """GDPR: mark PII keys redacted; preserve the hash; audit the deletion."""
-        self._redactions[event_id] = keys
+        with self._lock:
+            self._redactions[event_id] = keys
         return self.record(
             actor="audit_chain",
             action="gdpr.redacted",
@@ -162,11 +179,14 @@ class AuditChain:
 
     def export(self, *, redacted: bool = False) -> tuple[AuditEvent, ...]:
         """Export events; when redacted, mask PII keys (hash commitment kept)."""
+        with self._lock:
+            snapshot = list(self._events)
+            redactions = dict(self._redactions)
         if not redacted:
-            return tuple(s.event for s in self._events)
+            return tuple(s.event for s in snapshot)
         exported: list[AuditEvent] = []
-        for signed in self._events:
-            keys = self._redactions.get(signed.event.id)
+        for signed in snapshot:
+            keys = redactions.get(signed.event.id)
             if keys:
                 masked = {
                     key: ("[REDACTED:gdpr]" if key in keys else value)
@@ -178,4 +198,5 @@ class AuditChain:
         return tuple(exported)
 
     def events(self) -> tuple[AuditEvent, ...]:
-        return tuple(s.event for s in self._events)
+        with self._lock:
+            return tuple(s.event for s in self._events)

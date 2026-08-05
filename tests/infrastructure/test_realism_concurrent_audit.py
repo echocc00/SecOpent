@@ -99,6 +99,48 @@ def test_concurrent_store_appends_no_operational_error(tmp_path) -> None:  # typ
         assert _count(verify, CoreSignedAuditEvent) == 80
 
 
+@pytest.mark.realism
+def test_concurrent_chain_records_persist_in_order(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Chain-level concurrency (v0.3.0 T2): 4 threads recording through ONE
+    AuditChain backed by the real file store -> persisted rows are unique,
+    contiguous, and in chain order, and a chain rebuilt from the store
+    verifies (signatures + hash chain intact)."""
+    import threading
+
+    db = Database(create_sqlite_engine(tmp_path / "chain_race.db"))
+    store = SqlAlchemySignedAuditEventStore(db)
+    keys = AuditKeyManager()
+    chain = AuditChain(keys, store=store)
+    n_threads, n_records = 4, 25
+    errors: list[Exception] = []
+
+    def worker(thread_id: int) -> None:
+        try:
+            for i in range(n_records):
+                chain.record(
+                    actor=f"t{thread_id}", action="concurrent.event",
+                    resource_type="test", resource_id=f"{thread_id}-{i}",
+                    payload={"i": i},
+                )
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, f"concurrent chain.record failed: {errors[:3]}"
+
+    total = n_threads * n_records
+    with db.open_session() as verify:
+        assert _count(verify, CoreSignedAuditEvent) == total
+    # A fresh chain rebuilt from the store verifies (order + signatures).
+    rebuilt = AuditChain(keys, store=SqlAlchemySignedAuditEventStore(db))
+    assert len(rebuilt.events()) == total
+    assert rebuilt.verify() is True
+
+
 def _make_signed(event_id: str):  # type: ignore[no-untyped-def]
     from secopent.application.audit_chain import SignedAuditEvent
     from secopent.domain.audit.models import AuditEvent
