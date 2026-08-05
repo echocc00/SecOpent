@@ -105,6 +105,13 @@ class SqlAlchemyAuditRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
+    @property
+    def session(self) -> Session:
+        """The bound session (exposed for same-transaction merges - v4 refactor:
+        lets ``_audit_record`` pass this session to the signed audit store so
+        both audit tables are written in ONE transaction)."""
+        return self._session
+
     def add(self, event: AuditEvent) -> None:
         self._session.add(CoreAuditEvent(
             id=event.id, actor=event.actor, action=event.action,

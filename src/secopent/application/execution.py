@@ -111,7 +111,7 @@ def _issue_permit(
 
 
 def _audit_record(
-    audit: AuditService,
+    audit_repo: object,
     audit_chain: AuditChain | None,
     *,
     actor: str,
@@ -121,15 +121,22 @@ def _audit_record(
     payload: dict[str, object],
     permit_nonce: str | None = None,
 ) -> None:
-    """Record to the DB-backed AuditService and, if wired, the signed AuditChain."""
-    audit.record(
+    """Record to the DB-backed queryable audit log AND the signed AuditChain in
+    the SAME transaction (v4 refactor). The queryable log uses the repo's bound
+    session; the signed chain is passed that same session so both INSERTs join
+    one transaction, one WAL frame, one commit (caller commits). This eliminates
+    the cross-connection double-write that caused v4's SQLite lock contention.
+    """
+    AuditService(audit_repo).record(  # type: ignore[arg-type]
         actor=actor, action=action, resource_type=resource_type,
         resource_id=resource_id, payload=payload,
     )
     if audit_chain is not None:
+        session = getattr(audit_repo, "session", None)
         audit_chain.record(
             actor=actor, action=action, resource_type=resource_type,
-            resource_id=resource_id, payload=payload, permit_nonce=permit_nonce,
+            resource_id=resource_id, payload=payload,
+            permit_nonce=permit_nonce, session=session,
         )
 
 
@@ -140,7 +147,7 @@ def _verify_permit(
     audit_chain: AuditChain | None,
     assessment_id: str,
     service: AssessmentService,
-    audit: AuditService,
+    audit_repo: object,
 ) -> bool | None:
     """Verify the signed permit (signature + expiry + replay + worker).
 
@@ -162,7 +169,7 @@ def _verify_permit(
     except DomainError as exc:
         service.fail(assessment_id, f"PERMIT_INVALID:{exc}")
         _audit_record(
-            audit, audit_chain, actor="system",
+            audit_repo, audit_chain, actor="system",
             action="assessment.blocked.permit_invalid",
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
@@ -185,7 +192,7 @@ def _check_plan_scope(
     audit_chain: AuditChain | None,
     assessment_id: str,
     service: AssessmentService,
-    audit: AuditService,
+    audit_repo: object,
 ) -> bool:
     """Pre-check every plan target against the scope + egress before dispatch.
 
@@ -204,7 +211,7 @@ def _check_plan_scope(
             if not egress_decision.allowed:
                 service.fail(assessment_id, f"EGRESS_DENIED:{egress_decision.reason}")
                 _audit_record(
-                    audit, audit_chain, actor="system",
+                    audit_repo, audit_chain, actor="system",
                     action="assessment.blocked.egress_denied",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"target": target, "reason": egress_decision.reason},
@@ -227,7 +234,7 @@ def _check_plan_scope(
             if not decision.allowed:
                 service.fail(assessment_id, f"SCOPE_VIOLATION:{decision.reason}")
                 _audit_record(
-                    audit, audit_chain, actor="system",
+                    audit_repo, audit_chain, actor="system",
                     action="assessment.blocked.scope_violation",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"target": target, "reason": decision.reason},
@@ -276,7 +283,6 @@ def execute_assessment(
     a real number instead of a hardcoded 0.0).
     """
     service = AssessmentService(assessment_repo)
-    audit = AuditService(audit_repo)  # type: ignore[arg-type]
 
     nft_applied = False
     try:
@@ -285,7 +291,7 @@ def execute_assessment(
         if emergency_stop is not None and emergency_stop.is_triggered:
             service.fail(assessment_id, "EMERGENCY_STOP_TRIGGERED")
             _audit_record(
-                audit, audit_chain, actor="system",
+                audit_repo, audit_chain, actor="system",
                 action="assessment.blocked.emergency_stop",
                 resource_type="assessment", resource_id=assessment_id,
                 payload={"reason": "emergency_stop_triggered"},
@@ -310,7 +316,7 @@ def execute_assessment(
 
         permit_valid = _verify_permit(
             permit, permit_verifier, permit_registry, audit_chain,
-            assessment_id, service, audit,
+            assessment_id, service, audit_repo,
         )
         if permit_valid is None:
             return  # verification failed: assessment already FAILED + audited
@@ -321,7 +327,7 @@ def execute_assessment(
             )
 
         _audit_record(
-            audit, audit_chain, actor="system", action="assessment.started",
+            audit_repo, audit_chain, actor="system", action="assessment.started",
             resource_type="assessment", resource_id=assessment_id,
             payload={"permit_nonce": permit.nonce} if permit is not None else {},
         )
@@ -329,7 +335,7 @@ def execute_assessment(
 
         if not _check_plan_scope(
             scope_enforcer, egress_guard, plan, scope, permit_valid, audit_chain,
-            assessment_id, service, audit,
+            assessment_id, service, audit_repo,
         ):
             return  # out-of-scope/egress-denied target: assessment already FAILED + audited
 
@@ -363,13 +369,13 @@ def execute_assessment(
                     findings,
                     finding_repo=finding_repo,
                     confirmed_repo=confirmed_finding_repo,
-                    audit=audit,
+                    audit=AuditService(audit_repo),  # type: ignore[arg-type]
                     audit_chain=audit_chain,
                     actor="system",
                     verified_at=utc_now(),
                 )
                 _audit_record(
-                    audit, audit_chain, actor="system", action="oracle.batch_verified",
+                    audit_repo, audit_chain, actor="system", action="oracle.batch_verified",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={
                         "confirmed": summary.confirmed,
@@ -385,7 +391,7 @@ def execute_assessment(
                     assessment_id=assessment_id, error=str(exc), exc_info=True,
                 )
                 _audit_record(
-                    audit, audit_chain, actor="system", action="oracle.batch_failed",
+                    audit_repo, audit_chain, actor="system", action="oracle.batch_failed",
                     resource_type="assessment", resource_id=assessment_id,
                     payload={"reason": str(exc)},
                 )
@@ -393,7 +399,7 @@ def execute_assessment(
         service.complete(assessment_id)  # RUNNING -> COMPLETED
         coverage_rate, uncovered = _compute_coverage(catalog, asset_types, observations)
         _audit_record(
-            audit, audit_chain, actor="system", action="assessment.completed",
+            audit_repo, audit_chain, actor="system", action="assessment.completed",
             resource_type="assessment", resource_id=assessment_id,
             payload={
                 "findings": len(findings),
@@ -414,7 +420,7 @@ def execute_assessment(
         with contextlib.suppress(Exception):
             service.fail(assessment_id, str(exc))
         _audit_record(
-            audit, audit_chain, actor="system", action="assessment.failed",
+            audit_repo, audit_chain, actor="system", action="assessment.failed",
             resource_type="assessment", resource_id=assessment_id,
             payload={"reason": str(exc)},
         )

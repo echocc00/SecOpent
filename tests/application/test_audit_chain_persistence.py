@@ -10,7 +10,7 @@ class _FakeStore:
     def __init__(self) -> None:
         self.rows: list[SignedAuditEvent] = []
 
-    def append(self, signed: SignedAuditEvent) -> None:
+    def append(self, signed: SignedAuditEvent, *, session: object = None) -> None:
         self.rows.append(signed)
 
     def load_all(self) -> tuple[SignedAuditEvent, ...]:
