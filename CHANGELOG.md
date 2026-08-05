@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.2.0.2] - 2026-08-05
+
 `Schema: no | Deps: no | Breaking: no` - hotfix: complete the v4 same-tx refactor.
 v0.2.0.1's T3 refactor threaded `session` through `_audit_record` but missed 4
 other audit-write paths on the daemon (issue v5). All 4 now thread `session`
