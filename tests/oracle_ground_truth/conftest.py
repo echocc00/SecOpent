@@ -58,6 +58,7 @@ class GroundTruthVerifier:
         method: VerificationMethod,
         *,
         canary_token: str,
+    session=None,
     ) -> ReproductionStatus:
         self.reproductions += 1
         return ReproductionStatus.SUCCESS if self._vuln_present else ReproductionStatus.FAILURE

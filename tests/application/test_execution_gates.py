@@ -412,7 +412,7 @@ def test_nft_scope_enforcer_applied_and_revoked_around_execution(
             self.applied: list[object] = []
             self.revoked = 0
 
-        def apply_scope(self, snapshot: object) -> object:
+        def apply_scope(self, snapshot: object, *, session=None) -> object:
             self.applied.append(snapshot)
             return None
 
@@ -449,7 +449,7 @@ def test_nft_scope_enforcer_revoked_even_on_failure(memory_repositories) -> None
             self.applied: list[object] = []
             self.revoked = 0
 
-        def apply_scope(self, snapshot: object) -> object:
+        def apply_scope(self, snapshot: object, *, session=None) -> object:
             self.applied.append(snapshot)
             return None
 

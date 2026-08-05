@@ -47,7 +47,7 @@ class FakeAudit:
         self.events: list[tuple[str, str]] = []
 
     def record(self, *, actor: str, action: str, resource_type: str,
-               resource_id: str, payload: dict[str, object]) -> None:
+               resource_id: str, payload: dict[str, object], session=None) -> None:
         self.events.append((action, resource_id))
 
 

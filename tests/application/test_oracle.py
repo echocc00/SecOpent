@@ -42,6 +42,7 @@ class ScriptedVerifier:
         method: VerificationMethod,
         *,
         canary_token: str,
+        session=None,
     ) -> ReproductionStatus:
         self.calls.append((candidate.target, canary_token))
         if self._outcomes:

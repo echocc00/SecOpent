@@ -34,6 +34,7 @@ class _FakeVerifier:
         method: VerificationMethod,
         *,
         canary_token: str,
+    session=None,
     ) -> ReproductionStatus:
         self.calls.append(canary_token)
         return ReproductionStatus.SUCCESS if self._reproduce else ReproductionStatus.FAILURE
@@ -56,7 +57,7 @@ class _BoomFactory:
     def for_finding(self, finding: Finding) -> OracleVerifier:
         class _Boom:
             def reproduce(
-                self, c: CandidateFinding, m: VerificationMethod, *, canary_token: str
+                self, c: CandidateFinding, m: VerificationMethod, *, canary_token: str, session=None
             ) -> ReproductionStatus:
                 raise RuntimeError("scan blew up")
         return _Boom()  # type: ignore[return-value]

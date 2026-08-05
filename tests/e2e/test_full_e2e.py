@@ -98,7 +98,7 @@ class _EmittingRunner:
 
 
 class _AlwaysSucceed:
-    def reproduce(self, candidate, method, *, canary_token) -> ReproductionStatus:  # type: ignore[no-untyped-def]
+    def reproduce(self, candidate, method, *, canary_token, session=None) -> ReproductionStatus:  # type: ignore[no-untyped-def]
         return ReproductionStatus.SUCCESS
 
 

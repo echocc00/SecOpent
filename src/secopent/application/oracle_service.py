@@ -70,6 +70,7 @@ class OracleService:
         audit_chain: AuditChain | None,
         actor: str,
         verified_at: datetime | None = None,
+        session: Any = None,
     ) -> OracleSummary:
         """Verify each mappable finding; persist ConfirmedFindings + verdicts."""
         verified_at = verified_at or utc_now()
@@ -89,6 +90,7 @@ class OracleService:
                     audit_chain,
                     actor,
                     verified_at,
+                    session=session,
                 )
             except Exception as exc:  # noqa: BLE001 - best-effort, never abort batch
                 failed += 1
@@ -127,6 +129,7 @@ class OracleService:
         audit_chain: AuditChain | None,
         actor: str,
         verified_at: datetime,
+        session: Any = None,
     ) -> VerificationStatus:
         candidate = CandidateFinding(
             id=finding.id,
@@ -142,7 +145,7 @@ class OracleService:
             verifier=verifier,
             canary=self._canary,
         )
-        result = engine.verify(candidate, actor=actor)
+        result = engine.verify(candidate, actor=actor, session=session)
         if result.status is VerificationStatus.CONFIRMED:
             confirmed = engine.confirm(
                 candidate,
@@ -181,10 +184,12 @@ class OracleService:
             payload=payload,
         )
         if audit_chain is not None:
+            _session = getattr(getattr(audit, "_repo", None), "session", None)
             audit_chain.record(
                 actor=actor,
                 action=action,
                 resource_type="finding",
                 resource_id=finding_id,
                 payload=payload,
+                session=_session,
             )

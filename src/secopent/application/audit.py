@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac as _hmac
+from typing import Any
 
 from ..domain.audit.models import GENESIS_HASH, AuditEvent
 from .ports.repositories import AuditRepository
@@ -30,7 +31,11 @@ class AuditService:
         self._repo = repo
 
     def record(self, *, actor: str, action: str, resource_type: str,
-               resource_id: str, payload: dict[str, object]) -> AuditEvent:
+               resource_id: str, payload: dict[str, object],
+               session: Any = None) -> AuditEvent:
+        # ``session`` is accepted for AuditRecorder Protocol compatibility (the
+        # canary/oracle pass it through). AuditService ignores it - the repo is
+        # already bound to the correct session at construction time.
         previous = self._repo.last_hash() or GENESIS_HASH
         event = AuditEvent.create(
             event_id=f"evt-{len(self._repo.list_events()) + 1}",

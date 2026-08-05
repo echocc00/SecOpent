@@ -37,6 +37,7 @@ class _StubOracle:
         audit_chain,
         actor,
         verified_at=None,
+        session=None,
     ) -> OracleSummary:
         confirmed = 0
         for f in findings:

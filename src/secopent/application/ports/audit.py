@@ -8,7 +8,7 @@ land in the tamper-evident chain.
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -23,4 +23,5 @@ class AuditRecorder(Protocol):
         resource_type: str,
         resource_id: str,
         payload: dict[str, object],
+        session: Any = None,
     ) -> object: ...

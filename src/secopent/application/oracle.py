@@ -16,7 +16,7 @@ ConfirmedFinding and refuses anything else.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..domain.common.errors import DomainValidationError
 from ..domain.verification.models import (
@@ -48,6 +48,7 @@ class OracleVerifier(Protocol):
         method: VerificationMethod,
         *,
         canary_token: str,
+        session: Any = None,
     ) -> ReproductionStatus: ...
 
 
@@ -65,7 +66,9 @@ class OracleEngine:
         self._verifier = verifier
         self._canary = canary
 
-    def verify(self, candidate: CandidateFinding, *, actor: str) -> VerificationResult:
+    def verify(
+        self, candidate: CandidateFinding, *, actor: str, session: Any = None
+    ) -> VerificationResult:
         """Run the method's N independent reproductions and aggregate the result.
 
         Exactly ``method.default_n`` attempts are run; server-error attempts are
@@ -77,8 +80,12 @@ class OracleEngine:
         inconclusive = 0
         attempts = 0
         for _ in range(method.default_n):
-            token = self._canary.generate(actor=actor, candidate_id=candidate.id)
-            status = self._verifier.reproduce(candidate, method, canary_token=token)
+            token = self._canary.generate(
+                actor=actor, candidate_id=candidate.id, session=session
+            )
+            status = self._verifier.reproduce(
+                candidate, method, canary_token=token, session=session
+            )
             attempts += 1
             if status is ReproductionStatus.SUCCESS:
                 successes += 1

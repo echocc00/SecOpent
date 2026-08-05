@@ -101,7 +101,7 @@ class EmittingRunner:
 class AlwaysSucceedVerifier:
     """Oracle backend that always reproduces successfully (ground-truth vuln)."""
 
-    def reproduce(self, candidate, method, *, canary_token) -> ReproductionStatus:  # type: ignore[no-untyped-def]
+    def reproduce(self, candidate, method, *, canary_token, session=None) -> ReproductionStatus:  # type: ignore[no-untyped-def]
         return ReproductionStatus.SUCCESS
 
 

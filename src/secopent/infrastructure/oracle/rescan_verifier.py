@@ -90,6 +90,7 @@ class RescanVerifier:
         method: VerificationMethod,
         *,
         canary_token: str,
+        session: Any = None,
     ) -> ReproductionStatus:
         """Re-run the scan; SUCCESS if the candidate reproduces."""
         # OOB path (W3-E): canary as callback subdomain, require an interaction.
@@ -119,7 +120,9 @@ class RescanVerifier:
             # confirmation even if the target string appears in observations.
             kwargs = _embed_canary(self._scan_kwargs, canary, canary_token)
             result = self._runner.scan(**kwargs)
-            echoed = canary.verify_echo(result.stdout, canary_token, actor="oracle")
+            echoed = canary.verify_echo(
+                result.stdout, canary_token, actor="oracle", session=session
+            )
             return ReproductionStatus.SUCCESS if echoed else ReproductionStatus.FAILURE
         # Legacy path: substring match on the candidate's target.
         result = self._runner.scan(**self._scan_kwargs)

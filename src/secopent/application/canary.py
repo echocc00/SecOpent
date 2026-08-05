@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from typing import Any
 
 from ..domain.common.errors import DomainError
 from .ports.audit import AuditRecorder
@@ -52,7 +53,9 @@ class CanaryTokenManager:
         self._issued: set[str] = set()
         self._consumed: set[str] = set()
 
-    def generate(self, *, actor: str, candidate_id: str) -> str:
+    def generate(
+        self, *, actor: str, candidate_id: str, session: Any = None
+    ) -> str:
         """Mint a fresh, unique, high-entropy canary token and audit it."""
         token = secrets.token_urlsafe(16)
         while token in self._issued:  # collision paranoia; practically never loops
@@ -64,6 +67,7 @@ class CanaryTokenManager:
             resource_type="canary_token",
             resource_id=_audit_id(token),
             payload={"candidate_id": candidate_id},
+            session=session,
         )
         return token
 
@@ -77,7 +81,9 @@ class CanaryTokenManager:
         self._require_issued(token)
         return f"{token}.{self._oob_domain}"
 
-    def verify_echo(self, response: str, token: str, *, actor: str) -> bool:
+    def verify_echo(
+        self, response: str, token: str, *, actor: str, session: Any = None
+    ) -> bool:
         """Check the token echoed back in ``response``; consume it (single-use).
 
         Returns True iff the exact token appears in the response. The token is
@@ -94,6 +100,7 @@ class CanaryTokenManager:
             resource_type="canary_token",
             resource_id=_audit_id(token),
             payload={"hit": hit},
+            session=session,
         )
         return hit
 

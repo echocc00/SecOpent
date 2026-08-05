@@ -376,6 +376,7 @@ def execute_assessment(
                     audit_chain=audit_chain,
                     actor="system",
                     verified_at=utc_now(),
+                    session=getattr(audit_repo, "session", None),
                 )
                 _audit_record(
                     audit_repo, audit_chain, actor="system", action="oracle.batch_verified",
