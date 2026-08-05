@@ -10,6 +10,7 @@ from ..domain.assessments.models import (
     ExecutionPlan,
     PlanStep,
 )
+from ..domain.assessments.transitions import assert_transition
 from ..domain.common.errors import DomainError, DomainValidationError
 from ..domain.policy.models import ExecutionMode, RiskClass
 from .ports.repositories import AssessmentRepository
@@ -36,6 +37,9 @@ class AssessmentService:
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
+        # v0.3.0 T7: guard gap fix - previously ANY status could (re-)attach a
+        # plan; only DRAFT / AWAITING_APPROVAL (re-plan) may.
+        assert_transition(assessment.status, AssessmentStatus.AWAITING_APPROVAL)
         plan = ExecutionPlan.create(
             plan_id=f"plan-{uuid.uuid4().hex[:12]}",
             assessment_id=assessment_id, version=1, steps=steps,
@@ -73,6 +77,9 @@ class AssessmentService:
             raise LookupError(f"assessment {assessment_id} not found")
         if assessment.active_plan_id is None:
             raise DomainValidationError("assessment has no plan to approve")
+        # v0.3.0 T7: guard gap fix - previously an assessment could be
+        # approved from any status (e.g. REJECTED); only AWAITING_APPROVAL may.
+        assert_transition(assessment.status, AssessmentStatus.APPROVED)
         plan = self._repo.get_plan(assessment.active_plan_id)
         if plan is None:
             raise LookupError("active plan not found")
@@ -113,11 +120,7 @@ class AssessmentService:
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
-        if assessment.status is not AssessmentStatus.AWAITING_APPROVAL:
-            raise DomainValidationError(
-                f"assessment {assessment_id} is not awaiting approval "
-                f"(status={assessment.status.value})"
-            )
+        assert_transition(assessment.status, AssessmentStatus.REJECTED)
         if not reason.strip():
             raise DomainValidationError("rejection reason must be non-empty")
         updated = replace(assessment, status=AssessmentStatus.REJECTED)
@@ -144,10 +147,7 @@ class AssessmentService:
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
-        if assessment.status is not AssessmentStatus.APPROVED:
-            raise DomainValidationError(
-                f"assessment {assessment_id} cannot start from {assessment.status.value}"
-            )
+        assert_transition(assessment.status, AssessmentStatus.QUEUED)
         if not assessment.active_plan_id:
             raise DomainValidationError("assessment has no plan to execute")
         if not assessment.approval_id:
@@ -163,10 +163,7 @@ class AssessmentService:
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
-        if assessment.status is not AssessmentStatus.QUEUED:
-            raise DomainValidationError(
-                f"assessment {assessment_id} cannot run from {assessment.status.value}"
-            )
+        assert_transition(assessment.status, AssessmentStatus.RUNNING)
         updated = replace(assessment, status=AssessmentStatus.RUNNING)
         self._repo.add(updated)
         return updated
@@ -176,10 +173,7 @@ class AssessmentService:
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
-        if assessment.status is not AssessmentStatus.RUNNING:
-            raise DomainValidationError(
-                f"assessment {assessment_id} cannot complete from {assessment.status.value}"
-            )
+        assert_transition(assessment.status, AssessmentStatus.COMPLETED)
         updated = replace(assessment, status=AssessmentStatus.COMPLETED)
         self._repo.add(updated)
         return updated
@@ -189,10 +183,7 @@ class AssessmentService:
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
-        if assessment.status is not AssessmentStatus.RUNNING:
-            raise DomainValidationError(
-                f"assessment {assessment_id} cannot fail from {assessment.status.value}"
-            )
+        assert_transition(assessment.status, AssessmentStatus.FAILED)
         updated = replace(assessment, status=AssessmentStatus.FAILED)
         self._repo.add(updated)
         return updated
