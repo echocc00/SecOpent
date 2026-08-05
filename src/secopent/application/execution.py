@@ -324,6 +324,7 @@ def execute_assessment(
         if audit_chain is not None and permit is not None:
             audit_chain.record_permit_nonce(
                 actor="system", job_id=assessment_id, permit_nonce=permit.nonce,
+                session=getattr(audit_repo, "session", None),
             )
 
         _audit_record(
@@ -344,7 +345,9 @@ def execute_assessment(
         # are audited and the run continues on the app-layer EgressGuard alone.
         if nft_scope_enforcer is not None:
             try:
-                nft_scope_enforcer.apply_scope(scope)
+                nft_scope_enforcer.apply_scope(
+                    scope, session=getattr(audit_repo, "session", None)
+                )
                 nft_applied = True
             except Exception as exc:  # noqa: BLE001 - nft is defence-in-depth
                 _logger.warning(

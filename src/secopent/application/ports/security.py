@@ -9,7 +9,7 @@ without crossing the architecture boundary.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ...domain.permits.models import ExecutionPermit
 from ...domain.policy.models import PolicyDecision
@@ -79,6 +79,8 @@ class NftScopeEnforcerProtocol(Protocol):
     alone). Concrete impl (NftScopeEnforcer) lives in infrastructure.
     """
 
-    def apply_scope(self, snapshot: ScopeSnapshot) -> object: ...
+    def apply_scope(
+        self, snapshot: ScopeSnapshot, *, session: Any = None
+    ) -> object: ...
 
     def revoke(self) -> None: ...

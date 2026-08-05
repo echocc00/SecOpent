@@ -30,7 +30,7 @@ import socket
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import urlsplit
 
 from secopent.domain.common.errors import DomainError
@@ -55,6 +55,7 @@ class AuditSink(Protocol):
         resource_type: str,
         resource_id: str,
         payload: dict[str, object],
+        session: Any = None,
     ) -> object: ...
 
 
@@ -127,7 +128,9 @@ class NftScopeEnforcer:
             ipaddress.ip_network(cidr, strict=False) for cidr in blocked_cidrs
         ]
 
-    def apply_scope(self, snapshot: ScopeSnapshot) -> ScopeEnforcementResult:
+    def apply_scope(
+        self, snapshot: ScopeSnapshot, *, session: Any = None
+    ) -> ScopeEnforcementResult:
         """Resolve scoped targets and populate the nft allow/block sets."""
         allowed: list[str] = []
         blocked: list[str] = []
@@ -138,23 +141,25 @@ class NftScopeEnforcer:
                 rejected.append(entry)
                 continue
             if "/" in host:  # CIDR network
-                self._classify_network(host, allowed, blocked, rejected, entry)
+                self._classify_network(
+                    host, allowed, blocked, rejected, entry, session=session
+                )
                 continue
             try:
                 ips = self._resolve_with_rebinding_check(host)
             except DnsRebindingError:
                 rejected.append(entry)
-                self._record("egress.rejected_rebinding", entry)
+                self._record("egress.rejected_rebinding", entry, session=session)
                 continue
             for ip in ips:
                 if self._guard.is_blocked_destination(ip):
                     if ip not in blocked:
                         blocked.append(ip)
                     rejected.append(entry)
-                    self._record("egress.denied_blocked", ip)
+                    self._record("egress.denied_blocked", ip, session=session)
                 elif ip not in allowed:
                     allowed.append(ip)
-                    self._record("egress.allowed", ip)
+                    self._record("egress.allowed", ip, session=session)
         # Blocked set is pushed first: the nft output chain checks it BEFORE the
         # allow set, so a sensitive range is dropped even if it were whitelisted.
         self._add_elements("blocked_targets", blocked)
@@ -175,6 +180,8 @@ class NftScopeEnforcer:
         blocked: list[str],
         rejected: list[str],
         entry: str,
+        *,
+        session: Any = None,
     ) -> None:
         try:
             network = ipaddress.ip_network(cidr, strict=False)
@@ -183,11 +190,11 @@ class NftScopeEnforcer:
             return
         if any(network.overlaps(net) for net in self._blocked_nets):
             rejected.append(entry)
-            self._record("egress.denied_blocked", cidr)
+            self._record("egress.denied_blocked", cidr, session=session)
             return
         if cidr not in allowed:
             allowed.append(cidr)
-            self._record("egress.allowed", cidr)
+            self._record("egress.allowed", cidr, session=session)
 
     def _resolve_with_rebinding_check(self, host: str) -> tuple[str, ...]:
         """Resolve a host twice; reject if the answers differ (rebinding)."""
@@ -218,7 +225,9 @@ class NftScopeEnforcer:
             args = ["ip", "netns", "exec", self._netns, *args]
         self._runner(args)
 
-    def _record(self, action: str, resource_id: str) -> None:
+    def _record(
+        self, action: str, resource_id: str, *, session: Any = None
+    ) -> None:
         if self._audit is None:
             return
         self._audit.record(
@@ -227,4 +236,5 @@ class NftScopeEnforcer:
             resource_type="scope",
             resource_id=resource_id,
             payload={},
+            session=session,
         )

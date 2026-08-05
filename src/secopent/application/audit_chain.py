@@ -107,7 +107,8 @@ class AuditChain:
         return signed
 
     def record_permit_nonce(
-        self, *, actor: str, job_id: str, permit_nonce: str
+        self, *, actor: str, job_id: str, permit_nonce: str,
+        session: Any = None,
     ) -> SignedAuditEvent:
         """Record a permit's nonce so a replay is detectable."""
         return self.record(
@@ -117,6 +118,7 @@ class AuditChain:
             resource_id=job_id,
             payload={"job_id": job_id},
             permit_nonce=permit_nonce,
+            session=session,
         )
 
     def permit_nonces(self) -> set[str]:
