@@ -92,6 +92,7 @@ from ...infrastructure.secrets.persistent_file_backend import (
     PersistentEncryptedFileBackend,
 )
 from ...infrastructure.signing.ed25519 import Ed25519KeyProvider
+from ...interfaces.mcp import build_default_registry
 from .routers import (
     appmodels_router,
     approvals_router,
@@ -553,6 +554,16 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     else:
         app.state.peer_agent_service = None
 
+    # MCP tool registry (Phase 2.9; §13 + ADR-007): mount the safe read-only
+    # tool surface on app.state so the agent never gets shell/docker/python.
+    # The registry is framework-free (testable without the MCP SDK); the SDK
+    # wraps these specs in M5. Only read-only query handlers are wired today
+    # (list_findings / get_finding / list_required_classes); mutating
+    # orchestration tools land once their Application Service signatures
+    # stabilize. FORBIDDEN_TOOL_NAMES rejects shell/docker_run/
+    # execute_python/exec/eval at register() time (M4 DoD).
+    app.state.mcp_tool_registry = build_default_registry()
+
     # API at the root (dev: the vite proxy rewrites /api/* -> root).
     _register_api(app)
 
@@ -577,6 +588,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.oracle = app.state.oracle
     api.state.outbox_activation = app.state.outbox_activation
     api.state.peer_agent_service = app.state.peer_agent_service
+    api.state.mcp_tool_registry = app.state.mcp_tool_registry
     _register_api(api)
     app.mount("/api", api)
 
