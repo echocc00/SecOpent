@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { AppModelEditor } from "@/features/case-studio/AppModelEditor";
+import { DriftView } from "@/features/case-studio/DriftView";
 import { PropertyPanel } from "@/features/case-studio/PropertyPanel";
 import { SigningPanel } from "@/features/case-studio/SigningPanel";
 import { TestGenerator } from "@/features/case-studio/TestGenerator";
@@ -200,6 +201,7 @@ export function CaseStudio() {
               <TabsList className="w-fit">
                 <TabsTrigger value="editor">Model Editor</TabsTrigger>
                 <TabsTrigger value="yaml">YAML (Cases)</TabsTrigger>
+                <TabsTrigger value="drift">Drift</TabsTrigger>
                 <TabsTrigger value="signing">Signing</TabsTrigger>
                 <TabsTrigger value="tests">Test Generation</TabsTrigger>
               </TabsList>
@@ -230,6 +232,10 @@ export function CaseStudio() {
 
               <TabsContent value="yaml" className="mt-3">
                 <YamlEditor />
+              </TabsContent>
+
+              <TabsContent value="drift" className="mt-3">
+                <DriftView appId={loaded.app_id} version={loaded.version} />
               </TabsContent>
 
               <TabsContent value="signing" className="mt-3">

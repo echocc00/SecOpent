@@ -321,6 +321,15 @@ export const useReviseAppModel = () => {
   });
 };
 
+export const useCheckDrift = () =>
+  useMutation({
+    mutationFn: ({ app_id, version, body }: { app_id: string; version: string; body: Schemas["DriftRequest"] }) =>
+      api.POST("/appmodels/{app_id}/{version}/drift", {
+        params: { path: { app_id, version } },
+        body,
+      }),
+  });
+
 export const useValidateAppModel = () => {
   const qc = useQueryClient();
   return useMutation({
