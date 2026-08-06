@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-07
+
 `Schema: no | Deps: no | Breaking: no` - Phase 3 功能缺口收口（设计存在但未激活的
 能力全部激活）。设计文档 `docs/architecture/phase3-handoff.md`（含审阅勘误 E1-E5）。
 3.2 Strix/Shannon 已在 v0.4.0 完成；本版落地其余 5 项，1611 passed（+41），零回归。
