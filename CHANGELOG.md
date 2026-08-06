@@ -9,6 +9,47 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+`Schema: no | Deps: no | Breaking: no` - Phase 3 功能缺口收口（设计存在但未激活的
+能力全部激活）。设计文档 `docs/architecture/phase3-handoff.md`（含审阅勘误 E1-E5）。
+3.2 Strix/Shannon 已在 v0.4.0 完成；本版落地其余 5 项，1611 passed（+41），零回归。
+
+### Added
+- **审计链生命周期 API**（Phase 3.6）：`POST /audit/rotate`（轮换日志段，新段从
+  旧 tail 延续）+ `POST /audit/redact`（GDPR PII 掩码，哈希承诺保留）+
+  `GET /audit/chain?redacted=true`（签名链导出）。均 human-only（agent 403，
+  LLM 边界），事件经请求事务原子提交。
+- **OllamaBackend**（Phase 3.4）：本地 `ollama serve` 后端（/api/generate，
+  非流式；无 API key、无云出口），实现 application `ModelBackend.complete` +
+  infrastructure `LLMBackend.generate/is_available` 双协议——RemoteModelGateway
+  的数据分级/脱敏治理对本地模型同样生效。
+- **DriftView 前端**（Phase 3.3）：CaseStudio 加回 Drift tab，粘贴 re-imported
+  states/transitions → `POST /appmodels/{app_id}/{version}/drift` → 三栏渲染
+  added/removed/changed，提示再生成受影响的 logic tests。复用 generated.ts
+  既有类型（勘误 E3：不新建 API client 文件）。
+
+### Changed
+- **Echo canary per-method 门控**（Phase 3.1）：`VerificationMethod.echo_enabled`
+  字段 + factory 按策展方法嵌入 `&echo={{canary_token}}` 到探测 URL——token 必须
+  到达靶标才能回显（勘误 E1：独立 dict key 会撞 `RealScanRunner.scan` 严格签名
+  且永远不进流量）。XSS 为唯一 echo-enabled 类，**严格语义**（勘误 E2）：无回显
+  即 REFUTED，无 legacy fallback；OOB placeholder 保持 always-on，两分支互斥
+  （echo 方法 oob_window=0）。此前 echo 分支是死代码，反射型 XSS 只能走宽松的
+  legacy 子串匹配。已知行为变更：不回显的 stored/DOM XSS 发现将由弱确认变为
+  REFUTED（重扫探针本就无法复现它们）。
+- **LLM 后端配置驱动**（Phase 3.5，勘误 E4）：`_build_llm_backend` 按优先级
+  `SECOPTENT_LLM_BACKEND` env（remote/ollama/null）> `config/llm.yaml`
+  `backend:` 字段（`SECOPTENT_LLM_CONFIG` 覆盖路径）> `MINIMAX_API_KEY` 遗留
+  fallback > null 选择后端；配置错误降级 null + warning，启动永不失败。
+  `load_backend_from_config` 支持 remote/ollama/null 三种后端。
+- **rotate/redact_pii session 线程化**（Phase 3.6）：`AuditChain.rotate` /
+  `redact_pii` 加 `session=` 参数并透传 store append（v4/v5 bug class 残留收口）；
+  forbidden linter R3 扩扫 `audit_chain.py`（先红后绿）。
+
+### Verified
+- 1611 tests passed（default tier），5 realism 通过，coverage 92.14%（gate 80%），
+  ruff / mypy strict（287 files）/ bandit -ll / forbidden linter 全绿；前端
+  `npx tsc -b` + `npm run build` 绿，drift/appmodel 后端测试（31）不回归。
+
 ## [0.4.0] - 2026-08-06
 
 `Schema: yes | Deps: no | Breaking: no` - M5 里程碑：容器加固 + 真实 peer 后端 +
