@@ -36,6 +36,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 
 _PARSER_ENTRYPOINT = "secopent_adapters.nmap:parse"
 _ADAPTER_VERSION = "1.0.0"
@@ -69,6 +70,8 @@ def manifest() -> AdapterManifest:
     the manifest so the runner / profile selector can enforce the
     subprocess-only boundary at policy time.
     """
+    _image = IMAGE_CATALOG.get("nmap")
+    _digest = _image.digest if _image and _image.digest else "sha256:nmap-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="nmap",
         version=_ADAPTER_VERSION,
@@ -78,7 +81,7 @@ def manifest() -> AdapterManifest:
             name="nmap",
             url="https://nmap.org/",
             version=_UPSTREAM_VERSION,
-            digest="sha256:nmap-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.LOW,
         coverage_domain=(CoverageDomain.NETWORK,),

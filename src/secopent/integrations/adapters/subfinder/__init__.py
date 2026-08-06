@@ -10,6 +10,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 from secopent.integrations.adapters._common import safe_jsonl_load
 
 _PARSER_ENTRYPOINT = "secopent_adapters.subfinder:parse"
@@ -22,14 +23,15 @@ def manifest() -> AdapterManifest:
 
     subfinder is a passive subdomain enumeration tool (ProjectDiscovery, MIT).
 
-    The upstream ``digest`` is a PLACEHOLDER (``sha256:subfinder-<version>``),
-    not a real image content hash - it is structurally valid + uniquely
-    identifiable, which is all the M1 manifest contract required. The real
-    pinned image digest lives in ``infrastructure/adapters/image_catalog.py``
-    (key ``"subfinder"``); before running adapters in production the manifest
-    digest must be pinned to that catalog digest (M5 container-build task, see
-    ``docs/deployment.md`` §8 supply-chain gate).
+    The upstream ``digest`` is read dynamically from ``image_catalog`` (the
+    single source of truth for pinned image digests, §8.1 supply-chain gate).
+    If the catalog digest is empty (image pull pending/failed), the manifest
+    falls back to the ``sha256:subfinder-<version>`` placeholder - structurally
+    valid + uniquely identifiable, but NOT a real image content hash; the
+    AdapterRunner will refuse to launch it once a real digest is required.
     """
+    _image = IMAGE_CATALOG.get("subfinder")
+    _digest = _image.digest if _image and _image.digest else "sha256:subfinder-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="subfinder",
         version=_ADAPTER_VERSION,
@@ -39,7 +41,7 @@ def manifest() -> AdapterManifest:
             name="subfinder",
             url="https://github.com/projectdiscovery/subfinder",
             version=_UPSTREAM_VERSION,
-            digest="sha256:subfinder-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.PASSIVE,
         coverage_domain=(CoverageDomain.ASSET,),

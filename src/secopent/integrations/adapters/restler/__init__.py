@@ -29,6 +29,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 
 _PARSER_ENTRYPOINT = "secopent_adapters.restler:parse"
 _ADAPTER_VERSION = "1.0.0"
@@ -45,6 +46,8 @@ _BUG_SEVERITY: dict[str, Severity] = {
 
 def manifest() -> AdapterManifest:
     """Return the RESTler AdapterManifest (active, decision 23)."""
+    _image = IMAGE_CATALOG.get("restler")
+    _digest = _image.digest if _image and _image.digest else "sha256:restler-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="restler",
         version=_ADAPTER_VERSION,
@@ -54,7 +57,7 @@ def manifest() -> AdapterManifest:
             name="restler",
             url="https://github.com/microsoft/restler-fuzzer",
             version=_UPSTREAM_VERSION,
-            digest="sha256:restler-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.ACTIVE,
         coverage_domain=(CoverageDomain.WEB,),

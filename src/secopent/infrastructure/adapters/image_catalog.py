@@ -34,22 +34,22 @@ IMAGE_CATALOG: dict[str, ImageRef] = {
     "httpx": ImageRef("projectdiscovery/httpx", "latest", "sha256:e2f89a700e535b3e0d5ccf95e3383ebb54c2faecd8e8100573455cd0cbe8e02d"),
     "naabu": ImageRef("projectdiscovery/naabu", "latest", "sha256:0b7efcd6eb4bf7be2c5cfb2bbfe091a132df0e442e549267bca818a4cef15ea4"),
     "katana": ImageRef("projectdiscovery/katana", "latest", "sha256:a05d8460d34d06addc259da2543e554ef85ea756ed68e57701850fe09f326eff"),
-    "fingerprinthub": ImageRef("dominicbreuker/fingerprintx", "latest", ""),  # digest TBD when pulled (A2)
+    "fingerprinthub": ImageRef("dominicbreuker/fingerprintx", "latest", ""),  # digest TBD: pull failed (mirror 403 Forbidden)
     # --- Web/API (Task 10) ---
     "nuclei": ImageRef("projectdiscovery/nuclei", "latest", "sha256:e677842fb1f50f29747565ba274a1d35dcf8c684132a42b0cb406e71fccae9fc"),
     "dalfox": ImageRef("hahwul/dalfox", "latest", "sha256:91d5cebda9114fb7c2bfc7ad179ac5d605705c0bf4632a68f572f7a2f1d8a6dc"),
-    "restler": ImageRef("mcr.microsoft.com/restlerfuzzer/restler", "latest", ""),  # digest TBD (A2)
-    "schemathesis": ImageRef("schemathesis/schemathesis", "latest", ""),  # digest TBD (A2)
-    "zap": ImageRef("owasp/zap2docker-stable", "latest", ""),  # digest TBD (A2, Standalone-only)
+    "restler": ImageRef("mcr.microsoft.com/restlerfuzzer/restler", "latest", "sha256:0f3275119352be05011b7004a7bc644b190baf7522674ab970955917ee111a12"),
+    "schemathesis": ImageRef("schemathesis/schemathesis", "latest", "sha256:2f25d34b5e063e58df213f43a8ae288f656e0c1ca7a27821e0f1987430893ae5"),
+    "zap": ImageRef("owasp/zap2docker-stable", "latest", ""),  # digest TBD: pull failed (mirror 403 Forbidden)
     # --- Network host (Task 11) ---
     "nmap": ImageRef("instrumentisto/nmap", "latest", "sha256:96f6ed194519b62421a1a1c57809e65a7f94d2aa1c8c25676f247e5e148c0827"),
     "nuclei_tcp": ImageRef("projectdiscovery/nuclei", "latest", "sha256:e677842fb1f50f29747565ba274a1d35dcf8c684132a42b0cb406e71fccae9fc"),  # same image, TCP templates
     # --- Cloud container (Task 12) ---
-    "prowler": ImageRef("toniblyx/prowler", "latest", ""),  # digest TBD (A2)
-    "trivy": ImageRef("aquasec/trivy", "latest", ""),  # digest TBD (A2)
-    "kube_bench": ImageRef("aquasec/kube-bench", "latest", ""),  # digest TBD (A2)
-    "checkov": ImageRef("bridgecrew/checkov", "latest", ""),  # digest TBD (A2)
-    "scoutsuite": ImageRef("nccgroup/scoutsuite", "latest", ""),  # digest TBD (A2)
+    "prowler": ImageRef("toniblyx/prowler", "latest", ""),  # digest TBD: pull stalled (China mirror slow/intermittent)
+    "trivy": ImageRef("aquasec/trivy", "latest", "sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"),
+    "kube_bench": ImageRef("aquasec/kube-bench", "latest", ""),  # digest TBD: pull stalled (China mirror slow/intermittent)
+    "checkov": ImageRef("bridgecrew/checkov", "latest", "sha256:c64ffb6d6fc8087c896341a2c697770a04a1cf558db04fa7b8129d8ca6bce336"),
+    "scoutsuite": ImageRef("nccgroup/scoutsuite", "latest", ""),  # digest TBD: pull failed (mirror 403 Forbidden)
     # --- Targets (E2E) ---
     "juice_shop": ImageRef("bkimminich/juice-shop", "latest", "sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a"),
     "httpbin": ImageRef("kennethreitz/httpbin", "latest", "sha256:599fe5e5073102dbb0ee3dbb65f049dab44fa9fc251f6835c9990f8fb196a72b"),

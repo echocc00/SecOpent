@@ -27,6 +27,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 
 _PARSER_ENTRYPOINT = "secopent_adapters.trivy:parse"
 _ADAPTER_VERSION = "1.0.0"
@@ -59,6 +60,8 @@ def manifest() -> AdapterManifest:
     risk_class=PASSIVE - it reads container images / IaC files / filesystems
     and never sends traffic to user workloads.
     """
+    _image = IMAGE_CATALOG.get("trivy")
+    _digest = _image.digest if _image and _image.digest else "sha256:trivy-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="trivy",
         version=_ADAPTER_VERSION,
@@ -68,7 +71,7 @@ def manifest() -> AdapterManifest:
             name="trivy",
             url="https://github.com/aquasecurity/trivy",
             version=_UPSTREAM_VERSION,
-            digest="sha256:trivy-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.PASSIVE,
         coverage_domain=(CoverageDomain.CLOUD,),

@@ -25,6 +25,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 
 _PARSER_ENTRYPOINT = "secopent_adapters.checkov:parse"
 _ADAPTER_VERSION = "1.0.0"
@@ -80,6 +81,8 @@ def manifest() -> AdapterManifest:
     checkov is MIT-licensed (no GPL marker / independent_process flag needed).
     risk_class=PASSIVE - it parses IaC files, never sends traffic.
     """
+    _image = IMAGE_CATALOG.get("checkov")
+    _digest = _image.digest if _image and _image.digest else "sha256:checkov-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="checkov",
         version=_ADAPTER_VERSION,
@@ -89,7 +92,7 @@ def manifest() -> AdapterManifest:
             name="checkov",
             url="https://github.com/bridgecrewio/checkov",
             version=_UPSTREAM_VERSION,
-            digest="sha256:checkov-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.PASSIVE,
         coverage_domain=(CoverageDomain.CLOUD,),

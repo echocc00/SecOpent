@@ -10,6 +10,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 from secopent.integrations.adapters._common import safe_jsonl_load
 
 _PARSER_ENTRYPOINT = "secopent_adapters.naabu:parse"
@@ -18,6 +19,8 @@ _UPSTREAM_VERSION = "2.3.3"
 
 
 def manifest() -> AdapterManifest:
+    _image = IMAGE_CATALOG.get("naabu")
+    _digest = _image.digest if _image and _image.digest else "sha256:naabu-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="naabu",
         version=_ADAPTER_VERSION,
@@ -27,7 +30,7 @@ def manifest() -> AdapterManifest:
             name="naabu",
             url="https://github.com/projectdiscovery/naabu",
             version=_UPSTREAM_VERSION,
-            digest="sha256:naabu-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.LOW,
         coverage_domain=(CoverageDomain.ASSET,),

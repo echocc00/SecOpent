@@ -51,6 +51,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 
 _PARSER_ENTRYPOINT = "secopent_adapters.scoutsuite:parse"
 _ADAPTER_VERSION = "1.0.0"
@@ -100,6 +101,11 @@ def manifest() -> AdapterManifest:
     ``permissions``. risk_class=PASSIVE - it reads cloud config APIs, never
     sends traffic to user workloads.
     """
+    _image = IMAGE_CATALOG.get("scoutsuite")
+    _digest = (
+        _image.digest if _image and _image.digest
+        else "sha256:scoutsuite-" + _UPSTREAM_VERSION
+    )
     return AdapterManifest(
         id="scoutsuite",
         version=_ADAPTER_VERSION,
@@ -109,7 +115,7 @@ def manifest() -> AdapterManifest:
             name="ScoutSuite",
             url="https://github.com/nccgroup/ScoutSuite",
             version=_UPSTREAM_VERSION,
-            digest="sha256:scoutsuite-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.PASSIVE,
         coverage_domain=(CoverageDomain.CLOUD,),

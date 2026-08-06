@@ -26,6 +26,7 @@ from secopent.domain.adapters.contracts import (
     Severity,
 )
 from secopent.domain.policy.models import RiskClass
+from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 
 _PARSER_ENTRYPOINT = "secopent_adapters.zap:parse"
 _ADAPTER_VERSION = "1.0.0"
@@ -68,6 +69,8 @@ def manifest() -> AdapterManifest:
     Lite engagements) via the `permissions` tuple. The AdapterRunner /
     profile selector reads this marker to gate ZAP out of Lite runs.
     """
+    _image = IMAGE_CATALOG.get("zap")
+    _digest = _image.digest if _image and _image.digest else "sha256:zap-" + _UPSTREAM_VERSION
     return AdapterManifest(
         id="zap",
         version=_ADAPTER_VERSION,
@@ -77,7 +80,7 @@ def manifest() -> AdapterManifest:
             name="zap",
             url="https://github.com/zaproxy/zaproxy",
             version=_UPSTREAM_VERSION,
-            digest="sha256:zap-" + _UPSTREAM_VERSION,
+            digest=_digest,
         ),
         risk_class=RiskClass.ACTIVE,
         coverage_domain=(CoverageDomain.WEB,),
