@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-06
+
 `Schema: yes | Deps: no | Breaking: no` - M5 里程碑：容器加固 + 真实 peer 后端 +
 真实 E2E。handoff roadmap Phase 2 全部落地的代码层；v0.2.x 的 "wired but degraded"
 特性在 M5 变为 fully operational。Phase 2 共 9 个提交（2.1-2.10），新增 61 个测试
