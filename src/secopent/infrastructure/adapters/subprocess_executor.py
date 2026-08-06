@@ -12,10 +12,13 @@ Security guarantees enforced here:
 - **non-root**: ``--user 65532:65532``;
 - **no capabilities**: ``--cap-drop ALL``;
 - **read-only rootfs**: ``--read-only`` with a ``noexec,nosuid`` tmpfs at /tmp;
-- **seccomp**: Docker's **default** profile is in effect (never
-  ``seccomp=unconfined``); ~60 dangerous syscalls blocked. No custom profile
-  is shipped (W2-B honesty: the M2 "custom seccomp profile" claim is deferred
-  until a curated whitelist is validated against all adapters);
+- **seccomp**: Docker's **default** profile is in effect by default (never
+  ``seccomp=unconfined``); ~60 dangerous syscalls blocked. An OPTIONAL curated
+  denylist profile (:data:`SECCOPENT_SECCOMP_PROFILE`) can be applied via the
+  ``seccomp_profile`` parameter (M5 Phase 2.5); it is STRICTLY ADDITIVE
+  hardening (additional denies for bpf/keyctl/clone3/etc. on top of Docker's
+  default). Per-adapter strace-based allowlist tightening is Linux-only and
+  DEFERRED;
 - **resource limits**: ``--memory`` / ``--cpus``;
 - **network**: option c bridge (see ``egress/network_policy.py``) - scope is
   enforced at the application layer (EgressGuard) + host-level nftables
@@ -39,6 +42,20 @@ from .base import ContainerResult
 # Conventional mount destinations (the AdapterRunner uses /in and /out; the A2
 # integration tests and real tools use /work/input and /work/output).
 _OUTPUT_KEYS = ("/work/output", "/out")
+
+# Path to the curated seccomp denylist profile (M5 Phase 2.5). STRICTLY ADDITIVE
+# hardening on top of Docker's default profile: applies additional SCMP_ACT_ERRNO
+# denies for high-risk syscalls (bpf, keyctl, clone3, ptrace, mount, unshare,
+# setns, ...). None of these denies remove a syscall Docker's default already
+# blocks, so applying this profile cannot regress adapter compatibility.
+#
+# Resolved relative to the repo root (the file ships at
+# ``scripts/provision/secopent-seccomp.json``). The production runner factory
+# (RealScanRunner / production wiring) may pass this to ``run(seccomp_profile=)``
+# to opt in; tests do NOT force it on (the file is absent from the test CWD and
+# forcing it would break without the profile present). Per-adapter strace-based
+# allowlist tightening is Linux-only and DEFERRED.
+SECCOPENT_SECCOMP_PROFILE = Path("scripts/provision/secopent-seccomp.json")
 
 
 class ImageDigestMismatch(DomainError):
@@ -102,6 +119,7 @@ class SubprocessContainerExecutor:
         extra_labels: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         network_namespace: str | None = None,
+        seccomp_profile: str | None = None,
     ) -> ContainerResult:
         """Verify the digest, run the container, and capture its output.
 
@@ -125,11 +143,20 @@ class SubprocessContainerExecutor:
         and Docker rejects per-container --add-host under
         --network=container:). Callers obtain the sidecar name from
         :class:`~secopent.infrastructure.egress.netns_isolator.NetnsHandle`.
+
+        ``seccomp_profile``: M5 Phase 2.5 - path to a curated seccomp profile
+        JSON applied via ``--security-opt seccomp=<path>``. ``None`` (default)
+        leaves Docker's default profile in effect (no regression). When set to
+        :data:`SECCOPENT_SECCOMP_PROFILE` (or any path), the profile MUST exist
+        at run time (Docker fails the container otherwise). The production
+        runner factory opts in; tests pass ``None`` so they do not require the
+        file to be present in the test working directory.
         """
         self._verify_digest(image_digest)
         args = self._build_args(
             image_digest, command, mounts, network_policy, resource_limits,
             capabilities, extra_labels or {}, env or {}, network_namespace,
+            seccomp_profile,
         )
         artifacts_dir = self._artifacts_dir(mounts)
         try:
@@ -190,6 +217,7 @@ class SubprocessContainerExecutor:
         extra_labels: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
         network_namespace: str | None = None,
+        seccomp_profile: str | None = None,
     ) -> list[str]:
         args = [
             self._docker,
@@ -233,6 +261,11 @@ class SubprocessContainerExecutor:
         # explicitly requested caps are restored, never a broad set.
         for cap in capabilities:
             args += ["--cap-add", cap]
+        # M5 Phase 2.5: optional curated seccomp profile (STRICTLY ADDITIVE
+        # denylist on top of Docker's default). None = Docker default (no
+        # regression). When set, Docker requires the file to exist at run time.
+        if seccomp_profile is not None:
+            args += ["--security-opt", f"seccomp={seccomp_profile}"]
         args += [
             "--read-only",
             "--tmpfs",

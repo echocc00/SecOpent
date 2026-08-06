@@ -1,0 +1,52 @@
+{
+  "_comment": "SecOpent curated seccomp profile (M5 Phase 2.5). Strategy: denylist (defaultAction=SCMP_ACT_ALLOW) with explicit SCMP_ACT_ERRNO denies for high-risk syscalls. This is STRICTLY ADDITIVE hardening on top of Docker's default profile (~60 syscalls blocked): we additionally deny bpf, keyctl, open_by_handle_at, clone3, and others that Docker's default still permits. An allowlist (~300 syscalls) was rejected because (a) strace-based per-adapter syscall collection is Linux-only and DEFERRED (cannot validate on Windows), and (b) a missing syscall would silently break adapter compatibility. The denylist cannot regress adapters: any syscall not in the denylist behaves exactly as Docker's default. To tighten further, run `strace -ff -e trace=%file,%network,%process <adapter>` on Linux per adapter and convert this to an allowlist. Apply with: docker run --security-opt seccomp=scripts/provision/secopent-seccomp.json",
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "defaultErrnoRet": 1,
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_X32"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "bpf",
+        "keyctl",
+        "add_key",
+        "request_key",
+        "mount",
+        "umount2",
+        "reboot",
+        "kexec_load",
+        "kexec_file_load",
+        "open_by_handle_at",
+        "unshare",
+        "setns",
+        "clone3",
+        "io_uring_setup",
+        "io_uring_enter",
+        "io_uring_register",
+        "acct",
+        "swapon",
+        "swapoff",
+        "pivot_root",
+        "chroot",
+        "nfsservctl",
+        "iopl",
+        "ioperm",
+        "kcmp",
+        "lookup_dcookie",
+        "perf_event_open",
+        "personality",
+        "process_vm_readv",
+        "process_vm_writev",
+        "settimeofday",
+        "stime",
+        "vmsplice"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
+    }
+  ]
+}
