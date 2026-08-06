@@ -25,6 +25,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -60,7 +61,16 @@ from ...infrastructure.egress.egress_guard import EgressGuard
 from ...infrastructure.egress.netns_isolator import NetnsIsolator
 from ...infrastructure.egress.nft_scope import NftScopeEnforcer, SocketDnsResolver
 from ...infrastructure.evidence_store.redaction import RedactionEngine
+from ...infrastructure.llm import LLMError
+from ...infrastructure.llm.config import load_backend_from_config
 from ...infrastructure.llm.null_backend import NullModelBackend
+from ...infrastructure.llm.ollama_backend import (
+    DEFAULT_ENDPOINT as _OLLAMA_DEFAULT_ENDPOINT,
+)
+from ...infrastructure.llm.ollama_backend import (
+    DEFAULT_MODEL as _OLLAMA_DEFAULT_MODEL,
+)
+from ...infrastructure.llm.ollama_backend import OllamaBackend
 from ...infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
 from ...infrastructure.logging_setup import configure_logging
 from ...infrastructure.observability.context import install_request_context
@@ -254,6 +264,76 @@ def _load_or_create_audit_keys() -> AuditKeyManager:
                 os.chmod(key_path, 0o600)
         return keys
     return AuditKeyManager()
+
+
+def _build_llm_backend(config_path: Path | None = None) -> ModelBackend:
+    """Select the governed LLM backend (v0.5.0 Phase 3, 3.4+3.5, errata E4).
+
+    Precedence: ``SECOPTENT_LLM_BACKEND`` env override (remote/ollama/null)
+    > the config file's ``backend:`` field > the legacy ``MINIMAX_API_KEY``
+    fallback > the null backend. The config file is ``SECOPTENT_LLM_CONFIG``
+    or ``config/llm.yaml`` (CWD-relative; deployments should set the env var
+    since the working directory is not guaranteed).
+
+    Misconfiguration never breaks boot: the gateway degrades to the null
+    backend with a warning, and the deterministic layer's result stands.
+    """
+    logger = logging.getLogger("secopent.llm")
+    override = os.environ.get("SECOPTENT_LLM_BACKEND", "").strip().lower()
+    if override not in {"", "remote", "ollama", "null"}:
+        logger.warning("SECOPTENT_LLM_BACKEND=%r unsupported; ignoring", override)
+        override = ""
+    path = config_path or Path(
+        os.environ.get("SECOPTENT_LLM_CONFIG", "config/llm.yaml")
+    )
+
+    data: dict[str, Any] | None = None
+    if path.is_file():
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = loaded if isinstance(loaded, dict) else None
+        except (OSError, yaml.YAMLError) as exc:
+            logger.warning("LLM config %s unreadable (%s); ignoring", path, exc)
+
+    if data is not None:
+        config_backend = str(data.get("backend", "remote"))
+        backend = override or config_backend
+        if backend == "null":
+            return NullModelBackend()
+        if backend == "ollama":
+            if config_backend == "ollama":
+                endpoint = str(data.get("endpoint", "") or "") or _OLLAMA_DEFAULT_ENDPOINT
+                model = str(data.get("model", "") or "") or _OLLAMA_DEFAULT_MODEL
+                return OllamaBackend(endpoint=endpoint, model=model)
+            return OllamaBackend()  # env override; config describes another backend
+        if backend == "remote" and config_backend == "remote":
+            try:
+                return load_backend_from_config(path)
+            except LLMError as exc:
+                logger.warning(
+                    "LLM remote backend unusable (%s); degrading to null", exc
+                )
+                return NullModelBackend()
+        if backend != "remote":
+            logger.warning(
+                "unsupported LLM backend %r in %s; degrading to null", backend, path
+            )
+            return NullModelBackend()
+        # remote override over a non-remote config -> legacy env defaults below.
+
+    # No usable config file (or remote override mismatch): legacy env-driven
+    # defaults keep pre-v0.5.0 deployments (MINIMAX_API_KEY) working.
+    if override == "ollama":
+        return OllamaBackend()
+    if override == "null":
+        return NullModelBackend()
+    if os.environ.get("MINIMAX_API_KEY"):
+        return RemoteOpenAICompatibleBackend(
+            endpoint="https://api.minimax.chat/v1",
+            api_key_env="MINIMAX_API_KEY",
+            model="abab6.5s-chat",
+        )
+    return NullModelBackend()
 
 
 def _register_api(app: FastAPI) -> None:
@@ -491,18 +571,12 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         verifier_factory=verifier_factory,
     )
 
-    # Governed LLM gateway (§3.3): MiniMax when MINIMAX_API_KEY is set, else a
-    # null backend so LLM-assisted endpoints degrade to their deterministic
-    # path. The LLM only ever proposes/drafts - the deterministic layer decides.
-    llm_backend: ModelBackend
-    if os.environ.get("MINIMAX_API_KEY"):
-        llm_backend = RemoteOpenAICompatibleBackend(
-            endpoint="https://api.minimax.chat/v1",
-            api_key_env="MINIMAX_API_KEY",
-            model="abab6.5s-chat",
-        )
-    else:
-        llm_backend = NullModelBackend()
+    # Governed LLM gateway (§3.3; v0.5.0 Phase 3, 3.4+3.5): backend selection
+    # is config-driven (config/llm.yaml or SECOPTENT_LLM_CONFIG) with an env
+    # override and a legacy MINIMAX_API_KEY fallback; misconfiguration
+    # degrades to the null backend, never a broken boot. The LLM only ever
+    # proposes/drafts - the deterministic layer decides.
+    llm_backend = _build_llm_backend()
     app.state.model_gateway = RemoteModelGateway(
         local_backend=llm_backend, redactor=RedactionEngine()
     )

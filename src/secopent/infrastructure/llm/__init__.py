@@ -5,12 +5,13 @@ Per design §12.8 (RemoteModelGateway) + §12.11 (LLM operational constraints):
 - Data classification: Secret never sent, Restricted denied, Sensitive redacted.
 - Budget/rate limits + degradation: remote -> local -> stop agent (keep catalog).
 
-This module defines the LLMBackend Protocol (interface) and a remote
-OpenAI-compatible backend. A local backend (Ollama/vLLM) is left as a stub
-for later implementation - the Protocol is the integration point.
+This module defines the LLMBackend Protocol (interface), a remote
+OpenAI-compatible backend, and a local Ollama backend (v0.5.0 Phase 3, 3.4).
 
 Decision (Phase A): use remote large model (MiniMax/DeepSeek/Claude/GPT) as
-primary; local model interface reserved for later.
+primary; since v0.5.0 the backend is config-driven (config/llm.yaml,
+``backend: remote | ollama | null``) with a local Ollama option for
+air-gapped / cost-sensitive deployments.
 """
 from __future__ import annotations
 
@@ -30,11 +31,12 @@ class LLMResponse:
 
 
 class LLMBackend(Protocol):
-    """Interface for LLM backends (remote or local, implemented later).
+    """Interface for LLM backends (remote or local).
 
     Implementations:
     - RemoteOpenAICompatibleBackend: any OpenAI-compatible API (MiniMax/DeepSeek/Qwen/Claude/GPT)
-    - LocalOllamaBackend: STUB - reserved for later (Phase B+), not implemented in Phase A
+    - OllamaBackend: a locally running ``ollama serve`` (v0.5.0 Phase 3, 3.4)
+    - NullModelBackend: offline no-op fallback (application layer)
     """
 
     def generate(

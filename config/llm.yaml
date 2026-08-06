@@ -1,7 +1,11 @@
-# SecOpent LLM backend configuration (Phase A Task A1, Step 5)
+# SecOpent LLM backend configuration (Phase A Task A1, Step 5;
+# v0.5.0 Phase 3: backend selection is driven by the `backend:` field below,
+# overridable via SECOPTENT_LLM_BACKEND; point SECOPTENT_LLM_CONFIG at this
+# file when the process working directory is not the repo root).
 #
-# Decision: remote large model as primary (MiniMax/DeepSeek/etc.).
-# Local model (Ollama) reserved as interface for later (Phase B+).
+# backend: remote  - any OpenAI-compatible API (needs the api_key_env var set)
+# backend: ollama  - a locally running `ollama serve` (no key, no cloud egress)
+# backend: null    - offline no-op (deterministic paths only)
 #
 # Pick ONE provider and set its API key env var. Examples below.
 # The RemoteOpenAICompatibleBackend works with any OpenAI-compatible API.
@@ -21,6 +25,12 @@ temperature: 0.2
 # model: deepseek-chat
 # max_tokens: 2048
 # temperature: 0.2
+
+# --- Local Ollama alternative (v0.5.0 Phase 3, air-gapped / no API key) ---
+# Operator setup: install Ollama, `ollama serve`, `ollama pull llama3.1:8b`.
+# backend: ollama
+# endpoint: http://localhost:11434
+# model: llama3.1:8b
 
 # --- Qwen/通义 alternative ---
 # backend: remote
