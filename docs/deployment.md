@@ -93,7 +93,7 @@ secopent restore --db <sqlite文件> --from <备份文件>
 - [ ] 数据库换持久路径或 PG（替换默认 temp SQLite）
 - [ ] SecretStore 接稳定 Fernet key + 持久后端（如需跨重启保留密钥）
 - [ ] Oracle 复证已接线（W3-A）：`SECOPTENT_NUCLEI_TEMPLATE_DIR` 指向复证用模板目录，`SECOPTENT_SCAN_TIMEOUT` 覆盖复证超时（与扫描同源；oracle 在 assessment correlation 后 best-effort 运行，失败不阻塞完成）
-- [ ] OOB canary 复证生效（W4-C）：`SECOPTENT_INTERACTSH_SERVER_URL` 指向自建 interactsh-server（见 `scripts/provision/docker-compose.interactsh.yml`）；设置后用 `HttpInteractshTransport`，OOB 类发现（`oob_window_seconds>0`）经 canary 回调复证。未设则 OOB 降级为 Null（回退子串匹配）。生产 scan_kwargs 已嵌 `{{canary_oob_subdomain}}` 占位符；echo（`{{canary_token}}`）占位符待按方法粒度门控后启用
+- [ ] OOB canary 复证生效（W4-C）：`SECOPTENT_INTERACTSH_SERVER_URL` 指向自建 interactsh-server（部署 + 验证见 [`docs/deployment/interactsh.md`](deployment/interactsh.md)，compose 在 `scripts/provision/docker-compose.interactsh.yml`）；设置后用 `HttpInteractshTransport`，OOB 类发现（`oob_window_seconds>0`）经 canary 回调复证。未设则 OOB 降级为 Null（回退子串匹配）。生产 scan_kwargs 已嵌 `{{canary_oob_subdomain}}` 占位符；echo（`{{canary_token}}`）占位符待按方法粒度门控后启用。**端口**：HTTP `8081`（内网；HTTPS 8444 因 `oast.local` 无法签发公网证书而禁用）
 - [ ] 签名密钥轮换流程演练（rotate 后旧签可验、新签可用）
 - [ ] `secopent backup` 定时 + 恢复 round-trip 验证
 - [ ] 审计链启用 HMAC（防篡改要求时）

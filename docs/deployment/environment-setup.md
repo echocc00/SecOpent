@@ -85,18 +85,26 @@ Stop: `docker compose -f scripts/provision/docker-compose.targets.yml down`
 
 ## 5. Self-hosted Interactsh OOB
 
+> 完整部署 + 验证指南见 [`docs/deployment/interactsh.md`](interactsh.md)。
+> 本节为快速启动；端口订正、HTTPS 限制、公网部署等细节见该文档。
+
 ```bash
 docker compose -f scripts/provision/docker-compose.interactsh.yml up -d
 ```
 
 DNS setup (intranet testing):
 - Add to `C:\Windows\System32\drivers\etc\hosts`: `127.0.0.1  oast.local`
-- For wildcard `*.oast.local`, use a local DNS resolver or configure system DNS to 127.0.0.1
+- For wildcard `*.oast.local`, use a local DNS resolver or configure system DNS to 127.0.0.1:5300
 
-Verify:
+Verify (HTTP callback endpoint; 8444/HTTPS is disabled for `oast.local` intranet):
 ```bash
 docker ps | grep secopent-interactsh
-curl -s http://localhost:8081/   # HTTP callback endpoint
+curl -s http://localhost:8081/ | head -1   # -> <h1> Interactsh Server </h1>
+```
+
+Set the env var so SecOpent uses the real transport:
+```bash
+export SECOPTENT_INTERACTSH_SERVER_URL=http://localhost:8081
 ```
 
 Public deployment (later): point a real domain's NS to this host, use `-domain <your.domain>`.
