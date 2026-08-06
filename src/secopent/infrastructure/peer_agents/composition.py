@@ -22,6 +22,7 @@ from ...domain.peer_agents.models import (
     PeerAgentTrustLevel,
 )
 from ...domain.peer_agents.registry import PeerAgentRegistry
+from ..adapters.image_catalog import ImageRef
 from ..adapters.subprocess_executor import SubprocessContainerExecutor
 from .harness import ContainerPeerAgentHarness, PeerAgentBackend
 from .image_catalog import PEER_IMAGE_CATALOG
@@ -40,10 +41,23 @@ SHANNON_DEFAULT_BUDGET = PeerAgentBudget(
 )
 
 
+def _image_ref(image: ImageRef | None) -> str:
+    """Resolve an image catalog entry to a docker-pullable reference.
+
+    Digest-pinned (``name@sha256:...``) when a digest is recorded; falls back
+    to tag-only (``name:tag``) when the digest is empty - the executor's
+    digest check skips tag-only refs (no ``@``), so locally-built images work
+    until a registry push records a digest to pin.
+    """
+    if image is None:
+        return ""
+    if image.digest:
+        return f"{image.name}@{image.digest}"
+    return f"{image.name}:{image.tag}"
+
+
 def strix_descriptor() -> PeerAgentDescriptor:
     """Build the strix descriptor from the pinned image catalog entry."""
-    image = PEER_IMAGE_CATALOG.get("strix")
-    digest = f"{image.name}@{image.digest}" if image and image.digest else ""
     return PeerAgentDescriptor(
         name="strix",
         version=STRIX_VERSION,
@@ -52,14 +66,12 @@ def strix_descriptor() -> PeerAgentDescriptor:
         capabilities=("web", "api"),
         cost_class="llm_tokens",
         default_budget=STRIX_DEFAULT_BUDGET,
-        image_digest=digest,
+        image_digest=_image_ref(PEER_IMAGE_CATALOG.get("strix")),
     )
 
 
 def shannon_descriptor() -> PeerAgentDescriptor:
     """Build the shannon descriptor from the image catalog entry."""
-    image = PEER_IMAGE_CATALOG.get("shannon")
-    digest = f"{image.name}@{image.digest}" if image and image.digest else ""
     return PeerAgentDescriptor(
         name="shannon",
         version=SHANNON_VERSION,
@@ -68,7 +80,7 @@ def shannon_descriptor() -> PeerAgentDescriptor:
         capabilities=("web", "whitebox"),
         cost_class="llm_tokens",
         default_budget=SHANNON_DEFAULT_BUDGET,
-        image_digest=digest,
+        image_digest=_image_ref(PEER_IMAGE_CATALOG.get("shannon")),
     )
 
 

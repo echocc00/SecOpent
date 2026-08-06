@@ -15,6 +15,7 @@ Serving modes:
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -500,21 +501,55 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         local_backend=llm_backend, redactor=RedactionEngine()
     )
 
-    # Peer agents (W4-A T5): opt-in via SECOPTENT_PEER_AGENTS_ENABLED. Uses
-    # NullPeerAgentHarness until strix/shannon image digests are pinned - the
-    # service is constructible and the API returns empty outcomes instead of
-    # 500ing; swap to the real ContainerPeerAgentHarness (via the factory's
-    # harness=None default) once images are built. The audit recorder is
-    # session-factory-backed so the singleton service never holds one session.
+    # Peer agents (W4-A T5; Phase 2.2 real backends): opt-in via
+    # SECOPTENT_PEER_AGENTS_ENABLED. When an LLM_API_KEY is configured the
+    # factory wires the real ContainerPeerAgentHarness (strix registered by
+    # default; shannon opt-in via SECOPTENT_ENABLE_SHANNON +
+    # SECOPTENT_SHANNON_REPO + ANTHROPIC_API_KEY). When LLM_API_KEY is absent
+    # the service still constructs but degrades to NullPeerAgentHarness with a
+    # warning - peer launches would otherwise KeyError at call time. The audit
+    # recorder is session-factory-backed so the singleton service never holds
+    # one session.
     if os.environ.get("SECOPTENT_PEER_AGENTS_ENABLED") == "1":
-        app.state.peer_agent_service = create_peer_agent_service(
-            audit=DatabaseAuditRecorder(app.state.db),
-            runs=InMemoryPeerRunRepository(),
-            llm_provider=os.environ.get("SECOPTENT_PEER_LLM", "openai/gpt-4o-mini"),
-            secret_lookup={"LLM_API_KEY": os.environ.get("LLM_API_KEY", "")},
-            workdir_root=Path(os.environ.get("SECOPTENT_PEER_WORKDIR", "./peer_work")),
-            harness=NullPeerAgentHarness(),
-        )
+        _peer_logger = logging.getLogger("secopent.peer_agents")
+        _llm_key = os.environ.get("LLM_API_KEY", "")
+        if _llm_key:
+            _shannon_repo_env = os.environ.get("SECOPTENT_SHANNON_REPO", "")
+            _shannon_repo = Path(_shannon_repo_env) if _shannon_repo_env else None
+            app.state.peer_agent_service = create_peer_agent_service(
+                audit=DatabaseAuditRecorder(app.state.db),
+                runs=InMemoryPeerRunRepository(),
+                llm_provider=os.environ.get(
+                    "SECOPTENT_PEER_LLM", "openai/gpt-4o-mini"
+                ),
+                secret_lookup={
+                    "LLM_API_KEY": _llm_key,
+                    "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
+                },
+                workdir_root=Path(
+                    os.environ.get("SECOPTENT_PEER_WORKDIR", "./peer_work")
+                ),
+                enable_shannon=os.environ.get("SECOPTENT_ENABLE_SHANNON") == "true",
+                shannon_repo_path=_shannon_repo,
+            )
+        else:
+            _peer_logger.warning(
+                "SECOPTENT_PEER_AGENTS_ENABLED=1 but LLM_API_KEY is unset; "
+                "falling back to NullPeerAgentHarness (peer launches return "
+                "empty outcomes). Set LLM_API_KEY to enable real backends."
+            )
+            app.state.peer_agent_service = create_peer_agent_service(
+                audit=DatabaseAuditRecorder(app.state.db),
+                runs=InMemoryPeerRunRepository(),
+                llm_provider=os.environ.get(
+                    "SECOPTENT_PEER_LLM", "openai/gpt-4o-mini"
+                ),
+                secret_lookup={"LLM_API_KEY": ""},
+                workdir_root=Path(
+                    os.environ.get("SECOPTENT_PEER_WORKDIR", "./peer_work")
+                ),
+                harness=NullPeerAgentHarness(),
+            )
     else:
         app.state.peer_agent_service = None
 

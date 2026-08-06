@@ -11,10 +11,23 @@ from __future__ import annotations
 from ..adapters.image_catalog import ImageRef
 
 PEER_IMAGE_CATALOG: dict[str, ImageRef] = {
-    # Digest pinned after first build; verify with `docker images --digests`.
-    "strix": ImageRef("secopent/peer-worker-strix", "1.4.1", ""),
-    # P3: Shannon (AGPL-3.0). Digest to be pinned after first pull:
-    #   docker pull keygraph/shannon:latest
-    #   docker images --digests keygraph/shannon
-    "shannon": ImageRef("keygraph/shannon", "latest", ""),
+    # Locally built: `docker build -t secopent/peer-worker-strix:1.4.1 -f
+    # worker_images/strix/Dockerfile worker_images/strix/`. Digest is the
+    # local manifest-list digest (docker images --digests); pin it here so the
+    # executor's digest check enforces the exact local build. Re-pin after any
+    # rebuild or registry push (supply-chain §8.1).
+    "strix": ImageRef(
+        "secopent/peer-worker-strix",
+        "1.4.1",
+        "sha256:cdd9bac04730bd718a7cbddf68dd8d1a5f7ca7e0c10247f11fd6b61a666e2b71",
+    ),
+    # P3: Shannon (AGPL-3.0). Pulled from Docker Hub (keygraph/shannon);
+    # ghcr.io/keygraph/shannon is denied. Digest pinned after first successful
+    # pull (supply-chain §8.1). Shannon stays registered-behind-flag
+    # (enable_shannon, default off); re-pin after upgrades.
+    "shannon": ImageRef(
+        "keygraph/shannon",
+        "latest",
+        "sha256:0d7d462981bdf7829099c363df827a6607426f765493c6ef2403602c7ed45b07",
+    ),
 }

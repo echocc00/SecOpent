@@ -19,7 +19,11 @@ from secopent.interfaces.api.main import create_app
 @pytest.fixture
 def client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("SECOPTENT_PEER_AGENTS_ENABLED", "1")
-    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    # No LLM_API_KEY -> composition root falls back to NullPeerAgentHarness
+    # (with a warning), keeping this a pure wiring test: no real Docker or
+    # peer images are invoked. Set LLM_API_KEY in a real deployment to switch
+    # to ContainerPeerAgentHarness.
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     from secopent.infrastructure.db.sqlite import create_sqlite_engine
 
     engine = create_sqlite_engine(tmp_path / "w4a6.db")
