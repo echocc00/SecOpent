@@ -14,15 +14,23 @@ This is the recommended approach because the Docker daemon itself does not run
 inside a netns, so ``nsenter``-based approaches are fragile. ``destroy()``
 removes both the sidecar container and the netns.
 
-``is_supported()`` remains Linux-only: ``ip netns`` and ``--network=container``
-netns sharing are Linux features. On Windows / macOS all netns paths skip
-cleanly (callers gate on ``is_supported()``).
+v0.5.1 F1 (NAS incident): ``is_supported()`` no longer trusts ``sys.platform``
+alone - restricted Linux kernels (UGREEN/Synology/QNAP NAS) report Linux but
+lack full ``ip netns`` support. It now probes ``ip netns add/del`` once
+(cached) and honors ``SECOPTENT_NETNS_ENABLED=0`` to force it off. v0.5.1 F3:
+``create()`` self-cleans on partial failure so a half-bound sidecar/netns pair
+is never left behind (the caller can only destroy a returned handle).
 """
 from __future__ import annotations
 
+import contextlib
+import logging
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+
+_logger = logging.getLogger(__name__)
 
 # Command runner: argv list -> None (raises CalledProcessError on failure).
 # Used for both ``ip`` and ``docker`` invocations (Phase 2.3 sidecar).
@@ -75,41 +83,58 @@ class NetnsIsolator:
         self._runner = runner or _default_runner
         self._prefix = prefix
         self._sidecar_prefix = sidecar_prefix
+        # v0.5.1 F1: one-shot capability-probe result (None = not yet probed).
+        self._capability_cache: bool | None = None
 
     def create(
         self, assessment_id: str, *, with_sidecar: bool = True
     ) -> NetnsHandle:
-        """Create a netns named ``<prefix><assessment_id>`` (idempotent on Linux).
+        """Create a netns named ``<prefix><assessment_id>``.
 
-        When ``with_sidecar`` is True (default, Phase 2.3), additionally start
-        a sidecar container ``<sidecar_prefix><assessment_id>`` with
-        ``--network=none`` and move its network namespace into the named netns.
-        The returned handle carries the sidecar name so callers can wire
+        ``ip netns add`` FAILS if a netns with the same name already exists -
+        it is not idempotent. When ``with_sidecar`` is True (default,
+        Phase 2.3), additionally start a sidecar container
+        ``<sidecar_prefix><assessment_id>`` with ``--network=none`` and move
+        its network namespace into the named netns. The returned handle
+        carries the sidecar name so callers can wire
         ``--network=container:<sidecar>`` on scan containers.
+
+        v0.5.1 F3: if any step after the netns is created fails, the
+        half-bound sidecar container + netns are torn down before re-raising
+        - the caller can only destroy a returned handle, so create() must
+        never leave residue behind.
         """
         name = self._netns_name(assessment_id)
         self._runner(["ip", "netns", "add", name])
         if not with_sidecar:
             return NetnsHandle(name=name, sidecar="")
         sidecar = self._sidecar_name(assessment_id)
-        # Start sidecar with --network=none so it has an isolated, empty netns
-        # we then relocate into the named netns. --network=none also prevents
-        # the sidecar from getting a bridge IP (it needs no network of its own;
-        # the scan containers sharing its netns get their IPs/egress policy
-        # from the named netns + nft rules).
-        self._runner(
-            [
-                "docker", "run", "-d", "--name", sidecar,
-                "--network=none", "--restart=no",
-                self._SIDECAR_IMAGE, *self._SIDECAR_COMMAND,
-            ]
-        )
-        # Move the sidecar's netns into the named netns. The sidecar's PID
-        # identifies its current netns; ``ip netns attach <name> <pid>`` makes
-        # the named netns refer to that same namespace. (Equivalent to the
-        # symlink approach: ln -s /proc/<pid>/ns/net /var/run/netns/<name>.)
-        pid = self._inspect_sidecar_pid(sidecar)
-        self._runner(["ip", "netns", "attach", name, pid])
+        try:
+            # Start sidecar with --network=none so it has an isolated, empty netns
+            # we then relocate into the named netns. --network=none also prevents
+            # the sidecar from getting a bridge IP (it needs no network of its own;
+            # the scan containers sharing its netns get their IPs/egress policy
+            # from the named netns + nft rules).
+            self._runner(
+                [
+                    "docker", "run", "-d", "--name", sidecar,
+                    "--network=none", "--restart=no",
+                    self._SIDECAR_IMAGE, *self._SIDECAR_COMMAND,
+                ]
+            )
+            # Move the sidecar's netns into the named netns. The sidecar's PID
+            # identifies its current netns; ``ip netns attach <name> <pid>`` makes
+            # the named netns refer to that same namespace. (Equivalent to the
+            # symlink approach: ln -s /proc/<pid>/ns/net /var/run/netns/<name>.)
+            pid = self._inspect_sidecar_pid(sidecar)
+            self._runner(["ip", "netns", "attach", name, pid])
+        except Exception:
+            # F3: roll back whatever we created before failing.
+            with contextlib.suppress(Exception):
+                self._runner(["docker", "rm", "-f", sidecar])
+            with contextlib.suppress(Exception):
+                self._runner(["ip", "netns", "del", name])
+            raise
         return NetnsHandle(name=name, sidecar=sidecar)
 
     def destroy(self, handle: NetnsHandle) -> None:
@@ -124,8 +149,50 @@ class NetnsIsolator:
         self._runner(["ip", "netns", "del", handle.name])
 
     def is_supported(self) -> bool:
-        """True only on Linux (ip netns is a Linux feature)."""
-        return sys.platform == "linux"
+        """True only on Linux WITH a usable ``ip netns`` (probe, cached).
+
+        v0.5.1 F1: ``sys.platform == "linux"`` alone is not enough - restricted
+        NAS kernels (UGREEN/Synology/QNAP) report Linux but lack full iproute2
+        netns support. The first call probes ``ip netns add/del`` once and
+        caches the result. ``SECOPTENT_NETNS_ENABLED=0`` forces the probe off.
+        """
+        if sys.platform != "linux":
+            return False
+        if os.environ.get("SECOPTENT_NETNS_ENABLED", "1").lower() in {
+            "0", "false", "no",
+        }:
+            return False
+        if self._capability_cache is None:
+            self._capability_cache = self._probe_capability()
+        return self._capability_cache
+
+    def _probe_capability(self) -> bool:
+        """One-shot probe: can ``ip netns add/del`` actually run on this host?"""
+        import subprocess
+
+        probe = f"{self._prefix}probe"
+        try:
+            result = subprocess.run(
+                ["ip", "netns", "add", probe], capture_output=True, timeout=5
+            )
+            if result.returncode != 0:
+                _logger.warning(
+                    "netns capability probe failed: ip netns add returned %s "
+                    "(assessment egress isolation will degrade to the default netns)",
+                    result.returncode,
+                )
+                return False
+            subprocess.run(
+                ["ip", "netns", "del", probe], capture_output=True, timeout=5
+            )
+            return True
+        except (OSError, subprocess.SubprocessError) as exc:
+            _logger.warning(
+                "netns capability probe unavailable: %s "
+                "(assessment egress isolation will degrade to the default netns)",
+                exc,
+            )
+            return False
 
     def _netns_name(self, assessment_id: str) -> str:
         # Sanitize: netns names are filesystem slugs under /var/run/netns/.
