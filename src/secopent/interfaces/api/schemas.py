@@ -181,6 +181,28 @@ class AuditVerifyOut(BaseModel):
     event_count: int
 
 
+# --- Audit chain lifecycle (rotate / GDPR redact, v0.5.0 Phase 3) ---
+class AuditRotateRequest(BaseModel):
+    actor: str
+    actor_role: str = "human"
+
+
+class AuditRedactRequest(BaseModel):
+    event_id: str
+    keys: list[str]
+    actor: str
+    actor_role: str = "human"
+
+
+class AuditChainEventOut(BaseModel):
+    """A signed chain event (id / action / hash commitment / signature)."""
+
+    event_id: str
+    action: str
+    event_hash: str
+    signature: str
+
+
 # --- Drift (AppModel re-import diff) ---
 class DriftRequest(BaseModel):
     states: list[str]

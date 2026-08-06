@@ -82,3 +82,56 @@ def test_store_is_optional_backward_compat() -> None:
     chain.record(actor="a", action="x", resource_type="r", resource_id="1", payload={})
     assert chain.verify() is True
     assert isinstance(_FakeStore(), SignedAuditEventStore)  # Protocol satisfied
+
+
+class _SessionCapturingStore:
+    """Records the ``session`` kwarg each append receives (3.6, v0.5.0)."""
+
+    def __init__(self) -> None:
+        self.rows: list[SignedAuditEvent] = []
+        self.sessions: list[object] = []
+
+    def append(self, signed: SignedAuditEvent, *, session: object = None) -> None:
+        self.sessions.append(session)
+        self.rows.append(signed)
+
+    def load_all(self) -> tuple[SignedAuditEvent, ...]:
+        return tuple(self.rows)
+
+
+def test_rotate_threads_session_to_store() -> None:
+    """rotate(session=...) joins the caller's transaction (3.6)."""
+    store = _SessionCapturingStore()
+    chain = AuditChain(AuditKeyManager(), store=store)
+    chain.record(actor="a", action="x", resource_type="r", resource_id="1", payload={})
+    signed = chain.rotate(session="caller-session")
+    assert signed.event.action == "audit.rotated"
+    assert store.sessions[-1] == "caller-session"
+    assert chain.verify() is True
+
+
+def test_rotate_default_session_none_backward_compat() -> None:
+    store = _SessionCapturingStore()
+    chain = AuditChain(AuditKeyManager(), store=store)
+    chain.record(actor="a", action="x", resource_type="r", resource_id="1", payload={})
+    chain.rotate()
+    assert store.sessions[-1] is None  # store manages its own transaction
+
+
+def test_redact_pii_threads_session_to_store() -> None:
+    store = _SessionCapturingStore()
+    chain = AuditChain(AuditKeyManager(), store=store)
+    signed = chain.record(
+        actor="a", action="scan", resource_type="r", resource_id="1",
+        payload={"email": "u@x"},
+    )
+    chain.redact_pii(signed.event.id, keys=frozenset({"email"}), session="caller-session")
+    assert store.sessions[-1] == "caller-session"
+    assert chain.export(redacted=True)[0].payload["email"] == "[REDACTED:gdpr]"
+
+
+def test_rotate_records_actor() -> None:
+    """The API passes the human actor; default stays audit_chain."""
+    chain = AuditChain(AuditKeyManager())
+    assert chain.rotate(actor="ops-alice").event.actor == "ops-alice"
+    assert chain.rotate().event.actor == "audit_chain"

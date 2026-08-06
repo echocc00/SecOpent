@@ -155,26 +155,47 @@ class AuditChain:
             for s in signed
         )
 
-    def rotate(self) -> SignedAuditEvent:
-        """Rotate the log: the new segment continues from the prior tail."""
+    def rotate(
+        self, *, actor: str = "audit_chain", session: Any = None
+    ) -> SignedAuditEvent:
+        """Rotate the log: the new segment continues from the prior tail.
+
+        ``session`` threads through to the store (v0.5.0 Phase 3, 3.6): with
+        the caller's session the rotation event joins the caller's
+        transaction; without one the store commits in its own short
+        transaction (backward compatible).
+        """
         return self.record(
-            actor="audit_chain",
+            actor=actor,
             action="audit.rotated",
             resource_type="audit_chain",
             resource_id="rotation",
             payload={"previous_chain_tail_hash": self._tail},
+            session=session,
         )
 
-    def redact_pii(self, event_id: str, *, keys: frozenset[str]) -> SignedAuditEvent:
-        """GDPR: mark PII keys redacted; preserve the hash; audit the deletion."""
+    def redact_pii(
+        self,
+        event_id: str,
+        *,
+        keys: frozenset[str],
+        actor: str = "audit_chain",
+        session: Any = None,
+    ) -> SignedAuditEvent:
+        """GDPR: mark PII keys redacted; preserve the hash; audit the deletion.
+
+        ``session`` threads through to the store (v0.5.0 Phase 3, 3.6) so the
+        redaction event joins the caller's transaction.
+        """
         with self._lock:
             self._redactions[event_id] = keys
         return self.record(
-            actor="audit_chain",
+            actor=actor,
             action="gdpr.redacted",
             resource_type="audit_event",
             resource_id=event_id,
             payload={"redacted_event_id": event_id, "keys": sorted(keys)},
+            session=session,
         )
 
     def export(self, *, redacted: bool = False) -> tuple[AuditEvent, ...]:

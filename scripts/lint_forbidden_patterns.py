@@ -71,6 +71,9 @@ SESSION_REQUIRED_RECORD_FILES: frozenset[str] = frozenset({
     "application/oracle_service.py",
     "infrastructure/egress/nft_scope.py",
     "infrastructure/oracle/rescan_verifier.py",
+    # v0.5.0 Phase 3 (3.6): the chain's own lifecycle methods must thread the
+    # caller's session too, else rotate/redact open their own connections.
+    "application/audit_chain.py",
 })
 # execution.py: only ``audit_chain.record`` must thread session=. The
 # AuditService.record call there is bound to the correct session through its
