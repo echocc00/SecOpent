@@ -9,6 +9,62 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+`Schema: yes | Deps: no | Breaking: no` - M5 里程碑：容器加固 + 真实 peer 后端 +
+真实 E2E。handoff roadmap Phase 2 全部落地的代码层；v0.2.x 的 "wired but degraded"
+特性在 M5 变为 fully operational。Phase 2 共 9 个提交（2.1-2.10），新增 61 个测试
+（v0.3.0 基线 1513 -> 1574 passed），零回归。
+
+### Added
+- **适配器 digest pinning**（Phase 2.1）：9 个空 digest 适配器中 4 个真拉取并 pin
+  （restler/schemathesis/trivy/checkov），manifest `upstream.digest` 改为从
+  `IMAGE_CATALOG` 动态读取（不再硬编码占位符 `sha256:<adapter>-<ver>`）。剩余 5 个
+  （fingerprinthub/zap/scoutsuite/prowler/kube_bench）因国内镜像 403/stall 待补，
+  代码就绪，未来拉取成功即自动转绿。
+- **Strix/Shannon 真实 peer 后端**（Phase 2.2）：构建 `secopent/peer-worker-strix`
+  镜像（python:3.12-slim + strix-agent==1.4.1，digest pin）+ 拉取 `keygraph/shannon`
+  镜像（digest pin）；`create_peer_agent_service` 切真实 `ContainerPeerAgentHarness`，
+  无 LLM key 时降级回 `NullPeerAgentHarness` + warning（服务始终可构造）。
+- **Netns sidecar 绑定**（Phase 2.3，Linux）：`NetnsIsolator.create()` 启动 sidecar
+  容器（alpine sleep infinity）绑定命名 netns；扫描容器经 `--network=container:<sidecar>`
+  共享其 network namespace；`--add-host` 在 netns 模式下自动省略。Windows 单测覆盖参数
+  构造，真实 lifecycle 测试 Linux-only skip。
+- **Curated seccomp profile**（Phase 2.5）：`scripts/provision/secopent-seccomp.json`
+  denylist 策略，在 Docker 默认之上额外拒绝 33 个高危 syscall（ptrace/bpf/keyctl/
+  mount/unshare/clone3/io_uring/perf_event_open 等）；执行器 opt-in `seccomp=` 参数。
+- **CI e2e_real job**（Phase 2.6）：`.github/workflows/ci.yml` 新增 e2e-real job，
+  release/workflow_dispatch 触发（PR 不跑），启动 Juice Shop + httpbin + interactsh，
+  跑 `tests/e2e_real/`，失败上传 test-results 产物。
+- **MCP 工具注册表接线**（Phase 2.9）：`tool_registry.py` 已完整但从未挂载 ->
+  `build_default_registry()` 注册只读安全面（list_findings/get_finding/
+  list_required_classes），挂到 `app.state`；safe-surface 守卫测试断言无 shell/docker/
+  python/exec 工具名。
+- **PtaiBackend**（Phase 2.10）：按 P0-P3 PeerAgentBackend 模式实现 ptai peer agent
+  （宽容解析器 + opt-in 注册 `enable_ptai`，Linux-only）；承 A4 spike 决策。
+- **interactsh 部署文档**（Phase 2.4）：`docs/deployment/interactsh.md`，端口修正
+  （HTTP 8081 非 8443；HTTPS 因 `*.oast.local` 拿不到公网证书禁用，intranet OOB 走 HTTP）。
+
+### Changed
+- **RESTler parser 注册**（Phase 2.7）：`_ADAPTER_PARSERS` 此前只注册了 schemathesis，
+  RESTler 资源限制配了但 parser 漏了 -> `RealScanRunner.scan("restler")` 会 ValueError。已修。
+- **Schemathesis parser 增强**（Phase 2.8）：原 parser 只认 fixture JSON，真实 CLI 输出
+  是 NDJSON 事件流混合人类可读进度。增强为三格式兼容（fixture JSON / 纯 NDJSON / 混合 stdout）。
+- **Peer agent harness 降级路径**（Phase 2.2）：无 `LLM_API_KEY` 时回退
+  `NullPeerAgentHarness` + `logging.warning`（比硬抛 KeyError 稳）。
+
+### Fixed
+- RESTler parser 未注册（`real_scan.py` `_ADAPTER_PARSERS` 缺 "restler" 键）- 扫描会直接
+  `ValueError`。
+- Schemathesis parser 与真实 CLI 输出格式脱节（只认 fixture JSON）- 真实扫描解析出 0 发现。
+- interactsh 部署文档端口错误（8443 -> 8081）。
+
+### Known Limitations / Deferred（Linux 验证项）
+- 5 个 adapter digest 待补（fingerprinthub/zap/scoutsuite/prowler/kube_bench，国内镜像
+  403/stall；代码就绪）。
+- netns 真实 lifecycle + seccomp allowlist 收紧 + ptai 真镜像构建/输出 schema 采集 - 均
+  需 Linux worker。
+- RESTler e2e 需 operator 提供 OpenAPI spec + grammar compile（honest-skip，非 fake green）。
+- `GET /catalog/latest` 偶发返回 200-null（已自愈，根因调查中，非本版引入）。
+
 ## [0.3.0] - 2026-08-06
 
 `Schema: yes | Deps: no | Breaking: no` - architecture release: eradicate the
