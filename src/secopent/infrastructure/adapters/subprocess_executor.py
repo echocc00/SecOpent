@@ -101,6 +101,7 @@ class SubprocessContainerExecutor:
         capabilities: Sequence[str] = (),
         extra_labels: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
+        network_namespace: str | None = None,
     ) -> ContainerResult:
         """Verify the digest, run the container, and capture its output.
 
@@ -114,11 +115,21 @@ class SubprocessContainerExecutor:
         ``env``: additional ``--env KEY=VALUE`` pairs injected into the
         container. Used by peer-agent backends to pass LLM credentials and
         configuration without writing them to files.
+
+        ``network_namespace``: Phase 2.3 (方案 A) - the sidecar container name
+        whose network namespace this container should share. When set, the
+        ``--network=container:<name>`` flag is emitted instead of the default
+        bridge, and the ``--add-host host.docker.internal:host-gateway`` flag
+        is OMITTED (the shared netns is the source of truth for DNS/hosts;
+        re-adding host-gateway would conflict with the sidecar's network view
+        and Docker rejects per-container --add-host under
+        --network=container:). Callers obtain the sidecar name from
+        :class:`~secopent.infrastructure.egress.netns_isolator.NetnsHandle`.
         """
         self._verify_digest(image_digest)
         args = self._build_args(
             image_digest, command, mounts, network_policy, resource_limits,
-            capabilities, extra_labels or {}, env or {},
+            capabilities, extra_labels or {}, env or {}, network_namespace,
         )
         artifacts_dir = self._artifacts_dir(mounts)
         try:
@@ -178,6 +189,7 @@ class SubprocessContainerExecutor:
         capabilities: Sequence[str] = (),
         extra_labels: Mapping[str, str] | None = None,
         env: Mapping[str, str] | None = None,
+        network_namespace: str | None = None,
     ) -> list[str]:
         args = [
             self._docker,
@@ -193,13 +205,24 @@ class SubprocessContainerExecutor:
         # containers for targeted stop via ``docker ps --filter label=...``.
         for key, value in (extra_labels or {}).items():
             args += ["--label", f"{key}={value}"]
+        # --add-host lets the tool container reach host-mapped targets (Juice
+        # Shop, httpbin, ...) via host.docker.internal. Docker Desktop defines
+        # it already (harmless re-map); Linux runners/CI need the explicit
+        # host-gateway entry (T7 - enables e2e_real on ubuntu CI).
+        #
+        # Phase 2.3 (方案 A): when sharing a sidecar's network namespace via
+        # --network=container:<sidecar>, OMIT --add-host. The shared netns is
+        # the single source of truth for DNS/hosts, Docker rejects per-container
+        # --add-host under --network=container: (the flag is owned by the
+        # sidecar's network config), and the sidecar runs with --network=none so
+        # host-gateway mapping must be configured on the netns/nft layer if
+        # needed (it is not needed for isolated egress scans).
+        if not network_namespace:
+            args += [
+                "--add-host",
+                "host.docker.internal:host-gateway",
+            ]
         args += [
-            # Let the tool container reach host-mapped targets (Juice Shop,
-            # httpbin, ...) via host.docker.internal. Docker Desktop defines it
-            # already (harmless re-map); Linux runners/CI need the explicit
-            # host-gateway entry (T7 - enables e2e_real on ubuntu CI).
-            "--add-host",
-            "host.docker.internal:host-gateway",
             "--user",
             "65532:65532",
             "--cap-drop",
@@ -229,7 +252,7 @@ class SubprocessContainerExecutor:
             args += ["--env", f"{key}={value}"]
         args += [
             "--network",
-            self._network_mode(network_policy),
+            self._network_mode(network_policy, network_namespace),
             "--memory",
             self._memory(resource_limits),
             "--cpus",
@@ -249,9 +272,18 @@ class SubprocessContainerExecutor:
         return args
 
     @staticmethod
-    def _network_mode(network_policy: str) -> str:
-        # option c: bridge network + application-layer scope enforcement.
-        # M5 strengthens to nftables/netns network isolation.
+    def _network_mode(
+        network_policy: str, network_namespace: str | None = None
+    ) -> str:
+        # Phase 2.3 (方案 A): when a sidecar container name is supplied, scan
+        # containers share its network namespace via --network=container:<name>.
+        # This is how per-assessment netns isolation is enforced at the packet
+        # layer (the sidecar's netns was relocated into the named netns by
+        # NetnsIsolator.create, and nft egress rules are applied inside it).
+        # Otherwise: option c bridge network + application-layer scope
+        # enforcement; M5 strengthens to nftables/netns network isolation.
+        if network_namespace:
+            return f"container:{network_namespace}"
         return "bridge"
 
     @staticmethod

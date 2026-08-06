@@ -1,4 +1,13 @@
-"""NetnsIsolator command logic (W3-F T1)."""
+"""NetnsIsolator command logic (W3-F T1) + Phase 2.3 sidecar binding (方案 A).
+
+Unit tests for the command sequences issued by ``NetnsIsolator.create`` /
+``destroy``. The runner is a recording fake so these run on any platform
+(no real ``ip`` / ``docker`` binaries needed).
+
+Phase 2.3 (方案 A): ``create(with_sidecar=True)`` additionally starts an
+``alpine sleep infinity`` sidecar container and attaches its netns to the
+named netns; ``destroy`` removes the sidecar before deleting the netns.
+"""
 from __future__ import annotations
 
 from secopent.infrastructure.egress.netns_isolator import NetnsHandle, NetnsIsolator
@@ -15,17 +24,18 @@ class _RecordingRunner:
 def test_create_issues_ip_netns_add_with_sanitized_name() -> None:
     runner = _RecordingRunner()
     isolator = NetnsIsolator(runner=runner)
-    handle = isolator.create("asm-abc 123")
+    handle = isolator.create("asm-abc 123", with_sidecar=False)
     assert isinstance(handle, NetnsHandle)
     # Name sanitized (space -> -) + prefixed.
     assert handle.name == "secopent-asm-abc-123"
+    assert handle.sidecar == ""
     assert runner.calls == [["ip", "netns", "add", "secopent-asm-abc-123"]]
 
 
 def test_destroy_issues_ip_netns_del() -> None:
     runner = _RecordingRunner()
     isolator = NetnsIsolator(runner=runner)
-    handle = isolator.create("asm-1")
+    handle = isolator.create("asm-1", with_sidecar=False)
     runner.calls.clear()
     isolator.destroy(handle)
     assert runner.calls == [["ip", "netns", "del", "secopent-asm-1"]]
@@ -40,6 +50,6 @@ def test_is_supported_only_on_linux() -> None:
 def test_custom_prefix() -> None:
     runner = _RecordingRunner()
     isolator = NetnsIsolator(runner=runner, prefix="scan-")
-    handle = isolator.create("a1")
+    handle = isolator.create("a1", with_sidecar=False)
     assert handle.name == "scan-a1"
     assert runner.calls[0] == ["ip", "netns", "add", "scan-a1"]
