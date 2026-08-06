@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-07
+
 `Schema: no | Deps: no | Breaking: no` - hotfix: v0.4.0 NAS 升级事故（绿联 DXP4800PLUS
 回滚 v0.2.0.2）的根因修复。netns 隔离从"平台假设 + 加固不降级 + 部分失败留残留"改为
 "能力探测 + env 开关 + 降级 + 自清理"，存量 DB 升级路径自动化。postmortem 见
