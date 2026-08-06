@@ -9,16 +9,16 @@
 
 ## 0. 总览
 
-Phase 3 = 功能缺口：设计存在但未激活的能力。共 6 项，其中 **3.2 已由 P0-P3 + Phase 2.2 完成**，剩余 5 项约 **5.5 工作日**。
+Phase 3 = 功能缺口：设计存在但未激活的能力。共 6 项，其中 **3.2 已由 P0-P3 + Phase 2.2 完成**，剩余 5 项约 **6-6.5 工作日**（3.6 经审阅扩大至含 API 端点，见 §0.5 E5）。
 
 | # | 主题 | 优先级 | 工时 | 状态 | 依赖 |
 |---|------|--------|------|------|------|
-| 3.1 | Echo Canary Per-Method Gate | P2 | 1d | 待做 | 无 |
+| 3.1 | Echo Canary Per-Method Gate | P2 | 1d | 待做（按 §0.5 E1/E2 修正执行） | 无 |
 | 3.2 | Strix/Shannon 分层集成 | - | - | ✅ **已完成**（v0.4.0，P0-P3 + Phase 2.2） | - |
-| 3.3 | DriftView 前端 UI | P3 | 1d | 待做 | 后端 `/drift` 已就绪 |
-| 3.4 | LocalOllamaBackend | P3 | 1d | 待做 | 与 3.5 合并为一项 |
-| 3.5 | LLM Multi-Provider Config | P3 | 0.5d | 待做 | 与 3.4 合并 |
-| 3.6 | rotate/redact_pii Session Threading | P2 | 0.5d | 待做 | forbidden linter 已就绪 |
+| 3.3 | DriftView 前端 UI | P3 | 1d | 待做（按 §0.5 E3） | 后端 `/drift` 已就绪 |
+| 3.4 | LocalOllamaBackend | P3 | 1d | 待做（与 3.5 合并，按 §0.5 E4） | 与 3.5 合并为一项 |
+| 3.5 | LLM Multi-Provider Config | P3 | 0.5d | 待做（与 3.4 合并，按 §0.5 E4） | 与 3.4 合并 |
+| 3.6 | rotate/redact_pii + 审计链 API 端点 | P2 | 1-1.5d | 待做（范围扩大，见 §0.5 E5） | forbidden linter 已就绪 |
 
 **推荐执行序**（按优先级 + 依赖）：
 ```
@@ -27,6 +27,52 @@ P2 先行：3.6 (0.5d, 安全相关) ──┐
 P3 随后：3.4+3.5 (1.5d, LLM 统一) ┤── 3.3 (1d, 前端) 独立并行
                                  └── 全部完成后发 v0.5.0
 ```
+
+---
+
+## 0.5 审阅勘误（2026-08-06，执行前必读）
+
+设计稿经逐项源码复核，以下修正**优先于正文**；正文与勘误冲突时以勘误为准。
+
+### E1（3.1，致命缺陷）：`echo_probe` 独立 key 方案作废
+
+两条独立证据：
+1. **会崩溃**：`RescanVerifier.reproduce` 用 `self._runner.scan(**kwargs)` 解包，而 `RealScanRunner.scan` 是严格签名（`adapter_key / args / mounts / source / resource_limits / capabilities`，无 `**kwargs`，`infrastructure/adapters/real_scan.py:131-140`）。scan_kwargs 多任何未知 key → `TypeError`。
+2. **token 到不了靶标**：echo 验证要求 canary 出现在扫描 stdout（`rescan_verifier.py:123-126`）。不被 runner 消费的 dict key 永远不进入探测流量 → 真实反射型 XSS 的 N/N 复现全 FAILURE → 原本 legacy 可确认的发现变 REFUTED（与设计意图相反的回归）。
+
+**修正方案**：echo canary 嵌入 `-u` URL 的查询参数（与 OOB 的 `cb={OOB_PLACEHOLDER}` 同机制）：
+- factory 注入 `VerificationMethodRegistry`；`for_finding(finding)` 加 `vuln_type` 参数——`oracle_service._verify_one` 在 `oracle_service.py:79` 已算出 vuln_type、`:142` 才调 `for_finding`，现成可传。
+- 仅当 `method.echo_enabled` 时 URL 追加 `&echo={{canary_token}}`；OOB placeholder 保持 always-on 现状。两分支互斥触发（OOB 门控 `oob_window_seconds>0`；echo-enabled 的 XSS `oob_window=0`），无占位符冲突。
+- `rescan_verifier` 确实无需改（门控基于 placeholder 存在性）——正文此结论正确，但理由应改为本条。
+- 连带：`OracleVerifierFactory` Protocol（`application/ports/oracle.py:18-21`）签名变更，所有测试 fake 同步改。
+
+### E2（3.1，决策已确认）：严格 echo 语义
+
+VulnType 枚举只有单一 `XSS`（`domain/verification/models.py:23-39`，无 XSS_REFLECTED/OPEN_REDIRECT/SSTI——正文"具体枚举值以现状为准"的 fallback 触发）。**用户确认采用严格语义**：XSS `echo_enabled=True`；无回显 → N/N FAILURE → REFUTED，无 legacy fallback。已知行为变更：不回显的 stored/DOM XSS 发现从弱 legacy 确认变为 REFUTED（重扫探针本就无法复现它们，属预期收紧）。正文 §1.2/§1.3 的注册示例相应改为仅 `VulnType.XSS`。
+
+### E3（3.3）：API 客户端不新建文件
+
+`generated.ts`（openapi-typescript 生成）**已包含** `/appmodels/{app_id}/{version}/drift` 路径与 `DriftReport` 类型；前端用 `client.ts` 的 openapi-fetch `api.POST("/appmodels/{app_id}/{version}/drift", ...)` 模式即可。正文 §3.3 第 3 条（新建 `api/appmodels.ts`）作废。
+
+### E4（3.4/3.5）：协议与配置 API 对齐现实
+
+- `ModelBackend` Protocol 是 **`complete(prompt: str) -> str`**（`application/remote_model.py:72-75`），不是正文的 `propose(prompt, *, system)`。`OllamaBackend` 必须实现 `complete`。
+- 配置加载函数现实是 `load_backend_from_config(path) -> RemoteOpenAICompatibleBackend`（`infrastructure/llm/config.py:21`，backend≠remote 直接 raise），不是 `load_llm_config()`。扩展此函数支持 ollama/null。
+- 新增 **`SECOPTENT_LLM_CONFIG`** env 覆盖配置路径（正文的相对路径 `config/llm.yaml` 依赖 CWD，systemd 部署 CWD 不固定）。
+- **优先级链钉死**：`SECOPTENT_LLM_BACKEND` env（ollama/remote/null）> 配置文件 `backend:` 字段 > `MINIMAX_API_KEY` 存在时的 MiniMax fallback > `NullModelBackend`。
+
+### E5（3.6，范围扩大，决策已确认）：无生产调用方 + 顺带补 API 端点
+
+事实更正：`AuditChain.rotate`/`redact_pii` **没有生产调用方**（只有 3 个测试文件调用）；正文所说"signing_keys router 调用点"是 `SigningKeyService.rotate`（Ed25519 签名密钥，`signing_keys.py:58-73`），与审计链无关。linter R3 当前不扫 `audit_chain.py`（范围：canary/oracle_service/nft_scope/rescan_verifier + execution R3b）。
+
+**用户确认范围 = 卫生修复 + API 端点**：
+1. 卫生修复（原 3.6）：`rotate(*, session=None)` / `redact_pii(event_id, *, keys, session=None)` 内部透传；linter R3 扩扫 `audit_chain.py`（先红后绿）。
+2. API 端点（audit_router，`interfaces/api/routers/audit.py`）：
+   - `POST /audit/rotate`（body: `{actor, actor_role}`）→ `audit_chain.rotate(session=请求 session)`；
+   - `POST /audit/redact`（body: `{event_id, keys, actor, actor_role}`）→ `audit_chain.redact_pii(event_id, keys=frozenset(keys), session=请求 session)`；
+   - 两者 **human-only**（agent 角色 403，模式对齐 `signing_keys.py:70` 的 rotate 门禁）；
+   - `app.state.audit_chain` 已在 composition root；响应 schema 新增 `AuditChainEventOut`（event_id/action/event_hash/signature）或复用现有 out。
+3. 测试：agent 403 / human 200 / rotate 后 `GET /audit/verify` 仍 valid / redact 后 `GET /audit/events?redacted` 掩码生效（若 export 语义需要则补 redacted 查询参数——以 `AuditChain.export(redacted=True)` 现状为准）/ session 透传不自行 commit（请求事务原子性）。
 
 ---
 
