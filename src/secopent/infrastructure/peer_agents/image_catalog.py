@@ -30,4 +30,17 @@ PEER_IMAGE_CATALOG: dict[str, ImageRef] = {
         "latest",
         "sha256:0d7d462981bdf7829099c363df827a6607426f765493c6ef2403602c7ed45b07",
     ),
+    # Phase 2.10 (A4 spike): ptai (0xSteph, MIT) is an autonomous AI pentest
+    # agent distributed as MCP server + CLI. Linux-only: impacket / bloodhound
+    # / scapy / paramiko install cleanly only on Linux, so the peer-worker-ptai
+    # image must be built on a Linux worker (the Windows dev environment cannot
+    # `pip install ptai` with deps). digest="" until the first Linux build
+    # records a manifest-list digest; the executor's digest check skips
+    # tag-only refs (no `@`), so a locally-built image works until a registry
+    # push pins it. Re-pin after upgrades.
+    "ptai": ImageRef(
+        "secopent/peer-worker-ptai",
+        "1.1.0",
+        "",
+    ),
 }

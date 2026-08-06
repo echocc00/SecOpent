@@ -26,6 +26,7 @@ from ..adapters.image_catalog import ImageRef
 from ..adapters.subprocess_executor import SubprocessContainerExecutor
 from .harness import ContainerPeerAgentHarness, PeerAgentBackend
 from .image_catalog import PEER_IMAGE_CATALOG
+from .ptai_backend import PtaiBackend
 from .shannon_backend import ShannonBackend
 from .strix_backend import StrixBackend
 
@@ -38,6 +39,14 @@ SHANNON_VERSION = "2.0"
 SHANNON_DEFAULT_BUDGET = PeerAgentBudget(
     max_wall_seconds=60 * 60,  # 1h wall clock
     max_cost_units=200.0,  # LLM tokens cost class
+)
+# ptai version from the A4 spike (sepcs/2026-07-27-a4-ptai-spike-findings.md):
+# `pip show ptai` reported 1.1.0, MIT, 0xSteph, https://pentestai.xyz.
+PTAI_VERSION = "1.1.0"
+PTAI_DEFAULT_BUDGET = PeerAgentBudget(
+    max_wall_seconds=60 * 60,  # 1h wall clock
+    max_cost_units=200.0,  # LLM tokens cost class (self-reported; ptai does
+    # not self-report cost, so wall + external metering is authoritative)
 )
 
 
@@ -84,6 +93,25 @@ def shannon_descriptor() -> PeerAgentDescriptor:
     )
 
 
+def ptai_descriptor() -> PeerAgentDescriptor:
+    """Build the ptai descriptor from the image catalog entry.
+
+    ptai (MIT, 0xSteph) is an autonomous AI pentest agent (A4 spike
+    re-scope). The catalog entry carries ``digest=""`` until the first
+    Linux build of peer-worker-ptai records a manifest-list digest.
+    """
+    return PeerAgentDescriptor(
+        name="ptai",
+        version=PTAI_VERSION,
+        license="MIT",
+        trust_level=PeerAgentTrustLevel.ADOPTED_EXTERNAL,
+        capabilities=("web", "network"),
+        cost_class="llm_tokens",
+        default_budget=PTAI_DEFAULT_BUDGET,
+        image_digest=_image_ref(PEER_IMAGE_CATALOG.get("ptai")),
+    )
+
+
 def create_peer_agent_service(
     *,
     audit: AuditRecorder,
@@ -95,11 +123,16 @@ def create_peer_agent_service(
     enable_shannon: bool = False,
     shannon_repo_path: Path | None = None,
     shannon_llm_key_name: str = "ANTHROPIC_API_KEY",
+    enable_ptai: bool = False,
+    ptai_llm_key_name: str = "LLM_API_KEY",
 ) -> PeerAgentService:
     """Wire up a PeerAgentService with all adopted peer agents registered.
 
     Shannon is only registered when ``enable_shannon`` is True AND
     ``shannon_repo_path`` is provided (the target repo working copy source).
+    ptai is only registered when ``enable_ptai`` is True (Linux-only image;
+    the peer-worker-ptai image must be built on a Linux worker - the Windows
+    dev environment cannot ``pip install ptai`` with deps).
 
     ``harness`` overrides the default ``ContainerPeerAgentHarness`` - pass a
     ``NullPeerAgentHarness`` when Docker/images are unavailable so the service
@@ -121,6 +154,14 @@ def create_peer_agent_service(
             repo_path=shannon_repo_path,
             llm_key_name=shannon_llm_key_name,
             secret_lookup=secret_lookup,
+        )
+
+    if enable_ptai:
+        registry.register(ptai_descriptor())
+        backends["ptai"] = PtaiBackend(
+            llm_provider=llm_provider,
+            secret_lookup=secret_lookup,
+            llm_key_name=ptai_llm_key_name,
         )
 
     if harness is None:

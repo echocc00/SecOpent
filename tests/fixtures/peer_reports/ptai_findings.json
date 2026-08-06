@@ -1,0 +1,14 @@
+{
+  "run_id": "ptai-run-1",
+  "findings": [
+    {
+      "title": "SQL Injection in login form",
+      "target": "http://host.docker.internal:3000/login",
+      "severity": "high",
+      "cwe": "CWE-89",
+      "cve": [],
+      "poc": "POST /login with username=' OR '1'='1 returned 200 + admin session.",
+      "description": "The login endpoint concatenates user input into a SQL query without parameterization."
+    }
+  ]
+}

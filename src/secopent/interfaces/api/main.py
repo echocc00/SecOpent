@@ -532,6 +532,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
                 ),
                 enable_shannon=os.environ.get("SECOPTENT_ENABLE_SHANNON") == "true",
                 shannon_repo_path=_shannon_repo,
+                enable_ptai=os.environ.get("SECOPTENT_ENABLE_PTAI") == "true",
             )
         else:
             _peer_logger.warning(
