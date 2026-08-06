@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ....application.assessments import AssessmentPermissionError, AssessmentService
+from ....application.audit import AuditService
 from ....application.execution import execute_assessment
 from ....application.planner import Planner
 from ....domain.assessments.models import Assessment, ExecutionPlan
@@ -290,8 +291,28 @@ def _run_assessment_daemon(
                 and netns_isolator.is_supported()
                 and make_nft_enforcer is not None
             ):
-                netns_handle = netns_isolator.create(assessment_id)
-                enforcer = make_nft_enforcer(netns_handle.name)
+                try:
+                    netns_handle = netns_isolator.create(assessment_id)
+                    enforcer = make_nft_enforcer(netns_handle.name)
+                except Exception:  # noqa: BLE001 - netns is hardening, never blocks the scan
+                    logger.exception(
+                        "netns isolation unavailable for %s; degrading to default netns",
+                        assessment_id,
+                    )
+                    # v0.5.1 F2 (NAS incident): a hardening-feature failure must
+                    # not kill the assessment. Audit the degradation (joins this
+                    # request's transaction) and fall back to the default-netns
+                    # enforcer - the app-layer EgressGuard still applies.
+                    try:
+                        AuditService(SqlAlchemyAuditRepository(uow.session)).record(
+                            actor="system", action="netns.unavailable.degraded",
+                            resource_type="assessment", resource_id=assessment_id,
+                            payload={"reason": "netns create failed"},
+                        )
+                    except Exception:  # noqa: BLE001 - audit must not mask the degradation
+                        logger.exception("failed to audit netns degradation")
+                    netns_handle = None
+                    enforcer = make_nft_enforcer(None)
             elif make_nft_enforcer is not None:
                 enforcer = make_nft_enforcer(None)
             else:
