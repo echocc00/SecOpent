@@ -15,8 +15,10 @@ import contextlib
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from secopent.__version__ import __version__
+from secopent.infrastructure.db.session import BASELINE_REVISION
 
 __all__ = ["build_parser", "main", "__version__"]
 
@@ -364,6 +366,7 @@ def _cmd_db(action: str, db_url: str) -> int:
     cfg = Config(str(ini))
     try:
         if action == "upgrade":
+            _cmd_db_autostamp_baseline(url, cfg)
             command.upgrade(cfg, "head")
         elif action == "stamp":
             command.stamp(cfg, "head")
@@ -382,6 +385,28 @@ def _cmd_db(action: str, db_url: str) -> int:
         else:
             os.environ["SECOPTENT_DB_URL"] = saved_url
     return 0
+
+
+def _cmd_db_autostamp_baseline(url: str, cfg: Any) -> None:
+    """v0.5.1 F4: stamp a pre-alembic DB (v0.2.x) at the baseline so the
+    documented stop-then-migrate flow (`secopent db upgrade`) works - without
+    it, `alembic upgrade head` re-runs the baseline migration and fails with
+    "table already exists". No-op for fresh or already-versioned DBs."""
+    from sqlalchemy import create_engine, inspect
+
+    from alembic import command
+
+    engine = create_engine(url)
+    try:
+        insp = inspect(engine)
+        if insp.has_table("core_projects") and not insp.has_table("alembic_version"):
+            print(
+                f"stamping pre-alembic DB at baseline {BASELINE_REVISION} "
+                "(auto, v0.5.1 F4); upgrade will apply the delta migrations"
+            )
+            command.stamp(cfg, BASELINE_REVISION)
+    finally:
+        engine.dispose()
 
 
 def main(argv: list[str] | None = None) -> int:

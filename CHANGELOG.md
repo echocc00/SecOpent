@@ -9,6 +9,38 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+`Schema: no | Deps: no | Breaking: no` - hotfix: v0.4.0 NAS 升级事故（绿联 DXP4800PLUS
+回滚 v0.2.0.2）的根因修复。netns 隔离从"平台假设 + 加固不降级 + 部分失败留残留"改为
+"能力探测 + env 开关 + 降级 + 自清理"，存量 DB 升级路径自动化。postmortem 见
+`docs/architecture/postmortems/v0.4.0-nas-netns-compatibility.md`。
+
+### Fixed
+- **netns 能力探测**（F1，`is_supported()`）：不再只看 `sys.platform=="linux"`（受限 NAS
+  内核报 Linux 但缺 `ip netns`）。改为一次性 probe `ip netns add/del`（结果缓存）+ 日志，
+  并支持 `SECOPTENT_NETNS_ENABLED=0` 强制关闭。探测失败报告不支持 → 调用方走降级分支。
+- **daemon 降级**（F2）：netns create 失败不再杀死评估（此前 propagate 被 BackgroundTasks
+  吞掉 → 评估永久 QUEUED、无 FAILED 无审计）。现审计 `netns.unavailable.degraded` + 回落
+  默认 netns enforcer，评估照常执行（对齐 `apply_scope` 的 best-effort 模式）。
+- **create 自清理**（F3）：create() 三步非原子（add→sidecar→attach），任一步失败会留下
+  netns 文件 + sidecar 容器（调用方拿不到 handle 无法清理 → 后续评估撞 "File exists"/
+  "Device or resource busy" 死循环）。现失败时先 `docker rm -f sidecar` + `ip netns del`
+  再抛；修正 docstring 虚假的 "idempotent" 声明。
+- **存量 DB 自动 stamp baseline**（F4）：v0.2.x DB（create_all 建表、无 alembic_version）
+  使 `alembic upgrade head` 重跑 baseline 报 "table already exists"。`init_db` 与
+  `secopent db upgrade` CLI 现自动检测并 stamp 到 baseline（非 head——存量 schema 是
+  baseline 等价但缺 post-baseline 表如 core_audit_outbox），迁移只应用增量。
+- **测试去环境依赖**（F5）：由 F1/F2 达成——受限 Linux 上曾失败的 11 个 netns 相关测试
+  现走探测/降级路径确定性通过；real-docker 测试经能力探测门控（探测失败 skip 而非 fail）。
+
+### Added
+- **兼容性文档**（F6）：`docs/deployment/compatibility.md`（能力维度矩阵 + 环境分类 +
+  `SECOPTENT_NETNS_ENABLED` + 残留清理 SOP + DB 升级路径）。事故现场需先清残留：
+  `docker rm -f $(docker ps -aq --filter name=secopent-netns-)` 再删 `/run/netns/secopent-*`。
+
+### Verified
+- 1623 tests passed（default tier），ruff / mypy strict（287 files）/ bandit -ll /
+  forbidden linter 全绿；F4 全流程单测（legacy DB → 自动 stamp → upgrade → outbox 表就位）。
+
 ## [0.5.0] - 2026-08-07
 
 `Schema: no | Deps: no | Breaking: no` - Phase 3 功能缺口收口（设计存在但未激活的

@@ -73,3 +73,28 @@ def test_init_db_does_not_repeat_stamp(tmp_path: Path) -> None:
     init_db(engine, mode="auto")  # idempotent: version row already present
 
     assert _version(engine) == "ad674b51adca"
+
+
+def test_db_upgrade_cli_autostamps_legacy_db(tmp_path: Path) -> None:
+    """The documented stop-then-migrate flow: `secopent db upgrade` on a legacy
+    v0.2.x DB auto-stamps the baseline and applies the deltas - no manual
+    stamp step needed (v0.5.1 F4 covers the pre-boot CLI path too)."""
+    from secopent.interfaces.cli.main import main
+
+    engine = create_sqlite_engine(tmp_path / "legacy.db")
+    CoreBase.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE core_audit_outbox"))
+
+    url = f"sqlite:///{(tmp_path / 'legacy.db').as_posix()}"
+    assert main(["db", "upgrade", "--db", url]) == 0
+
+    assert _version(engine) == "811a5b9a583d"  # baseline + outbox = head
+    with Session(engine) as session:
+        outbox = session.execute(
+            text(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='core_audit_outbox'"
+            )
+        ).first()
+    assert outbox is not None

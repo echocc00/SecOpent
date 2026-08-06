@@ -75,7 +75,7 @@ def init_db(engine: Engine, *, mode: str | None = None) -> None:
             "existing DB has no alembic_version; auto-stamping baseline %s - "
             "run `secopent db upgrade` to apply delta migrations "
             "(e.g. core_audit_outbox)",
-            _BASELINE_REVISION,
+            BASELINE_REVISION,
         )
         _stamp_baseline(engine)
     if engine.dialect.name == "sqlite":
@@ -90,7 +90,7 @@ def init_db(engine: Engine, *, mode: str | None = None) -> None:
 
 # The alembic baseline revision (hand-written, created in W4-D). Existing
 # pre-alembic DBs are stamped here so upgrades only apply delta migrations.
-_BASELINE_REVISION = "ad674b51adca"
+BASELINE_REVISION = "ad674b51adca"
 
 
 def _stamp(engine: Engine, revision: str) -> None:
@@ -133,7 +133,7 @@ def _stamp_head(engine: Engine) -> None:
 
 def _stamp_baseline(engine: Engine) -> None:
     """Stamp at the baseline (legacy v0.2.x DBs are baseline-equivalent)."""
-    _stamp(engine, _BASELINE_REVISION)
+    _stamp(engine, BASELINE_REVISION)
 
 
 class UnitOfWork:
