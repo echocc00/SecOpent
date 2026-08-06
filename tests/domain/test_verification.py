@@ -177,3 +177,31 @@ def test_decide_pending_when_not_enough_attempts() -> None:
     assert (
         decide_outcome(method, successes=1, attempts=2) is VerificationStatus.PENDING
     )
+
+
+# --- Echo canary per-method gate (v0.5.0 Phase 3, 3.1) ----------------------
+
+
+def test_echo_enabled_defaults_false() -> None:
+    method = VerificationMethod(vuln_type=VulnType.SQLI, default_n=5)
+    assert method.echo_enabled is False
+
+
+def test_default_registry_marks_xss_echo_enabled() -> None:
+    """Reflection-type gate (E2): XSS is the only echo-enabled curated class."""
+    registry = default_registry()
+    xss = registry.require_method(VulnType.XSS)
+    assert xss.echo_enabled is True
+    non_echo = [vt for vt in registry.vuln_types() if vt is not VulnType.XSS]
+    assert len(non_echo) == 13
+    for vuln_type in non_echo:
+        method = registry.require_method(vuln_type)
+        assert method.echo_enabled is False, f"{vuln_type} must not embed echo canary"
+
+
+def test_echo_enabled_methods_are_not_oob() -> None:
+    """Echo and OOB branches are mutually exclusive (no placeholder clash)."""
+    registry = default_registry()
+    for vuln_type in registry.vuln_types():
+        method = registry.require_method(vuln_type)
+        assert not (method.echo_enabled and method.oob_window_seconds > 0)

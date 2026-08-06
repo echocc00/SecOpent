@@ -476,12 +476,17 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         )
     else:
         interactsh = InteractshClient(NullInteractshTransport())
+    # One shared registry: OracleService resolves N/thresholds from it, and
+    # the verifier factory reads echo_enabled for the per-method canary gate
+    # (v0.5.0 Phase 3, 3.1).
+    oracle_registry = default_registry()
     verifier_factory = RescanVerifierFactory(
-        oracle_scan_runner, template_host_dir, canary, interactsh=interactsh
+        oracle_scan_runner, template_host_dir, canary, interactsh=interactsh,
+        method_registry=oracle_registry,
     )
     app.state.canary = canary
     app.state.oracle = OracleService(
-        registry=default_registry(),
+        registry=oracle_registry,
         canary=canary,
         verifier_factory=verifier_factory,
     )

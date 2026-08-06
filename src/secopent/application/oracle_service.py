@@ -139,7 +139,7 @@ class OracleService:
             vuln_type=vuln_type,
             target=finding.asset,
         )
-        verifier = self._verifier_factory.for_finding(finding)
+        verifier = self._verifier_factory.for_finding(finding, vuln_type)
         engine = OracleEngine(
             registry=self._registry,
             verifier=verifier,

@@ -65,7 +65,9 @@ def default_registry() -> VerificationMethodRegistry:
             VerificationMethod(
                 vuln_type=VulnType.XXE, default_n=3, oob_window_seconds=oob_window
             ),
-            VerificationMethod(vuln_type=VulnType.XSS, default_n=3),
+            VerificationMethod(
+                vuln_type=VulnType.XSS, default_n=3, echo_enabled=True
+            ),
             VerificationMethod(
                 vuln_type=VulnType.DESERIALIZATION,
                 default_n=3,

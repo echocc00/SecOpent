@@ -11,11 +11,17 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from ...domain.findings.models import Finding
+from ...domain.verification.models import VulnType
 from ..oracle import OracleVerifier
 
 
 @runtime_checkable
 class OracleVerifierFactory(Protocol):
-    """Build a per-finding OracleVerifier (the reproduction backend)."""
+    """Build a per-finding OracleVerifier (the reproduction backend).
 
-    def for_finding(self, finding: Finding) -> OracleVerifier: ...
+    ``vuln_type`` lets the factory tailor the probe to the curated method
+    (v0.5.0 Phase 3, 3.1: echo-canary embedding is per-method, so only
+    reflection-type vulns carry the echo placeholder).
+    """
+
+    def for_finding(self, finding: Finding, vuln_type: VulnType) -> OracleVerifier: ...

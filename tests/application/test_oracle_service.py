@@ -47,14 +47,14 @@ class _FakeFactory:
         self._reproduce = reproduce
         self.verifiers: list[_FakeVerifier] = []
 
-    def for_finding(self, finding: Finding) -> OracleVerifier:
+    def for_finding(self, finding: Finding, vuln_type=None) -> OracleVerifier:
         v = _FakeVerifier(reproduce=self._reproduce)
         self.verifiers.append(v)
         return v  # type: ignore[return-value]
 
 
 class _BoomFactory:
-    def for_finding(self, finding: Finding) -> OracleVerifier:
+    def for_finding(self, finding: Finding, vuln_type=None) -> OracleVerifier:
         class _Boom:
             def reproduce(
                 self, c: CandidateFinding, m: VerificationMethod, *, canary_token: str, session=None

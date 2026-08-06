@@ -89,6 +89,11 @@ class VerificationMethod:
     cross_worker: bool = True
     server_error_threshold: int = 2
     oob_window_seconds: int = 0
+    # v0.5.0 Phase 3 (3.1): only reflection-type methods embed the echo
+    # canary into the reproduction probe. Strict semantics (E2): when the
+    # echo canary is embedded, a finding confirms ONLY if the token echoes
+    # back - there is no legacy fallback for echo-enabled methods.
+    echo_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.default_n < 1:
