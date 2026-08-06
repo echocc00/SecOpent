@@ -35,6 +35,7 @@ from secopent.integrations.adapters import (
     nmap,
     nuclei,
     prowler,
+    restler,
     schemathesis,
     scoutsuite,
     subfinder,
@@ -57,8 +58,9 @@ _ADAPTER_PARSERS: dict[str, Any] = {
     "nmap": nmap.parse,
     "dalfox": dalfox.parse,
     "katana": katana.parse,
-    # API fuzzing.
+    # API fuzzing (decision 23: schemathesis boundary + restler sequence).
     "schemathesis": schemathesis.parse,
+    "restler": restler.parse,
     # Cloud / container (P3 §3.2 / T5 - completes the four-domain coverage).
     "trivy": trivy.parse,
     "prowler": prowler.parse,

@@ -419,6 +419,48 @@ def test_schemathesis_malformed_parse_returns_empty() -> None:
     assert observations == ()
 
 
+def test_schemathesis_parses_real_ndjson_event_format() -> None:
+    """The real schemathesis CLI (``--report ndjson --report-ndjson-path
+    /dev/stdout``) emits NDJSON events interleaved with human-readable progress
+    text. The parser must skip non-JSON lines and extract failed checks from
+    ``ScenarioFinished`` events."""
+    # Sample extracted from a real schemathesis run against httpbin.
+    raw = (
+        "Schemathesis v4.24.3\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        '{"Initialize":{"command":"st run","schemathesis_version":"4.24.3"}}\n'
+        '{"LoadingStarted":{"id":"abc","timestamp":1786011204.46}}\n'
+        '{"ScenarioFinished":{"id":"sf1","timestamp":1786011209.48,'
+        '"status":"failure","recorder":{"label":"DELETE /redirect-to",'
+        '"checks":{"case1":[{"name":"not_a_server_error","status":"failure",'
+        '"failure_info":{"failure":{"type":"ServerError","message":"Server error"}}}]}}}}\n'
+        '{"ScenarioFinished":{"id":"sf2","timestamp":1786011210.0,'
+        '"status":"success","recorder":{"label":"GET /anything",'
+        '"checks":{"case2":[{"name":"not_a_server_error","status":"success"}]}}}}\n'
+        "================== 1 failures in 62.74s ==================\n"
+    )
+    observations = schemathesis.parse(stdout=raw, source=_ADAPTER_SOURCE, artifacts={})
+    assert len(observations) == 1, "should extract exactly one failed check"
+    obs = observations[0]
+    assert obs.coverage_domain is CoverageDomain.WEB
+    assert obs.rule_id == "schemathesis.not_a_server_error"
+    assert obs.asset_identity == "DELETE /redirect-to"
+    assert obs.severity is Severity.HIGH
+    assert str(obs.raw.get("test_class", "")).lower() == "boundary"
+
+
+def test_schemathesis_ndjson_no_failures_returns_empty() -> None:
+    """A real schemathesis run with all passing checks produces no
+    Observations."""
+    raw = (
+        '{"ScenarioFinished":{"id":"sf1","status":"success",'
+        '"recorder":{"label":"GET /anything",'
+        '"checks":{"c1":[{"name":"not_a_server_error","status":"success"}]}}}}\n'
+    )
+    observations = schemathesis.parse(stdout=raw, source=_ADAPTER_SOURCE, artifacts={})
+    assert observations == ()
+
+
 # ---------------------------------------------------------------------------
 # zap parser tests (alerts -> cwe from plugin)
 # ---------------------------------------------------------------------------

@@ -78,39 +78,143 @@ def manifest() -> AdapterManifest:
     )
 
 
-def _load_results(stdout: str) -> list[dict[str, Any]]:
-    """Parse Schemathesis JSON report.
+def _extract_ndjson_events(text: str) -> list[dict[str, Any]]:
+    """Extract JSON objects from mixed stdout (NDJSON + human-readable text).
 
-    The report is a JSON object with a `results` array (or top-level array).
-    Returns `[]` on any parse failure.
+    The real schemathesis CLI (``--report ndjson --report-ndjson-path
+    /dev/stdout``) interleaves NDJSON event lines with human-readable progress
+    output (banners, failure details, summary). We scan every line, skip
+    non-JSON lines, and return the parsed JSON objects.
+    """
+    events: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            events.append(obj)
+    return events
+
+
+def _failed_checks_from_events(
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Extract failed checks from schemathesis NDJSON ScenarioFinished events.
+
+    Each ``ScenarioFinished`` event has a ``recorder`` with ``label`` (e.g.
+    ``"GET /anything"``) and ``checks`` (a dict of case_id -> list of check
+    dicts). A failed check has ``status == "failure"`` with a ``name`` (e.g.
+    ``"not_a_server_error"``) and optional ``failure_info``.
+
+    Returns a flat list of ``{"check": ..., "method": ..., "path": ...,
+    "message": ...}`` dicts consumable by the existing parse loop.
+    """
+    results: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for event in events:
+        sf = event.get("ScenarioFinished")
+        if not isinstance(sf, dict):
+            continue
+        if sf.get("status") != "failure":
+            continue
+        recorder = sf.get("recorder")
+        if not isinstance(recorder, dict):
+            continue
+        label = str(recorder.get("label") or "")
+        # label is "METHOD /path" - split on first space.
+        if " " in label:
+            method, path = label.split(" ", 1)
+        else:
+            method, path = "GET", label or "/"
+        checks = recorder.get("checks")
+        if not isinstance(checks, dict):
+            continue
+        for _case_id, check_list in checks.items():
+            if not isinstance(check_list, list):
+                continue
+            for check in check_list:
+                if not isinstance(check, dict):
+                    continue
+                if check.get("status") != "failure":
+                    continue
+                check_name = str(check.get("name") or "unknown")
+                key = (check_name, method, path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                failure_info = check.get("failure_info") or {}
+                message = ""
+                if isinstance(failure_info, dict):
+                    failure = failure_info.get("failure")
+                    if isinstance(failure, dict):
+                        message = str(failure.get("message") or "")
+                results.append(
+                    {
+                        "check": check_name,
+                        "method": method,
+                        "path": path,
+                        "message": message,
+                        "status": sf.get("status"),
+                    }
+                )
+    return results
+
+
+def _load_results(stdout: str) -> list[dict[str, Any]]:
+    """Parse Schemathesis output into a flat list of failed-check records.
+
+    Handles three formats:
+    1. JSON object with a ``results`` array (fixture format, legacy report).
+    2. Pure NDJSON (one JSON object per line).
+    3. The real schemathesis CLI stdout (mixed human-readable + NDJSON events
+       from ``--report ndjson --report-ndjson-path /dev/stdout``): we extract
+       ``ScenarioFinished`` events and flatten their failed checks.
+
+    Returns ``[]`` on any parse failure.
     """
     if not stdout or not stdout.strip():
         return []
     text = stdout.strip()
+
+    # Format 1: single JSON object with a ``results`` array.
     try:
         obj = json.loads(text)
     except json.JSONDecodeError:
-        # Maybe NDJSON.
-        records: list[dict[str, Any]] = []
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                return []
-            if isinstance(item, dict):
-                records.append(item)
-        return records
+        obj = None
     if isinstance(obj, dict):
         results = obj.get("results")
         if isinstance(results, list):
             return [r for r in results if isinstance(r, dict)]
-        return [obj]
-    if isinstance(obj, list):
+        # A flat result dict has check/method/path keys. A non-result dict
+        # (e.g. a single NDJSON event like {"ScenarioFinished": ...}) must
+        # fall through to the NDJSON path, not be treated as a result.
+        if any(k in obj for k in ("check", "method", "path", "name")):
+            return [obj]
+        # Fall through to NDJSON extraction below.
+    elif isinstance(obj, list):
         return [item for item in obj if isinstance(item, dict)]
-    return []
+
+    # Formats 2 + 3: NDJSON (possibly mixed with human-readable progress text).
+    events = _extract_ndjson_events(text)
+    if not events:
+        return []
+
+    # If the NDJSON is the legacy flat format (each line is already a result
+    # dict with ``check`` / ``method`` / ``path`` keys), return as-is.
+    flat_results = [
+        e for e in events
+        if "check" in e or "name" in e or "method" in e or "path" in e
+    ]
+    if flat_results:
+        return flat_results
+
+    # Real schemathesis NDJSON events: extract failed checks from
+    # ScenarioFinished events.
+    return _failed_checks_from_events(events)
 
 
 def parse(
