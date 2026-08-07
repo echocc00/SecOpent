@@ -27,6 +27,7 @@ import structlog
 from ..domain.common.canonical import utc_now
 from ..domain.common.errors import DomainError
 from ..domain.findings.models import Finding
+from ..domain.jobs.models import JobStatus
 from ..domain.permits.models import DEFAULT_PERMIT_TTL_SECONDS, ExecutionPermit
 from ..domain.scope.models import ScopeSnapshot
 from .assessments import AssessmentService
@@ -389,6 +390,17 @@ def execute_assessment(
                     "nft apply_scope failed (continuing on app-layer guard)",
                     assessment_id=assessment_id, error=str(exc),
                 )
+                # v8 §3.1: a hardening-feature downgrade must be audited, not
+                # silent - the app-layer EgressGuard cannot block a container on
+                # the bridge network, so losing nftables is a real egress-isolation
+                # regression the operator needs to see in the audit log.
+                _audit_record(
+                    audit_repo, audit_chain, actor="system",
+                    action="egress.hardening_unavailable",
+                    resource_type="assessment", resource_id=assessment_id,
+                    payload={"reason": str(exc)},
+                    outbox=audit_outbox,
+                )
 
         # v0.3.0 T3: release the WAL write lock before the long scan phase -
         # everything up to here (RUNNING + permit + scope audits) is durable.
@@ -402,6 +414,29 @@ def execute_assessment(
 
         observations = step_runner.all_observations()  # type: ignore[attr-defined]
         findings = FindingCorrelation().correlate(observations)
+        succeeded_steps = sum(
+            1 for job in jobs.all() if job.status is JobStatus.SUCCEEDED
+        )
+        # v0.5.2 (v8): an execution where EVERY step failed and nothing was
+        # produced is an EMPTY execution, not a clean scan. Mark FAILED so
+        # coverage_rate=0.0 never masquerades as "target is clean" (the NAS
+        # incident: 9 nuclei steps all failed to launch, the run still
+        # completed). A plan where >=1 step succeeded with 0 findings stays
+        # COMPLETED - that is a legitimately clean (or partial-coverage) scan.
+        if not findings and succeeded_steps == 0:
+            service.fail(assessment_id, "EMPTY_EXECUTION:no plan step succeeded, 0 findings")
+            _audit_record(
+                audit_repo, audit_chain, actor="system",
+                action="assessment.completed.empty_execution",
+                resource_type="assessment", resource_id=assessment_id,
+                payload={
+                    "coverage_rate": 0.0,
+                    "reason": "zero successful plan steps, zero findings",
+                },
+                outbox=audit_outbox,
+            )
+            _logger.warning("assessment empty execution", assessment_id=assessment_id)
+            return
         for finding in findings:
             finding_repo.add(replace(finding, assessment_id=assessment_id))
         # v0.3.0 T3: findings durable before the (minutes-long) oracle phase.
