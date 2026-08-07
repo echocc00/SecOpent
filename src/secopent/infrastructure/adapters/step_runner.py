@@ -137,12 +137,12 @@ class AdapterStepRunner:
             ) from exc
         except ValueError as exc:  # unknown adapter_key / no registered parser
             raise StepFailure(FailureClass.INPUT_INVALID, str(exc)) from exc
-        if result.exit_code != 0:
-            # The tool RAN but exited non-zero. Non-zero is not necessarily a
-            # failure (checkov exits 1 on policy violations) - but an exit with
-            # zero observations and no parseable output is indistinguishable
-            # from a clean scan, so surface it as a worker failure rather than
-            # silently completing (v8: all 9 steps "succeeded" with exit!=0).
+        if result.exit_code != 0 and not result.observations:
+            # The tool ran but exited non-zero AND produced nothing - that is
+            # indistinguishable from a scan that never worked (v8: 9 steps all
+            # "succeeded" with exit!=0 and zero findings). A non-zero exit WITH
+            # observations is legitimate (checkov exits 1 when it finds policy
+            # violations - the findings ARE the successful result).
             raise StepFailure(
                 FailureClass.WORKER_UNAVAILABLE,
                 f"adapter {step.runner!r} on {target}: exit_code={result.exit_code}, "

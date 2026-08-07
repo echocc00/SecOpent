@@ -210,9 +210,9 @@ def test_empty_targets_raises_input_invalid_step_failure() -> None:
         runner.run(_nuclei_step())
 
 
-def test_nonzero_exit_code_raises_worker_unavailable_step_failure() -> None:
-    """v8 root cause 2: a container that exits non-zero must be a step FAILURE,
-    never a silent 'success' with zero observations."""
+def test_nonzero_exit_code_with_no_observations_raises_step_failure() -> None:
+    """v8 root cause 2: a container that exits non-zero AND produced nothing is
+    a step FAILURE, never a silent 'success' with zero observations."""
     scanner = FakeScanner(observations=(), exit_code=3, stderr="no templates found")
     runner = _runner(scanner)
 
@@ -222,6 +222,19 @@ def test_nonzero_exit_code_raises_worker_unavailable_step_failure() -> None:
     assert excinfo.value.failure_class is FailureClass.WORKER_UNAVAILABLE
     assert "exit_code=3" in str(excinfo.value)
     assert "no templates found" in str(excinfo.value)
+
+
+def test_nonzero_exit_with_observations_is_legitimate_success() -> None:
+    """checkov exits 1 when it FINDS policy violations - that IS a successful
+    scan (the findings are in stdout). A non-zero exit with observations must
+    NOT be treated as a failure (v0.5.2 regression guard)."""
+    scanner = FakeScanner(observations=(_obs("ckv-aws-20"),), exit_code=1, stderr="")
+    runner = _runner(scanner)
+
+    result = runner.run(_nuclei_step())
+
+    assert result.result_digest == canonical_digest(scanner._observations)
+    assert len(runner.observations_for("web_app:sqli")) == 1
 
 
 def test_container_launch_exception_classified_worker_unavailable() -> None:
