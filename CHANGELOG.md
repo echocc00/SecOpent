@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-08-08
+
 ### v0.5.3 (in progress)
 - **fix(scope)**: `includes_ip` 现在匹配 HTTP-prefixed 规则(egress_guard/scope_enforcer 传裸 IP,此前 HTTP 分支要求 value 也带 scheme → HTTP-prefixed scope 目标恒 OUT_OF_SCOPE,v8 scope/egress bug A)
 - **fix(execution)**: `_check_plan_scope` 现在检查 `scope.include` 的 concrete-host 目标(此前只查 plan 参数 `target`,而 catalog 计划从不生成该字段 → scope/egress 检查是死代码,v8 bug B)。误包含 metadata IP 的 scope 现在会被 egress_guard 拦截
