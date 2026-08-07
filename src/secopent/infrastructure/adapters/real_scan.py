@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from secopent.domain.adapters.contracts import AdapterSource, Observation
+from secopent.domain.common.errors import DomainError
 from secopent.infrastructure.observability.metrics import time_adapter_run
 from secopent.integrations.adapters import (
     checkov,
@@ -108,6 +109,17 @@ class RealScanResult:
     stderr: str
 
 
+class ContainerExecError(DomainError):
+    """The tool container could not be launched (docker run failure).
+
+    Distinct from a non-zero exit (which is a normal, parseable tool outcome):
+    a launch failure means the image/command/mount never started, so there is
+    no output to parse and the step must be treated as a worker failure, not a
+    clean scan (v8 root cause 2 - the bare "No such file or directory" that
+    was previously swallowed into a fake COMPLETED).
+    """
+
+
 class RealScanRunner:
     """Run digest-pinned tool containers and parse their real output."""
 
@@ -143,18 +155,27 @@ class RealScanRunner:
         if parser is None:
             raise ValueError(f"no parser registered for adapter {adapter_key!r}")
         with time_adapter_run(adapter_key):
-            result = self._executor.run(
-                image_digest=self.image_ref(adapter_key),
-                command=list(args),
-                mounts=dict(mounts or {}),
-                network_policy="bridge",
-                resource_limits=dict(
-                    resource_limits or _ADAPTER_RESOURCE_LIMITS.get(
-                        adapter_key, _DEFAULT_RESOURCE_LIMITS
-                    )
-                ),
-                capabilities=list(capabilities or _ADAPTER_CAPABILITIES.get(adapter_key, ())),
-            )
+            try:
+                result = self._executor.run(
+                    image_digest=self.image_ref(adapter_key),
+                    command=list(args),
+                    mounts=dict(mounts or {}),
+                    network_policy="bridge",
+                    resource_limits=dict(
+                        resource_limits or _ADAPTER_RESOURCE_LIMITS.get(
+                            adapter_key, _DEFAULT_RESOURCE_LIMITS
+                        )
+                    ),
+                    capabilities=list(
+                        capabilities or _ADAPTER_CAPABILITIES.get(adapter_key, ())
+                    ),
+                )
+            except Exception as exc:  # noqa: BLE001 - container launch failure
+                # v8 §3.2: keep the raw docker error; the caller classifies and
+                # adds the operator-facing `docker logs` diagnostic hint.
+                raise ContainerExecError(
+                    f"container launch failed for {adapter_key}: {exc}"
+                ) from exc
             scan_source = source or AdapterSource(
                 name=adapter_key, version="1.0.0", template_version="1.0.0"
             )

@@ -35,8 +35,12 @@ from secopent.domain.adapters.contracts import (
 )
 from secopent.domain.assessments.models import PlanStep
 from secopent.domain.common.canonical import canonical_digest
+from secopent.domain.jobs.models import FailureClass
 from secopent.domain.policy.models import RiskClass
-from secopent.infrastructure.adapters.real_scan import RealScanResult
+from secopent.infrastructure.adapters.real_scan import (
+    ContainerExecError,
+    RealScanResult,
+)
 from secopent.infrastructure.adapters.step_runner import AdapterStepRunner, ScanContext
 
 _SOURCE = AdapterSource(name="nuclei", version="1.0.0", template_version="1.0.0")
@@ -72,10 +76,17 @@ class FakeScanner:
     """Stands in for RealScanRunner: records calls, returns canned observations."""
 
     def __init__(
-        self, observations: tuple[Observation, ...] = (), *, fail_key: str | None = None
+        self,
+        observations: tuple[Observation, ...] = (),
+        *,
+        fail_key: str | None = None,
+        exit_code: int = 0,
+        stderr: str = "",
     ) -> None:
         self._observations = observations
         self._fail_key = fail_key
+        self._exit_code = exit_code
+        self._stderr = stderr
         self.calls: list[dict[str, Any]] = []
 
     def scan(
@@ -94,9 +105,9 @@ class FakeScanner:
         return RealScanResult(
             adapter_key=adapter_key,
             observations=self._observations,
-            exit_code=0,
+            exit_code=self._exit_code,
             stdout="{}",
-            stderr="",
+            stderr=self._stderr,
         )
 
 
@@ -197,6 +208,57 @@ def test_empty_targets_raises_input_invalid_step_failure() -> None:
     )
     with pytest.raises(StepFailure):
         runner.run(_nuclei_step())
+
+
+def test_nonzero_exit_code_raises_worker_unavailable_step_failure() -> None:
+    """v8 root cause 2: a container that exits non-zero must be a step FAILURE,
+    never a silent 'success' with zero observations."""
+    scanner = FakeScanner(observations=(), exit_code=3, stderr="no templates found")
+    runner = _runner(scanner)
+
+    with pytest.raises(StepFailure) as excinfo:
+        runner.run(_nuclei_step())
+
+    assert excinfo.value.failure_class is FailureClass.WORKER_UNAVAILABLE
+    assert "exit_code=3" in str(excinfo.value)
+    assert "no templates found" in str(excinfo.value)
+
+
+def test_container_launch_exception_classified_worker_unavailable() -> None:
+    """A docker-run crash (not a parse error) is a transient worker failure."""
+
+    class _ExplodingScanner(FakeScanner):
+        def scan(self, adapter_key, *, args, mounts=None, **_: object):  # type: ignore[override]
+            raise ContainerExecError("Error: No such file or directory")
+
+    runner = AdapterStepRunner(
+        _ExplodingScanner(),  # type: ignore[arg-type]
+        ScanContext(targets=("http://target:3000",)),
+    )
+    with pytest.raises(StepFailure) as excinfo:
+        runner.run(_nuclei_step())
+    assert excinfo.value.failure_class is FailureClass.WORKER_UNAVAILABLE
+    assert "No such file or directory" in str(excinfo.value)
+
+
+def test_container_launch_failure_mention_docker_logs_hint() -> None:
+    """v8 §3.2: a container launch failure must surface a `docker logs` hint
+    so the operator can diagnose without Docker socket access."""
+
+    class _ExplodingScanner(FakeScanner):
+        def scan(self, adapter_key, *, args, mounts=None, **_: object):  # type: ignore[override]
+            raise ContainerExecError(
+                "container launch failed for nuclei: docker: Error response "
+                "from daemon: No such file or directory"
+            )
+
+    runner = AdapterStepRunner(
+        _ExplodingScanner(),  # type: ignore[arg-type]
+        ScanContext(targets=("http://target:3000",)),
+    )
+    with pytest.raises(StepFailure) as excinfo:
+        runner.run(_nuclei_step())
+    assert "docker logs" in str(excinfo.value)
 
 
 # --- engagement-wide mounts + cloud invocation ------------------------------

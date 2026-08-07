@@ -39,7 +39,7 @@ from secopent.domain.assessments.models import PlanStep
 from secopent.domain.common.canonical import canonical_digest
 from secopent.domain.jobs.models import FailureClass
 
-from .real_scan import RealScanResult, RealScanRunner
+from .real_scan import ContainerExecError, RealScanResult, RealScanRunner
 
 # Adapters driven by a mounted rule/template directory (nuclei-style `-t <dir>`).
 _TEMPLATE_ADAPTERS = frozenset({"nuclei", "nuclei_tcp"})
@@ -125,9 +125,30 @@ class AdapterStepRunner:
     def _scan_target(self, step: PlanStep, target: str) -> RealScanResult:
         args, mounts = self._invocation(step.runner, target)
         try:
-            return self._scanner.scan(step.runner, args=args, mounts=mounts)
+            result = self._scanner.scan(step.runner, args=args, mounts=mounts)
+        except ContainerExecError as exc:
+            # A launch failure means nothing ran - classify as a transient
+            # worker failure (retryable) so the orchestrator doesn't treat it
+            # as a clean scan (v8 root cause 2). Surface a docker-logs hint so
+            # the operator can diagnose without Docker socket access.
+            raise StepFailure(
+                FailureClass.WORKER_UNAVAILABLE,
+                f"{exc} (see `docker logs {step.runner}` for the container)",
+            ) from exc
         except ValueError as exc:  # unknown adapter_key / no registered parser
             raise StepFailure(FailureClass.INPUT_INVALID, str(exc)) from exc
+        if result.exit_code != 0:
+            # The tool RAN but exited non-zero. Non-zero is not necessarily a
+            # failure (checkov exits 1 on policy violations) - but an exit with
+            # zero observations and no parseable output is indistinguishable
+            # from a clean scan, so surface it as a worker failure rather than
+            # silently completing (v8: all 9 steps "succeeded" with exit!=0).
+            raise StepFailure(
+                FailureClass.WORKER_UNAVAILABLE,
+                f"adapter {step.runner!r} on {target}: exit_code={result.exit_code}, "
+                f"stderr={result.stderr.strip() or 'no stderr'}",
+            )
+        return result
 
     def _invocation(self, adapter_key: str, target: str) -> tuple[list[str], dict[str, str]]:
         """Map (adapter, target) + context onto tool CLI args and mounts."""
