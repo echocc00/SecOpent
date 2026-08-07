@@ -62,6 +62,8 @@ class ScopeSnapshot:
                 if value.startswith(("http://", "https://"))
                 else value
             )
+            if not value_host:
+                return False
             return self._host_matches(rule_host, value_host)
         try:
             network = ipaddress.ip_network(rule, strict=False)
