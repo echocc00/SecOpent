@@ -9,6 +9,12 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### v0.5.2 (in progress)
+- **fix(execution)**: 容器 `exit_code != 0` 现在抛 `StepFailure(WORKER_UNAVAILABLE)`，不再静默当"成功"（v8 NAS 事故根因 2：9 步全失败仍 COMPLETED）
+- **fix(execution)**: 空执行（0 step 成功 + 0 findings）→ 标 `FAILED` + `assessment.completed.empty_execution` 审计，不再伪报 COMPLETED（v8 §4.7）
+- **fix(scan)**: 容器启动失败 wrap 成 `ContainerExecError` 并带 `docker logs` 诊断提示（v8 §3.2）
+- **fix(egress)**: nft `apply_scope` 失败写 `egress.hardening_unavailable` 审计，不再静默降级（v8 §3.1）
+
 ## [0.5.1] - 2026-08-07
 
 `Schema: no | Deps: no | Breaking: no` - hotfix: v0.4.0 NAS 升级事故（绿联 DXP4800PLUS

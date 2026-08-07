@@ -9,7 +9,7 @@
 | 能力 | 需要什么 | 探测方式 | 缺失时的行为 |
 |---|---|---|---|
 | **netns 隔离**（每评估独立 network namespace + nft egress） | 标准 Linux iproute2（`ip netns add/del/attach`）+ Docker（sidecar） | 一次性 probe `ip netns add/del`（v0.5.1 F1，结果缓存） | 降级到默认 netns enforcer；审计 `netns.unavailable.degraded`；**评估照常执行**（v0.5.1 F2） |
-| **nftables egress**（主机级 packets 拦截） | `nft` 二进制 + 权限 | — | 已有 best-effort：失败仅审计告警，应用层 EgressGuard 继续 |
+| **nftables egress**（主机级 packets 拦截） | `nft` 二进制 + 权限 | — | best-effort：失败写 `egress.hardening_unavailable` 审计（v0.5.2，不再静默）+ 应用层 EgressGuard 继续 |
 | **适配器容器**（nuclei 等） | Docker daemon + 镜像 | — | step 失败 → 评估 FAILED（核心依赖，不降级） |
 
 ## 2. 环境分类
@@ -59,3 +59,5 @@ v0.5.1 起 create() 部分失败会自清理，正常流程不再产生残留。
 | 日志出现 `netns.unavailable.degraded` | 本机 netns 不可用，已降级 | 正常降级，无需处理；想确认可 `SECOPTENT_NETNS_ENABLED=0` 显式关闭 |
 | 日志出现 `netns capability probe failed` | probe 探测到 ip netns 不可用 | 同上 |
 | `alembic upgrade` 报 table already exists | 存量 DB 未 stamp | v0.5.1 自动处理；老版本手动 `secopent db stamp` |
+| 日志出现 `egress.hardening_unavailable` | nft 不可用，网络层 egress 隔离降级（v0.5.2 起留审计，此前静默） | 修 NAS：`apt install nftables` + 内核 ≥5.x；或接受应用层 EgressGuard 降级 |
+| `coverage_rate=0.0` + `status=failed` | v0.5.2 起"空执行"：0 个 plan step 成功 + 0 findings 判 FAILED，不再把"没扫成"伪装成"扫干净了" | 预期行为。诊断：看 `assessment.completed.empty_execution` 审计 + 各 step 的 `WORKER_UNAVAILABLE` 失败原因 |
