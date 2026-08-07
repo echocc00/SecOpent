@@ -47,17 +47,41 @@ class ScopeSnapshot:
         return domain == rule
 
     def _target_matches(self, rule: str, value: str) -> bool:
+        # An HTTP-prefixed rule (e.g. "http://8.133.200.235/") matches the
+        # rule's HOST against the value's HOST - whether the value is a bare
+        # IP/domain (includes_ip / includes_domain) or a full URL. Previously
+        # this branch required value to also be HTTP-prefixed, so egress_guard
+        # (which strips the scheme and passes a bare IP) could never match an
+        # HTTP-prefixed scope rule (v8 scope/egress bug A).
         if rule.startswith(("http://", "https://")):
-            return (
-                value.startswith(("http://", "https://"))
-                and normalize_url(value).startswith(rule)
+            rule_host = urlsplit(rule).hostname or ""
+            if not rule_host:
+                return False
+            value_host = (
+                urlsplit(value).hostname
+                if value.startswith(("http://", "https://"))
+                else value
             )
+            return self._host_matches(rule_host, value_host)
         try:
             network = ipaddress.ip_network(rule, strict=False)
         except ValueError:
             return self._domain_matches(rule, normalize_domain(value))
         try:
             return ipaddress.ip_address(value) in network
+        except ValueError:
+            return False
+
+    def _host_matches(self, rule_host: str, value_host: str) -> bool:
+        """Match a bare host against an HTTP-rule host (IP or domain, wildcard)."""
+        if self._domain_matches(rule_host, value_host):
+            return True
+        try:
+            rule_net = ipaddress.ip_network(rule_host, strict=False)
+        except ValueError:
+            return False
+        try:
+            return ipaddress.ip_address(value_host) in rule_net
         except ValueError:
             return False
 

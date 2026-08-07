@@ -50,6 +50,37 @@ def test_scope_snapshot_immutable() -> None:
 
 
 # ---------------------------------------------------------------------------
+# HTTP-prefixed rules matched against bare IPs (v8 scope/egress bug A)
+# ---------------------------------------------------------------------------
+
+
+def test_includes_ip_matches_http_prefixed_ip_rule() -> None:
+    """v8 bug A: scope rule ``http://8.133.200.235/`` must match the bare IP
+    ``8.133.200.235`` (egress_guard / scope_enforcer pass a scheme-stripped IP)."""
+    snapshot = _snapshot(include=("http://8.133.200.235/",))
+    assert snapshot.includes_ip("8.133.200.235")
+
+
+def test_includes_domain_matches_http_prefixed_domain_rule() -> None:
+    """An HTTP-prefixed domain rule matches the bare hostname via includes_domain."""
+    snapshot = _snapshot(include=("https://example.test/",))
+    assert snapshot.includes_domain("example.test")
+
+
+def test_includes_ip_still_matches_bare_ip_rule() -> None:
+    """A bare IP/CIDR rule still works unchanged."""
+    snapshot = _snapshot(include=("192.0.2.0/28",))
+    assert snapshot.includes_ip("192.0.2.5")
+    assert not snapshot.includes_ip("192.0.2.200")
+
+
+def test_includes_ip_rejects_out_of_scope_ip_for_http_rule() -> None:
+    """An IP not matching the HTTP-prefixed rule's host is rejected."""
+    snapshot = _snapshot(include=("http://8.133.200.235/",))
+    assert not snapshot.includes_ip("8.133.200.236")
+
+
+# ---------------------------------------------------------------------------
 # Cloud-account scope (M1 Task 12, §4.1.1 方案 B)
 # ---------------------------------------------------------------------------
 
