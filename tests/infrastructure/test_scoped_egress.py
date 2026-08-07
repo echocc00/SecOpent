@@ -90,3 +90,24 @@ def test_configurable_blocked_cidr_docker_host() -> None:
 def test_is_blocked_destination_fails_closed_on_garbage() -> None:
     guard = EgressGuard(FakeResolver({}))
     assert guard.is_blocked_destination("not-an-ip") is True
+
+
+def test_http_prefixed_ip_rule_matches_bare_ip_egress_target() -> None:
+    """v8 bugs A+B: egress_guard.check receives the scheme-stripped IP, and the
+    scope rule is HTTP-prefixed. Before the fix, includes_ip rejected the bare IP
+    (the HTTP branch required a scheme) so this in-scope target was wrongly
+    OUT_OF_SCOPE - every HTTP-prefixed scope was un-scannable."""
+    guard = EgressGuard(FakeResolver({}))
+    scope = _scope(include=("http://8.133.200.235/",))
+    decision = guard.check("8.133.200.235", scope)
+    assert decision.allowed is True
+    assert decision.reason == "ALLOWED"
+
+
+def test_http_prefixed_ip_rule_rejects_out_of_scope_ip() -> None:
+    """The same HTTP-prefixed rule rejects a DIFFERENT IP (the check is real)."""
+    guard = EgressGuard(FakeResolver({}))
+    scope = _scope(include=("http://8.133.200.235/",))
+    decision = guard.check("8.133.200.236", scope)
+    assert decision.allowed is False
+    assert decision.reason == "OUT_OF_SCOPE"
