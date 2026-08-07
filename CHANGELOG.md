@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-07
+
 ### v0.5.2 (in progress)
 - **fix(execution)**: 容器 `exit_code != 0` 且**零产出**时抛 `StepFailure(WORKER_UNAVAILABLE)`（v8 根因 2）；非零 exit 但有产出（checkov 扫到违规 exit=1）是合法成功，不误伤
 - **fix(execution)**: 空执行（0 step 成功 + 0 findings）→ 标 `FAILED` + `assessment.completed.empty_execution` 审计，不再伪报 COMPLETED（v8 §4.7）
