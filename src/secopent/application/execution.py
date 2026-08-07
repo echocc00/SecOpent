@@ -489,6 +489,12 @@ def execute_assessment(
                 "findings": len(findings),
                 "coverage_rate": coverage_rate,
                 "uncovered_classes": list(uncovered),
+                # v8 scenario #3: steps succeeded but produced zero observations
+                # (e.g. every probe failed on a throttling ISP). This is
+                # ambiguous with a clean target, so the assessment stays
+                # COMPLETED - but the flag makes the anomaly queryable in the
+                # audit log instead of being indistinguishable from "clean".
+                "no_observations": True if not observations else None,
             },
             outbox=audit_outbox,
         )

@@ -10,10 +10,11 @@ stamps it and tags the matching `v<version>`.
 ## [Unreleased]
 
 ### v0.5.2 (in progress)
-- **fix(execution)**: 容器 `exit_code != 0` 现在抛 `StepFailure(WORKER_UNAVAILABLE)`，不再静默当"成功"（v8 NAS 事故根因 2：9 步全失败仍 COMPLETED）
+- **fix(execution)**: 容器 `exit_code != 0` 且**零产出**时抛 `StepFailure(WORKER_UNAVAILABLE)`（v8 根因 2）；非零 exit 但有产出（checkov 扫到违规 exit=1）是合法成功，不误伤
 - **fix(execution)**: 空执行（0 step 成功 + 0 findings）→ 标 `FAILED` + `assessment.completed.empty_execution` 审计，不再伪报 COMPLETED（v8 §4.7）
 - **fix(scan)**: 容器启动失败 wrap 成 `ContainerExecError` 并带 `docker logs` 诊断提示（v8 §3.2）
 - **fix(egress)**: nft `apply_scope` 失败写 `egress.hardening_unavailable` 审计，不再静默降级（v8 §3.1）
+- **fix(execution)**: 步骤成功但零 observations（容器跑了、probe 全失败）→ `assessment.completed` 审计 payload 带 `no_observations: true`，可与"target 干净"区分（v8 场景 #3）
 
 ## [0.5.1] - 2026-08-07
 
