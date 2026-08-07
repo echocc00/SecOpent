@@ -29,6 +29,7 @@ from ..domain.common.errors import DomainError
 from ..domain.findings.models import Finding
 from ..domain.jobs.models import JobStatus
 from ..domain.permits.models import DEFAULT_PERMIT_TTL_SECONDS, ExecutionPermit
+from ..domain.policy.models import RiskClass
 from ..domain.scope.models import ScopeSnapshot
 from .assessments import AssessmentService
 from .audit import AuditService
@@ -225,18 +226,42 @@ def _check_plan_scope(
     audit_repo: object,
     audit_outbox: object | None = None,
 ) -> bool:
-    """Pre-check every plan target against the scope + egress before dispatch.
+    """Pre-check every target that will be scanned against scope + egress.
 
     Returns True if all targets are in scope (or no enforcer is wired).
     Returns False (and FAILS + audits the assessment) on the first denial.
+
+    The targets checked are: (1) any ``target`` a plan step carries explicitly,
+    plus (2) every ``scope.include`` entry - because the production
+    ``_production_step_runner`` uses ``scope.include`` as the ScanContext
+    targets, so those are the actual addresses the tool containers will hit.
+    Relying on ``step.parameters["target"]`` alone was dead code: real
+    catalog-generated plans never populate it (v8 scope/egress bug B - the
+    check silently skipped every step).
     """
     if enforcer is None and egress_guard is None:
         return True
     steps = getattr(plan, "steps", ())
+    targets: list[str] = []
     for step in steps:
         target = step.parameters.get("target") if hasattr(step, "parameters") else None
-        if not target:
-            continue
+        if target:
+            targets.append(target)
+    # Also check concrete-host scope.include entries (URLs/IPs/domains): the
+    # production _production_step_runner uses scope.include as ScanContext
+    # targets, so those are the actual addresses tool containers hit. CIDR
+    # networks (e.g. "10.0.0.0/30") are authorization boundaries, not direct
+    # egress targets - they are skipped (the plan's explicit target is checked
+    # instead). This closes the v8 bug B dead-code gap: a catalog plan with no
+    # `target` field still has every concrete scan destination checked.
+    for target in scope.include:
+        if "/" in target and not target.startswith(("http://", "https://")):
+            continue  # CIDR network, not a direct egress target
+        if target not in targets:
+            targets.append(target)
+    if not targets:
+        return True
+    for target in targets:
         if egress_guard is not None:
             egress_decision = egress_guard.check(target, scope)
             if not egress_decision.allowed:
@@ -254,9 +279,13 @@ def _check_plan_scope(
                 )
                 return False
         if enforcer is not None:
+            # Target-driven (scope.include), not step-driven: use a fixed,
+            # already-approved risk context so the enforcer's scope/rebinding
+            # checks run while its risk/approval steps pass trivially (the
+            # assessment was approved upstream before dispatch).
             context = EnforcementContext(
-                risk=step.risk,
-                approved_risks=frozenset({step.risk}),
+                risk=RiskClass.PASSIVE,
+                approved_risks=frozenset({RiskClass.PASSIVE}),
                 approved=True,
                 budget_remaining=1.0,
                 now=utc_now(),

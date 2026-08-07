@@ -173,3 +173,114 @@ def test_nft_failure_records_hardening_unavailable_audit(memory_repositories) ->
     assert "egress.hardening_unavailable" in actions
     # The scan continues despite the nft downgrade.
     assert memory_repositories.assessments.get(a.id).status is AssessmentStatus.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# v8 scope/egress dead-code bug B: _check_plan_scope must check scope.include
+# even when the plan carries no `target` (real catalog-style plans never do).
+# ---------------------------------------------------------------------------
+
+
+def _seed_approved_with_scope(repos, *, include: tuple[str, ...]) -> None:
+    """Seed an APPROVED assessment whose scope.include holds the scan targets,
+    with a CATALOG-STYLE plan (no `target` in step.parameters - the real
+    planner output)."""
+    from datetime import UTC, datetime
+
+    from secopent.domain.policy.models import ExecutionMode, RiskClass
+    from secopent.domain.projects.models import Project
+    from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
+
+    repos.projects.add(Project.create(project_id="p1", name="t"))
+    repos.scopes.add_snapshot(ScopeSnapshot(
+        id="s1", project_id="p1", include=include, exclude=(),
+        ports=(443,),
+        limits=ScopeLimits(requests_per_second=10, concurrency=2, max_requests=100),
+        approved_by="a", approved_at=datetime.now(UTC), digest="sha256:scope",
+    ))
+    service = AssessmentService(repos.assessments)
+    assessment = service.create(
+        project_id="p1", scope_snapshot_id="s1", mode=ExecutionMode.APPROVAL,
+    )
+    from secopent.domain.assessments.models import PlanStep
+    service.attach_plan(assessment.id, steps=(
+        PlanStep(
+            key="web_app:wstg-info-01", runner="nuclei", risk=RiskClass.PASSIVE,
+            parameters={"asset_type": "web_app", "test_class": "wstg-info-01"},
+            dependencies=(),
+        ),
+    ))
+    service.approve(
+        assessment_id=assessment.id, approved_by="analyst",
+        approved_risks=frozenset({RiskClass.PASSIVE}),
+        approved_capabilities=frozenset(), scope_digest="sha256:scope",
+    )
+    return repos.assessments.get(assessment.id)
+
+
+def test_scope_include_metadata_ip_blocked_by_egress_with_catalog_plan(
+    memory_repositories,
+) -> None:
+    """v8 bug B: a scope that mistakenly includes the cloud-metadata IP is
+    blocked by egress_guard EVEN THOUGH the plan carries no `target` field
+    (real catalog plans). Previously _check_plan_scope skipped every step and
+    the metadata IP was never checked."""
+    from secopent.infrastructure.egress.egress_guard import EgressGuard
+    from secopent.infrastructure.egress.nft_scope import SocketDnsResolver
+
+    _seed_approved_with_scope(
+        memory_repositories, include=("https://169.254.169.254/",)
+    )
+    assessment = memory_repositories.assessments.items[
+        next(iter(memory_repositories.assessments.items))
+    ]
+    AssessmentService(memory_repositories.assessments).start(assessment.id)
+
+    execute_assessment(
+        assessment_id=assessment.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        egress_guard=EgressGuard(SocketDnsResolver()),
+    )
+
+    assessment = memory_repositories.assessments.get(assessment.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.FAILED
+    actions = [e.action for e in memory_repositories.audit.events]
+    assert "assessment.blocked.egress_denied" in actions
+
+
+def test_scope_include_in_scope_target_proceeds_with_catalog_plan(
+    memory_repositories,
+) -> None:
+    """A legitimate in-scope target (non-metadata, HTTP-prefixed IP rule) must
+    NOT be blocked by the scope check when the plan carries no `target`."""
+    from secopent.infrastructure.egress.egress_guard import EgressGuard
+    from secopent.infrastructure.egress.nft_scope import SocketDnsResolver
+
+    _seed_approved_with_scope(
+        memory_repositories, include=("https://8.133.200.235/",)
+    )
+    assessment = memory_repositories.assessments.items[
+        next(iter(memory_repositories.assessments.items))
+    ]
+    AssessmentService(memory_repositories.assessments).start(assessment.id)
+
+    execute_assessment(
+        assessment_id=assessment.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        egress_guard=EgressGuard(SocketDnsResolver()),
+    )
+
+    assessment = memory_repositories.assessments.get(assessment.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.COMPLETED
+    actions = [e.action for e in memory_repositories.audit.events]
+    assert "assessment.blocked.egress_denied" not in actions
