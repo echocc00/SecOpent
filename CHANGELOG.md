@@ -9,9 +9,13 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### v0.5.3 (in progress)
+- **fix(scope)**: `includes_ip` 现在匹配 HTTP-prefixed 规则(egress_guard/scope_enforcer 传裸 IP,此前 HTTP 分支要求 value 也带 scheme → HTTP-prefixed scope 目标恒 OUT_OF_SCOPE,v8 scope/egress bug A)
+- **fix(execution)**: `_check_plan_scope` 现在检查 `scope.include` 的 concrete-host 目标(此前只查 plan 参数 `target`,而 catalog 计划从不生成该字段 → scope/egress 检查是死代码,v8 bug B)。误包含 metadata IP 的 scope 现在会被 egress_guard 拦截
+- **test(egress)**: 钉住 HTTP-prefixed 规则 + 裸 IP egress target 的直连断言(in-scope ALLOWED / out-of-scope 拒绝)
+
 ## [0.5.2] - 2026-08-07
 
-### v0.5.2 (in progress)
 - **fix(execution)**: 容器 `exit_code != 0` 且**零产出**时抛 `StepFailure(WORKER_UNAVAILABLE)`（v8 根因 2）；非零 exit 但有产出（checkov 扫到违规 exit=1）是合法成功，不误伤
 - **fix(execution)**: 空执行（0 step 成功 + 0 findings）→ 标 `FAILED` + `assessment.completed.empty_execution` 审计，不再伪报 COMPLETED（v8 §4.7）
 - **fix(scan)**: 容器启动失败 wrap 成 `ContainerExecError` 并带 `docker logs` 诊断提示（v8 §3.2）
