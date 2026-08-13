@@ -22,7 +22,7 @@ from .models import AssessmentStatus
 
 ALLOWED_TRANSITIONS: Mapping[AssessmentStatus, frozenset[AssessmentStatus]] = {
     AssessmentStatus.DRAFT: frozenset({AssessmentStatus.AWAITING_APPROVAL}),
-    # PLANNED/PAUSED are reserved statuses with no transitions today.
+    # PLANNED is a reserved status with no transitions today.
     AssessmentStatus.PLANNED: frozenset(),
     # Re-planning keeps the assessment in AWAITING_APPROVAL.
     AssessmentStatus.AWAITING_APPROVAL: frozenset({
@@ -32,13 +32,25 @@ ALLOWED_TRANSITIONS: Mapping[AssessmentStatus, frozenset[AssessmentStatus]] = {
     }),
     AssessmentStatus.APPROVED: frozenset({AssessmentStatus.QUEUED}),
     AssessmentStatus.REJECTED: frozenset(),  # terminal: a new assessment is the remedy
-    AssessmentStatus.QUEUED: frozenset({AssessmentStatus.RUNNING}),
+    AssessmentStatus.QUEUED: frozenset({
+        AssessmentStatus.RUNNING,
+        AssessmentStatus.CANCELLED,
+    }),
     AssessmentStatus.RUNNING: frozenset({
         AssessmentStatus.COMPLETED,
         AssessmentStatus.PARTIAL,
         AssessmentStatus.FAILED,
+        # Pause/resume/cancel (MCP orchestration): the executor consumes the
+        # durable control signal at step boundaries (M4), so a RUNNING row may
+        # legally land on PAUSED (paused: completes its in-flight step then
+        # stops issuing work) or CANCELLED (terminal).
+        AssessmentStatus.PAUSED,
+        AssessmentStatus.CANCELLED,
     }),
-    AssessmentStatus.PAUSED: frozenset(),
+    AssessmentStatus.PAUSED: frozenset({
+        AssessmentStatus.RUNNING,      # resume
+        AssessmentStatus.CANCELLED,    # cancel from paused
+    }),
     AssessmentStatus.COMPLETED: frozenset(),  # terminal
     AssessmentStatus.PARTIAL: frozenset(),    # terminal
     AssessmentStatus.FAILED: frozenset(),     # terminal: restart = explicit operator action

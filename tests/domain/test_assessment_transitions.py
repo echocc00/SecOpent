@@ -56,6 +56,26 @@ def test_happy_path_chain_is_legal() -> None:
         assert_transition(current, target)
 
 
+def test_pause_resume_cancel_chain_is_legal() -> None:
+    """MCP control-plane semantics: RUNNING<->PAUSED, cancel from 3 states."""
+    legal = [
+        (AssessmentStatus.RUNNING, AssessmentStatus.PAUSED),
+        (AssessmentStatus.PAUSED, AssessmentStatus.RUNNING),
+        (AssessmentStatus.QUEUED, AssessmentStatus.CANCELLED),
+        (AssessmentStatus.RUNNING, AssessmentStatus.CANCELLED),
+        (AssessmentStatus.PAUSED, AssessmentStatus.CANCELLED),
+    ]
+    for current, target in legal:
+        assert_transition(current, target)
+
+
+def test_pause_resume_are_persistence_only_guards() -> None:
+    """PAUSED has no executor-related exits; only resume/cancel."""
+    assert ALLOWED_TRANSITIONS[AssessmentStatus.PAUSED] == frozenset(
+        {AssessmentStatus.RUNNING, AssessmentStatus.CANCELLED}
+    )
+
+
 def test_replan_stays_awaiting_approval() -> None:
     assert_transition(
         AssessmentStatus.AWAITING_APPROVAL, AssessmentStatus.AWAITING_APPROVAL

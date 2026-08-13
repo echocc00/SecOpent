@@ -158,16 +158,20 @@ class SqlAlchemyAssessmentRepository:
             scope_snapshot_id=assessment.scope_snapshot_id,
             mode=assessment.mode.value, status=assessment.status.value,
             active_plan_id=assessment.active_plan_id, approval_id=assessment.approval_id,
+            control=assessment.control.value,
         ))
 
     def get(self, assessment_id: str) -> Assessment | None:
         row = self._session.get(CoreAssessment, assessment_id)
         if not row:
             return None
+        from ...domain.assessments.models import ControlState
+
         return Assessment(
             id=row.id, project_id=row.project_id, scope_snapshot_id=row.scope_snapshot_id,
             mode=ExecutionMode(row.mode), status=AssessmentStatus(row.status),
             active_plan_id=row.active_plan_id, approval_id=row.approval_id,
+            control=ControlState(row.control),
         )
 
     def list_all(self, project_id: str | None = None) -> list[Assessment]:
@@ -175,12 +179,15 @@ class SqlAlchemyAssessmentRepository:
         if project_id is not None:
             stmt = stmt.where(CoreAssessment.project_id == project_id)
         rows = self._session.execute(stmt).scalars().all()
+        from ...domain.assessments.models import ControlState
+
         return [
             Assessment(
                 id=row.id, project_id=row.project_id,
                 scope_snapshot_id=row.scope_snapshot_id,
                 mode=ExecutionMode(row.mode), status=AssessmentStatus(row.status),
                 active_plan_id=row.active_plan_id, approval_id=row.approval_id,
+                control=ControlState(row.control),
             )
             for row in rows
         ]

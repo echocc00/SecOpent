@@ -24,6 +24,22 @@ class AssessmentStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ControlState(StrEnum):
+    """Runtime-control signal for a live assessment (MCP pause/resume/cancel).
+
+    Written by the control-plane tools (``AssessmentService.pause/resume/
+    cancel``) and consumed (then cleared to NONE) by the executor thread at
+    step boundaries. The signal is durable (a column on ``core_assessments``)
+    so an executor in a different process sees the request; M4 wires the
+    actual consumption.
+    """
+
+    NONE = "none"
+    PAUSE_REQUESTED = "pause_requested"
+    RESUME_REQUESTED = "resume_requested"
+    CANCEL_REQUESTED = "cancel_requested"
+
+
 @dataclass(frozen=True, slots=True)
 class PlanStep:
     key: str
@@ -115,6 +131,10 @@ class Assessment:
     status: AssessmentStatus
     active_plan_id: str | None = None
     approval_id: str | None = None
+    # Runtime-control signal for a live execution (ControlState); consumed by
+    # the executor at step boundaries (M4). Default NONE keeps every existing
+    # construction site compatible.
+    control: ControlState = ControlState.NONE
 
     @classmethod
     def create(cls, *, assessment_id: str, project_id: str, scope_snapshot_id: str,

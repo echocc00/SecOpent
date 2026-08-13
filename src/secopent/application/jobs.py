@@ -1,17 +1,21 @@
 # src/secopent/application/jobs.py
-"""JobService: job lifecycle + DB-lease semantics (§13 V1, §7.3).
+"""JobService facade + the in-memory JobStore (M4 §13, §7.3).
 
-Manages jobs in a lease-based store. A worker leases a READY (or stale-leased)
-job, which stamps it with an owner + expiry; if the worker stalls, the lease
-expires and another worker can re-lease. ``add`` is idempotent on the
-``idempotency_key`` so re-dispatching the same plan does not duplicate work.
-The in-memory store is M4 scope; the SQLite-backed lease lands behind the same
-surface (Task 11).
+``JobService`` is the backward-compatible surface the orchestrator and tests
+already use; by default it wraps an in-memory store. Production wiring passes
+the SQLAlchemy-backed store (``SqlAlchemyJobRepository`` over ``core_jobs``)
+so leases survive restarts and the Web /jobs view shows real execution state
+(design: sepcs/2026-08-13-mcp-job-lease-cancellation-design.md, M1).
 
-Thread-safety (P3 §3.5 / T4): all public operations hold a re-entrant lock so
-the lease check-then-set is atomic - concurrent workers cannot double-lease the
-same job, and the parallel Orchestrator (``execute_ready`` with max_workers>1)
-runs adapter executions concurrently without racing the store.
+Lease semantics (identical across stores):
+
+- ``lease``: READY (or LEASED with an expired lease - stale takeover) ->
+  LEASED, stamped with the owner + expiry, attempt incremented. The
+  check-then-set is atomic (RLock here; a conditional UPDATE in SQL), so
+  concurrent workers cannot double-lease the same job.
+- ``renew``: only the current owner may extend the lease.
+- ``add``: idempotent on ``idempotency_key`` - re-dispatching a plan does not
+  duplicate jobs.
 """
 from __future__ import annotations
 
@@ -26,6 +30,7 @@ from ..domain.jobs.models import (
     Job,
     JobStatus,
 )
+from .ports.jobs import JobStore
 
 
 class JobNotFoundError(DomainError):
@@ -36,8 +41,8 @@ class JobLeaseError(DomainError):
     """Raised on an invalid lease transition (wrong owner / not leaseable)."""
 
 
-class JobService:
-    """Lease-based job store (single-machine V1), thread-safe."""
+class MemoryJobStore:
+    """In-memory JobStore implementation (thread-safe, RLock)."""
 
     def __init__(self, *, lease_ttl_seconds: int = 300) -> None:
         self._jobs: dict[str, Job] = {}
@@ -55,12 +60,9 @@ class JobService:
             self._jobs[job.id] = job
             return job
 
-    def get(self, job_id: str) -> Job:
+    def get(self, job_id: str) -> Job | None:
         with self._lock:
-            job = self._jobs.get(job_id)
-            if job is None:
-                raise JobNotFoundError(f"job not found: {job_id}")
-            return job
+            return self._jobs.get(job_id)
 
     def all(self) -> tuple[Job, ...]:
         with self._lock:
@@ -76,7 +78,7 @@ class JobService:
         together, so two concurrent workers cannot both lease the same job.
         """
         with self._lock:
-            job = self.get(job_id)
+            job = self._require(job_id)
             stale = (
                 job.status is JobStatus.LEASED
                 and job.lease_expires_at is not None
@@ -95,7 +97,7 @@ class JobService:
     def renew(self, job_id: str, *, owner: str, now: datetime) -> Job:
         """Extend the lease; only the current owner may renew."""
         with self._lock:
-            job = self.get(job_id)
+            job = self._require(job_id)
             if job.lease_owner != owner:
                 raise JobLeaseError("only the lease owner may renew")
             return self._set(job_id, lease_expires_at=now + timedelta(seconds=self._ttl))
@@ -112,8 +114,20 @@ class JobService:
         return self._set(job_id, status=status, failure_class=failure_class.value)
 
     def requeue(self, job_id: str) -> Job:
-        """Return a job to READY (released lease) for a retry."""
-        return self._set(job_id, status=JobStatus.READY, lease_owner=None, lease_expires_at=None)
+        """Return a job to READY (released lease, cleared failure) for a retry."""
+        return self._set(
+            job_id,
+            status=JobStatus.READY,
+            lease_owner=None,
+            lease_expires_at=None,
+            failure_class="",
+        )
+
+    def skip(self, job_id: str) -> Job:
+        """Mark a job SKIPPED (a cancelled/paused run abandons it)."""
+        return self._set(
+            job_id, status=JobStatus.SKIPPED, lease_owner=None, lease_expires_at=None
+        )
 
     def leaseable(self, now: datetime) -> tuple[Job, ...]:
         """Jobs that can be leased now: READY, or LEASED with an expired lease."""
@@ -129,10 +143,66 @@ class JobService:
                     result.append(job)
             return tuple(result)
 
+    def _require(self, job_id: str) -> Job:
+        """Internal lookup: raise JobNotFoundError on a missing job."""
+        job = self.get(job_id)
+        if job is None:
+            raise JobNotFoundError(f"job not found: {job_id}")
+        return job
+
     def _set(self, job_id: str, **changes: object) -> Job:
         # Callers hold the (re-entrant) lock; get() re-acquires it safely.
         with self._lock:
-            job = self.get(job_id)
+            job = self._require(job_id)
             updated = replace(job, **changes)  # type: ignore[arg-type]
             self._jobs[job_id] = updated
             return updated
+
+
+class JobService:
+    """Backward-compatible facade over a ``JobStore`` (memory by default)."""
+
+    def __init__(
+        self,
+        store: JobStore | None = None,
+        *,
+        lease_ttl_seconds: int = 300,
+    ) -> None:
+        self._store = store or MemoryJobStore(lease_ttl_seconds=lease_ttl_seconds)
+
+    def add(self, job: Job) -> Job:
+        return self._store.add(job)
+
+    def get(self, job_id: str) -> Job:
+        """Facade contract (unchanged): raise on a missing job."""
+        job = self._store.get(job_id)
+        if job is None:
+            raise JobNotFoundError(f"job not found: {job_id}")
+        return job
+
+    def all(self) -> tuple[Job, ...]:
+        return self._store.all()
+
+    def mark_ready(self, job_id: str) -> Job:
+        return self._store.mark_ready(job_id)
+
+    def lease(self, job_id: str, *, owner: str, now: datetime) -> Job:
+        return self._store.lease(job_id, owner=owner, now=now)
+
+    def renew(self, job_id: str, *, owner: str, now: datetime) -> Job:
+        return self._store.renew(job_id, owner=owner, now=now)
+
+    def complete(self, job_id: str, *, result_digest: str) -> Job:
+        return self._store.complete(job_id, result_digest=result_digest)
+
+    def fail(self, job_id: str, *, failure_class: FailureClass) -> Job:
+        return self._store.fail(job_id, failure_class=failure_class)
+
+    def requeue(self, job_id: str) -> Job:
+        return self._store.requeue(job_id)
+
+    def skip(self, job_id: str) -> Job:
+        return self._store.skip(job_id)
+
+    def leaseable(self, now: datetime) -> tuple[Job, ...]:
+        return self._store.leaseable(now)

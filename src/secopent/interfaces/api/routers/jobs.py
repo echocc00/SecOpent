@@ -8,8 +8,6 @@ FAILED jobs may be retried; a live/leased job is left to the worker lifecycle.
 """
 from __future__ import annotations
 
-from dataclasses import replace
-
 from fastapi import APIRouter, HTTPException
 
 from ....domain.jobs.models import Job, JobStatus
@@ -60,12 +58,5 @@ def retry_job(job_id: str, session: DbSession) -> JobOut:
             status_code=409,
             detail=f"only failed jobs can be retried (status={job.status.value})",
         )
-    retried = replace(
-        job,
-        status=JobStatus.READY,
-        lease_owner=None,
-        lease_expires_at=None,
-        failure_class="",
-    )
-    repo.add(retried)
+    retried = repo.requeue(job_id)  # clears lease + failure_class atomically
     return _to_out(retried)

@@ -7,6 +7,7 @@ from ..domain.assessments.models import (
     Approval,
     Assessment,
     AssessmentStatus,
+    ControlState,
     ExecutionPlan,
     PlanStep,
 )
@@ -185,5 +186,64 @@ class AssessmentService:
             raise LookupError(f"assessment {assessment_id} not found")
         assert_transition(assessment.status, AssessmentStatus.FAILED)
         updated = replace(assessment, status=AssessmentStatus.FAILED)
+        self._repo.add(updated)
+        return updated
+
+    # --- MCP control-plane orchestration (M4 §13; agent-callable) ----------
+    # status/pause/resume/cancel are read/control-plane operations, NOT the
+    # human-gated approve/reject/start surface. Each control move writes a
+    # durable signal (``control``) alongside the status transition; the
+    # executor thread consumes the signal at step boundaries (M4): a paused
+    # run finishes its in-flight step then issues no new work (remaining jobs
+    # stay READY for a resume drain); a cancelled run abandons the remaining
+    # jobs. The status column is the source of truth the executor respects.
+
+    def status(self, assessment_id: str) -> Assessment:
+        """Read-only status probe; raises LookupError when not found."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        return assessment
+
+    @staticmethod
+    def _set_control(
+        assessment: Assessment, target: AssessmentStatus, signal: ControlState
+    ) -> Assessment:
+        """Status transition + control signal in one atomic domain update."""
+        assert_transition(assessment.status, target)
+        return replace(
+            assessment, status=target, control=signal,
+        )
+
+    def pause(self, assessment_id: str) -> Assessment:
+        """RUNNING -> PAUSED; requests the executor to stop at the next step."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        updated = self._set_control(
+            assessment, AssessmentStatus.PAUSED, ControlState.PAUSE_REQUESTED
+        )
+        self._repo.add(updated)
+        return updated
+
+    def resume(self, assessment_id: str) -> Assessment:
+        """PAUSED -> RUNNING; requests a drain restart for remaining jobs."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        updated = self._set_control(
+            assessment, AssessmentStatus.RUNNING, ControlState.RESUME_REQUESTED
+        )
+        self._repo.add(updated)
+        return updated
+
+    def cancel(self, assessment_id: str) -> Assessment:
+        """QUEUED/RUNNING/PAUSED -> CANCELLED; requests container termination."""
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        updated = self._set_control(
+            assessment, AssessmentStatus.CANCELLED, ControlState.CANCEL_REQUESTED
+        )
         self._repo.add(updated)
         return updated

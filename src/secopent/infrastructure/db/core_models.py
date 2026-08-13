@@ -43,6 +43,8 @@ class CoreAssessment(CoreBase):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     active_plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     approval_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Runtime-control signal (ControlState); "none" default (MCP pause/resume/cancel).
+    control: Mapped[str] = mapped_column(String(32), nullable=False, default="none")
 
 
 class CoreExecutionPlan(CoreBase):

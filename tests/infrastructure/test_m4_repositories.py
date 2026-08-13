@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from secopent.domain.adapters.contracts import Severity
@@ -116,10 +115,18 @@ def test_job_round_trip_preserves_lease(session: Session) -> None:
     assert loaded.dependencies == ("a", "b")
 
 
-def test_job_idempotency_key_unique(session: Session) -> None:
+def test_job_add_is_idempotent_on_idempotency_key(session: Session) -> None:
+    """Re-dispatching the same plan returns the stored job, never a duplicate.
+
+    ``add`` is the JobStore contract (application/ports/jobs.py): idempotent on
+    ``idempotency_key`` so the orchestrator can safely re-dispatch. The unique
+    DB constraint remains as a last-resort guard, but the store never reaches
+    it for a same-key re-add.
+    """
     repo = SqlAlchemyJobRepository(session)
     repo.add(Job(id="j1", plan_step_key="k", idempotency_key="same"))
     session.commit()
-    repo.add(Job(id="j2", plan_step_key="k2", idempotency_key="same"))
-    with pytest.raises(IntegrityError):  # duplicate idempotency_key
-        session.commit()
+    repeated = repo.add(Job(id="j2", plan_step_key="k2", idempotency_key="same"))
+    assert repeated.id == "j1"  # existing job wins, no duplicate row
+    session.commit()  # must not raise IntegrityError
+    assert len(repo.all()) == 1

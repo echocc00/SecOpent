@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from ....application.assessments import AssessmentPermissionError, AssessmentService
 from ....application.audit import AuditService
-from ....application.execution import execute_assessment
+from ....application.execution import execute_assessment, resume_assessment
 from ....application.planner import Planner
 from ....domain.assessments.models import Assessment, ExecutionPlan
 from ....domain.catalog.models import AssetType
@@ -37,6 +37,7 @@ from ....infrastructure.repositories.sqlalchemy_core import (
 from ....infrastructure.repositories.sqlalchemy_findings import (
     SqlAlchemyFindingRepository,
 )
+from ....infrastructure.repositories.sqlalchemy_jobs import SqlAlchemyJobRepository
 from ..deps import DbSession
 from ..schemas import (
     AssessmentCreate,
@@ -342,6 +343,9 @@ def _run_assessment_daemon(
                     if oracle is not None
                     else None
                 ),
+                # Durable lease (M1/M4): job state lands in core_jobs, visible
+                # to the Web /jobs view and reusable by resume drains.
+                jobs_store=SqlAlchemyJobRepository(uow.session),
             )
     finally:
         if netns_handle is not None and netns_isolator is not None:
@@ -351,6 +355,65 @@ def _run_assessment_daemon(
                 logger.exception(
                     "netns destroy failed for %s", netns_handle.name
                 )
+        if active_executions is not None and active_executions_lock is not None:
+            with active_executions_lock:
+                active_executions.discard(thread)
+
+
+def _run_resume_daemon(
+    *,
+    db: Database,
+    assessment_id: str,
+    active_executions: Any = None,
+    active_executions_lock: Any = None,
+    audit_chain: Any = None,
+    oracle: Any = None,
+    audit_outbox: Any = None,
+) -> None:
+    """Resume a PAUSED assessment's remaining jobs in the background (M4).
+
+    A lightweight continuation of the original execution: no permit/nft
+    re-issue (``resume_assessment`` owns the drain); the thread registers for
+    SIGTERM drain like the initial daemon. The durable job store (core_jobs)
+    makes dispatch idempotent, so only the remaining READY jobs run.
+    """
+    thread = threading.current_thread()
+    if active_executions is not None and active_executions_lock is not None:
+        with active_executions_lock:
+            active_executions.add(thread)
+    try:
+        with db.unit_of_work() as uow:
+            catalog = SqlAlchemyCatalogRepository(uow.session).latest_catalog()
+            assessment = SqlAlchemyAssessmentRepository(uow.session).get(assessment_id)
+            scope = (
+                SqlAlchemyScopeRepository(uow.session).get_snapshot(
+                    assessment.scope_snapshot_id
+                )
+                if assessment
+                else None
+            )
+            asset_types = tuple(_classify_asset_types(scope)) if scope else ()
+            resume_assessment(
+                assessment_id=assessment_id,
+                assessment_repo=SqlAlchemyAssessmentRepository(uow.session),
+                scope_repo=SqlAlchemyScopeRepository(uow.session),
+                finding_repo=SqlAlchemyFindingRepository(uow.session),
+                audit_repo=SqlAlchemyAuditRepository(uow.session),
+                step_runner_factory=_production_step_runner,
+                catalog=catalog,
+                asset_types=asset_types,
+                max_workers=_orchestrator_max_workers(),
+                audit_chain=audit_chain,
+                audit_outbox=audit_outbox,
+                oracle=oracle,
+                confirmed_finding_repo=(
+                    SqlAlchemyConfirmedFindingRepository(uow.session)
+                    if oracle is not None
+                    else None
+                ),
+                jobs_store=SqlAlchemyJobRepository(uow.session),
+            )
+    finally:
         if active_executions is not None and active_executions_lock is not None:
             with active_executions_lock:
                 active_executions.discard(thread)
@@ -413,6 +476,45 @@ def start_assessment(
         nft_scope_enforcer=getattr(app_state, "nft_scope_enforcer", None),
         netns_isolator=getattr(app_state, "netns_isolator", None),
         make_nft_enforcer=getattr(app_state, "make_nft_enforcer", None),
+        oracle=getattr(app_state, "oracle", None),
+        audit_outbox=getattr(app_state, "outbox_activation", {}).get("recorder"),
+    )
+    return _to_out(assessment)
+
+
+@router.post("/{assessment_id}/resume", response_model=AssessmentOut)
+def start_resume(
+    assessment_id: str,
+    request: Request,
+    session: DbSession,
+    background_tasks: BackgroundTasks,
+) -> AssessmentOut:
+    """Resume a PAUSED assessment: PAUSED -> RUNNING, then drain remaining jobs.
+
+    Control-plane continuation (agent-callable, symmetric with pause): the
+    durable core_jobs store makes re-dispatch idempotent, so only the jobs
+    left READY by the pause run. The drain runs as a background thread
+    (``_run_resume_daemon``); this endpoint returns immediately with
+    status=RUNNING. A live executor that is still draining ignores the
+    RESUME_REQUESTED signal (it is already executing).
+    """
+    service = AssessmentService(SqlAlchemyAssessmentRepository(session))
+    try:
+        assessment = service.resume(assessment_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DomainValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    session.commit()  # same rationale as /start: daemon reads fresh status
+    app_state = request.app.state
+    background_tasks.add_task(
+        _run_resume_daemon,
+        db=app_state.db,
+        assessment_id=assessment_id,
+        active_executions=getattr(app_state, "active_executions", None),
+        active_executions_lock=getattr(app_state, "active_executions_lock", None),
+        audit_chain=getattr(app_state, "audit_chain", None),
         oracle=getattr(app_state, "oracle", None),
         audit_outbox=getattr(app_state, "outbox_activation", {}).get("recorder"),
     )
