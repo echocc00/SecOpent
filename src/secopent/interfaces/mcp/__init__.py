@@ -20,6 +20,7 @@ later phase once their Application Service signatures stabilize.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from .tool_registry import (
     FORBIDDEN_TOOL_NAMES,
@@ -30,6 +31,9 @@ from .tool_registry import (
     ToolSpec,
     ToolTrustLevel,
 )
+
+if TYPE_CHECKING:
+    from .handlers import McpRuntime
 
 __all__ = [
     "FORBIDDEN_TOOL_NAMES",
@@ -114,38 +118,158 @@ SAFE_READ_ONLY_TOOLS: tuple[str, ...] = (
 
 def build_default_registry(
     *,
+    runtime: McpRuntime | None = None,
     repository: Mapping[str, object] | None = None,
     catalog: Mapping[str, object] | None = None,
 ) -> McpToolRegistry:
-    """Build the default MCP tool registry with the safe read-only surface.
+    """Build the MCP tool registry.
 
-    Only read-only query tools are wired here (Phase 2.9). Mutating
-    orchestration tools (plan_generate, assessment_start, ...) land in a
-    later phase once their Application Service signatures are stable; the
-    registry is already structured to accept them via
-    ``register_standard_tools``.
+    Two wiring modes:
 
-    ``repository`` / ``catalog`` are optional injected adapters (Mappings of
-    callable query handlers). When None, the tools return empty results -
-    the registry still mounts and is provably read-only.
+    - ``runtime=None`` (default): the legacy safe read-only surface
+      (list_findings / get_finding / list_required_classes) with permissive
+      handlers that accept optional ``repository``/``catalog`` Mappings and
+      return deterministic empty results when nothing is wired. The registry
+      stays framework-free and mount-safe (existing tests rely on this).
+    - ``runtime=<McpRuntime>`` (``app.state`` wiring): ALL 17 standard
+      orchestration tools are registered with real Application-Service
+      handlers from ``handlers.py``, plus the 3 read-only tools bound to real
+      repositories. Trust levels stay ``SELF_WRITTEN`` for every tool;
+      ``FORBIDDEN_TOOL_NAMES`` still rejects shell/docker/python/exec/eval.
+
+    ``repository`` / ``catalog`` remain accepted only in the legacy mode.
     """
-    registry = McpToolRegistry()
-    ctx_repo = repository
-    ctx_catalog = catalog
+    from .handlers import TOOL_HANDLERS
 
+    registry = McpToolRegistry()
+    if runtime is None:
+        ctx_repo = repository
+        ctx_catalog = catalog
+
+        registry.register_self_written(
+            "list_findings",
+            "Read-only: list findings for an assessment (optionally filtered by status).",
+            lambda **kw: _list_findings(repository=ctx_repo, **kw),
+        )
+        registry.register_self_written(
+            "get_finding",
+            "Read-only: fetch a single finding by id.",
+            lambda **kw: _get_finding(repository=ctx_repo, **kw),
+        )
+        registry.register_self_written(
+            "list_required_classes",
+            "Read-only: list required test classes for an asset type from the catalog.",
+            lambda **kw: _list_required_classes(catalog=ctx_catalog, **kw),
+        )
+        return registry
+
+    # Runtime-wired mode: every handler opens its own short-lived session from
+    # runtime.db (commit-on-success / rollback-on-error), mirrors the API
+    # routers, and records mutating actions on the signed AuditChain.
+    bound = {
+        name: (lambda _h=h, **kw: _h(runtime, **kw))
+        for name, h in TOOL_HANDLERS.items()
+    }
+    registry.register_standard_tools(bound)
     registry.register_self_written(
         "list_findings",
-        "Read-only: list findings for an assessment (optionally filtered by status).",
-        lambda **kw: _list_findings(repository=ctx_repo, **kw),
+        "Read-only: list findings for an assessment (optionally filtered).",
+        lambda **kw: _list_findings_runtime(runtime, **kw),
     )
     registry.register_self_written(
         "get_finding",
         "Read-only: fetch a single finding by id.",
-        lambda **kw: _get_finding(repository=ctx_repo, **kw),
+        lambda **kw: _get_finding_runtime(runtime, **kw),
     )
     registry.register_self_written(
         "list_required_classes",
         "Read-only: list required test classes for an asset type from the catalog.",
-        lambda **kw: _list_required_classes(catalog=ctx_catalog, **kw),
+        lambda **kw: _list_required_classes_runtime(runtime, **kw),
     )
     return registry
+
+
+def _list_findings_runtime(
+    runtime: McpRuntime, *, assessment_id: str = "", status: str = ""
+) -> object:
+    """Read-only finding list against the real repository (runtime mode)."""
+    from ...infrastructure.repositories.sqlalchemy_findings import (
+        SqlAlchemyFindingRepository,
+    )
+
+    with runtime.db.unit_of_work() as uow:
+        session = uow.session
+        findings = SqlAlchemyFindingRepository(session).all(
+            assessment_id=assessment_id or None, severity=None,
+            oracle_verdict=None,
+        )
+        return [
+            {
+                "id": f.id,
+                "title": f.title,
+                "asset": f.asset,
+                "severity": f.severity.value,
+                "status": f.status.value,
+                "assessment_id": f.assessment_id,
+                "oracle_verdict": f.oracle_verdict.value,
+            }
+            for f in findings
+            if not status or f.status.value == status
+        ]
+
+
+def _get_finding_runtime(
+    runtime: McpRuntime, *, finding_id: str = ""
+) -> object:
+    """Read-only single-finding lookup against the real repository."""
+    from ...infrastructure.repositories.sqlalchemy_findings import (
+        SqlAlchemyFindingRepository,
+    )
+
+    if not finding_id:
+        return None
+    with runtime.db.unit_of_work() as uow:
+        session = uow.session
+        finding = SqlAlchemyFindingRepository(session).get(finding_id)
+        if finding is None:
+            return None
+        return {
+            "id": finding.id,
+            "title": finding.title,
+            "asset": finding.asset,
+            "severity": finding.severity.value,
+            "status": finding.status.value,
+            "assessment_id": finding.assessment_id,
+            "oracle_verdict": finding.oracle_verdict.value,
+        }
+
+
+def _list_required_classes_runtime(
+    runtime: McpRuntime, *, asset_type: str = ""
+) -> object:
+    """Read-only catalog query against the real repository."""
+    from ...domain.catalog.models import AssetType
+    from ...infrastructure.repositories.sqlalchemy_catalog import (
+        SqlAlchemyCatalogRepository,
+    )
+
+    if not asset_type:
+        return []
+    with runtime.db.unit_of_work() as uow:
+        session = uow.session
+        catalog = SqlAlchemyCatalogRepository(session).latest_catalog()
+        if catalog is None:
+            return []
+        try:
+            classes = catalog.required_for(AssetType(asset_type))
+        except ValueError:
+            return []
+        return [
+            {
+                "id": c.id,
+                "cwe": list(c.cwe),
+                "owasp": list(c.owasp),
+                "risk": c.risk.value,
+            }
+            for c in classes
+        ]

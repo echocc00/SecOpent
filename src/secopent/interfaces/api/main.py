@@ -20,7 +20,7 @@ import os
 import threading
 import time
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager, nullcontext, suppress
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
+from starlette.routing import Mount
 
 from ...application.audit_chain import AuditChain
 from ...application.canary import CanaryTokenManager
@@ -103,6 +104,7 @@ from ...infrastructure.secrets.persistent_file_backend import (
 )
 from ...infrastructure.signing.ed25519 import Ed25519KeyProvider
 from ...interfaces.mcp import build_default_registry
+from ..mcp.server import McpHttpTransport, _runtime_from_app
 from .routers import (
     appmodels_router,
     approvals_router,
@@ -178,23 +180,37 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     crash-recovery drain runs before the first request, the worker thread
     exists only while the app serves, and apps built without a lifespan
     (bare ``TestClient(app)``) keep the legacy direct-audit path.
+
+    MCP Streamable HTTP (M4 §13 / ADR-007): ``McpHttpTransport.serve`` is
+    entered first so the FastMCP session manager is initialized before the
+    first request reaches /mcp. When no transport is mounted (tests that
+    build the app without a server) it is a no-op.
     """
-    worker: OutboxWorker | None = getattr(app.state, "outbox_worker", None)
-    recorder: OutboxRecorder | None = getattr(app.state, "outbox_recorder", None)
-    activation: dict[str, object] = app.state.outbox_activation
-    if worker is not None and recorder is not None:
-        worker.drain_pending()  # crash recovery: no permit-replay gap (D4)
-        activation["recorder"] = recorder  # routers now write outbox rows
-        threading.Thread(
-            target=worker.run_forever, daemon=True, name="outbox-worker"
-        ).start()
-    yield
-    app.state.shutdown_event.set()
-    _drain_active_executions(app)
-    if worker is not None:
-        worker.stop()
-        with suppress(Exception):
-            worker.drain_pending()  # flush rows the drained executions wrote
+    transport: McpHttpTransport | None = getattr(
+        app.state, "mcp_http_transport", None
+    )
+    mcp_cm = (
+        nullcontext()
+        if transport is None
+        else transport.serve(_runtime_from_app(app))
+    )
+    async with mcp_cm:
+        worker: OutboxWorker | None = getattr(app.state, "outbox_worker", None)
+        recorder: OutboxRecorder | None = getattr(app.state, "outbox_recorder", None)
+        activation: dict[str, object] = app.state.outbox_activation
+        if worker is not None and recorder is not None:
+            worker.drain_pending()  # crash recovery: no permit-replay gap (D4)
+            activation["recorder"] = recorder  # routers now write outbox rows
+            threading.Thread(
+                target=worker.run_forever, daemon=True, name="outbox-worker"
+            ).start()
+        yield
+        app.state.shutdown_event.set()
+        _drain_active_executions(app)
+        if worker is not None:
+            worker.stop()
+            with suppress(Exception):
+                worker.drain_pending()  # flush rows the drained executions wrote
 
 
 def _build_secret_backend() -> EncryptedFileBackend | PersistentEncryptedFileBackend:
@@ -637,12 +653,15 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # MCP tool registry (Phase 2.9; §13 + ADR-007): mount the safe read-only
     # tool surface on app.state so the agent never gets shell/docker/python.
     # The registry is framework-free (testable without the MCP SDK); the SDK
-    # wraps these specs in M5. Only read-only query handlers are wired today
-    # (list_findings / get_finding / list_required_classes); mutating
-    # orchestration tools land once their Application Service signatures
-    # stabilize. FORBIDDEN_TOOL_NAMES rejects shell/docker_run/
-    # execute_python/exec/eval at register() time (M4 DoD).
-    app.state.mcp_tool_registry = build_default_registry()
+    # wraps these specs in M5. With the runtime wired, ALL 16 standard
+    # orchestration tools are registered against the real Application Services
+    # (mutating actions record on the shared signed AuditChain); the human
+    # boundary is preserved: plan_approve/assessment_start return
+    # HUMAN_REQUIRED to the agent. FORBIDDEN_TOOL_NAMES rejects
+    # shell/docker_run/execute_python/exec/eval at register() time (M4 DoD).
+    app.state.mcp_tool_registry = build_default_registry(
+        runtime=_runtime_from_app(app)
+    )
 
     # API at the root (dev: the vite proxy rewrites /api/* -> root).
     _register_api(app)
@@ -671,6 +690,17 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.mcp_tool_registry = app.state.mcp_tool_registry
     _register_api(api)
     app.mount("/api", api)
+
+    # Real MCP transport (§13 + ADR-007): Streamable HTTP mounted at /mcp,
+    # sharing this app's singleton wiring (Database, signed AuditChain, scope
+    # enforcer). The FastMCP session manager is initialized per-lifespan by
+    # McpHttpTransport.serve (see _lifespan); stdio is available via the
+    # ``secopent-mcp`` console script / ``python -m secopent.interfaces.mcp.server``,
+    # which calls create_app() itself and reads the same app.state.
+    app.state.mcp_http_transport = McpHttpTransport()
+    app.router.routes.append(
+        Mount("/mcp", app.state.mcp_http_transport, name="mcp")
+    )
 
     # Production static serving (W11): serve the built frontend's hashed assets
     # and fall back to index.html for client-side routing. Registered AFTER the

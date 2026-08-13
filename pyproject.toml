@@ -23,7 +23,13 @@ dependencies = [
     "opentelemetry-api>=1.25,<2",
     "opentelemetry-sdk>=1.25,<2",
     "opentelemetry-instrumentation-fastapi>=0.46b0,<1",
+    # MCP server transport (M4 §13 / ADR-007): FastMCP stdio + streamable HTTP.
+    # <2 avoids the FastMCP v3 stateless_http constructor break.
+    "mcp>=1.9,<2",
 ]
+
+[project.scripts]
+secopent-mcp = "secopent.interfaces.mcp.server:main"
 
 [project.optional-dependencies]
 dev = [

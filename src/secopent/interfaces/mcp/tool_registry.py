@@ -29,7 +29,8 @@ STANDARD_ORCHESTRATION_TOOLS: tuple[str, ...] = (
     "scope_draft",
     "scope_validate",
     "scope_freeze",
-    # plan / execution
+    # assessment / plan / execution
+    "assessment_create",
     "plan_generate",
     "plan_approve",
     "assessment_start",
@@ -138,9 +139,14 @@ class McpToolRegistry:
             raise ToolNotFoundError(f"tool not registered: {name}")
         return spec
 
-    def invoke(self, name: str, **params: object) -> object:
-        """Dispatch to a self-written tool's handler (adopted tools are proxied)."""
-        spec = self.get(name)
+    def invoke(self, __tool: str, **params: object) -> object:
+        """Dispatch to a self-written tool's handler (adopted tools are proxied).
+
+        ``__tool`` is positional-only so a tool whose own parameter is named
+        ``name`` (e.g. ``project_create(name=...)``) does not collide with the
+        routing argument.
+        """
+        spec = self.get(__tool)
         return spec.handler(**params)
 
     def names(self, trust_level: ToolTrustLevel | None = None) -> tuple[str, ...]:
