@@ -9,6 +9,11 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-13
+
+### Fixed
+- **fix(scope-enforcer)**: `ScopeEnforcer` 的私有 host-vs-rule matcher(`_host_matches_rule`)无 HTTP 前缀分支,任何 `http(s)://` 形式的 scope rule 均判 `NOT_INCLUDED`(v9 issue——v0.5.3 Fix A 只修了 domain 的 `includes_ip`,平行 matcher 失同步)→ `_check_plan_scope` 使所有 URL-form scope 的评估在启动前被拒。现删除私有复制,include/exclude 统一委托 `ScopeSnapshot.includes_host/excludes_host`(单一真源 `_target_matches`)
+
 ## [0.6.0] - 2026-08-13
 
 ### Added

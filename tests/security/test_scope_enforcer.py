@@ -185,3 +185,85 @@ def test_ip_target_skips_dns_and_is_rechecked() -> None:
     # A direct in-scope IP target needs no DNS resolution and passes.
     decision = _enforcer().check("https://192.0.2.5/", _scope(), _context())
     assert decision.allowed is True
+
+
+# ---------------------------------------------------------------------------
+# HTTP-prefixed scope rules (issue v9 regression)
+# ---------------------------------------------------------------------------
+
+
+def _url_ip_scope() -> ScopeSnapshot:
+    """The documented scope form - operators write URL rules, not bare IPs."""
+    return ScopeSnapshot(
+        id="s9", project_id="p9",
+        include=("http://192.168.2.18:3000/",),
+        exclude=(), ports=(3000, 8080),
+        limits=ScopeLimits(5.0, 3, 50_000),
+        approved_by="h", approved_at=_NOON, digest="sha256:" + "0" * 64,
+    )
+
+
+def test_http_prefixed_rule_allows_url_target() -> None:
+    """v9: the documented scope form must pass the gate (was NOT_INCLUDED)."""
+    decision = _enforcer().check(
+        "http://192.168.2.18:3000", _url_ip_scope(), _context()
+    )
+    assert decision.allowed is True
+    assert decision.reason == "ALLOWED"
+
+
+def test_http_prefixed_rule_allows_bare_ip_target() -> None:
+    # Scheme-stripped targets (how callers pass IPs) match the same rule.
+    decision = _enforcer().check("8.133.200.235", _url_ip_scope(), _context())
+    assert decision.reason == "NOT_INCLUDED"  # foreign host, correctly rejected
+    ip_scope = ScopeSnapshot(
+        id="s9b", project_id="p9b",
+        include=("http://8.133.200.235/",), exclude=(), ports=(80,),
+        limits=ScopeLimits(5.0, 3, 50_000),
+        approved_by="h", approved_at=_NOON, digest="sha256:" + "0" * 64,
+    )
+    assert _enforcer().check("8.133.200.235", ip_scope, _context()).allowed is True
+
+
+def test_http_prefixed_exclude_deny_wins() -> None:
+    scope = ScopeSnapshot(
+        id="s9c", project_id="p9c",
+        include=("http://192.168.2.18:3000/",),
+        exclude=("http://192.168.2.18/",), ports=(3000,),
+        limits=ScopeLimits(5.0, 3, 50_000),
+        approved_by="h", approved_at=_NOON, digest="sha256:" + "0" * 64,
+    )
+    decision = _enforcer().check(
+        "http://192.168.2.18:3000", scope, _context()
+    )
+    assert decision.allowed is False
+    assert decision.reason == "EXPLICIT_DENY"
+
+
+def test_http_prefixed_rule_rejects_foreign_host() -> None:
+    decision = _enforcer().check(
+        "http://evil.example.com", _url_ip_scope(), _context()
+    )
+    assert decision.allowed is False
+    assert decision.reason == "NOT_INCLUDED"
+
+
+def test_http_prefixed_domain_rule_with_dns() -> None:
+    """A URL domain rule resolves through the injected resolver and is rechecked.
+
+    The resolved-IP recheck needs an IP-side rule to prove the resolution is
+    in scope (a domain rule alone cannot prove an arbitrary IP belongs to it) -
+    operators pair the domain with its authorized netblock, as here.
+    """
+    enforcer = _enforcer({"app.example.test": ("192.168.2.18",)})
+    scope = ScopeSnapshot(
+        id="s9d", project_id="p9d",
+        include=("http://app.example.test:3000/", "192.168.2.0/24"),
+        exclude=(), ports=(3000,),
+        limits=ScopeLimits(5.0, 3, 50_000),
+        approved_by="h", approved_at=_NOON, digest="sha256:" + "0" * 64,
+    )
+    decision = enforcer.check(
+        "http://app.example.test:3000", scope, _context()
+    )
+    assert decision.allowed is True

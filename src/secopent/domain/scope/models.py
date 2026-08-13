@@ -116,6 +116,28 @@ class ScopeSnapshot:
             matches(rule) for rule in self.include
         )
 
+    def matches_any(self, host: str, rules: tuple[str, ...]) -> bool:
+        """True if any scope rule matches a host/IP value (v9 single matcher).
+
+        The ONE host-vs-rule matcher both consumers share -
+        ``ScopeSnapshot.includes_ip/includes_domain`` (post-resolution checks)
+        and ``ScopeEnforcer``'s include/exclude steps (pre-scan check) - so a
+        fix to URL-rule handling can never drift between the two again
+        (v8 Fix A touched only ``_target_matches``; ``ScopeEnforcer``'s own
+        private copy stayed broken for HTTP-prefixed rules, issue v9).
+        """
+        return any(self._target_matches(rule, host) for rule in rules)
+
+    def includes_host(self, host: str) -> bool:
+        """Whether ``host``/IP matches some include rule (deny-priority: exclude wins)."""
+        return not self.matches_any(host, self.exclude) and self.matches_any(
+            host, self.include
+        )
+
+    def excludes_host(self, host: str) -> bool:
+        """Whether ``host``/IP matches ANY exclude rule (deny-priority)."""
+        return self.matches_any(host, self.exclude)
+
     def includes_port(self, value: int) -> bool:
         return normalize_port(value) in self.ports
 

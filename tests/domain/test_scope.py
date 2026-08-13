@@ -81,6 +81,53 @@ def test_includes_ip_rejects_out_of_scope_ip_for_http_rule() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Single matcher: includes_host / excludes_host (issue v9)
+# ---------------------------------------------------------------------------
+
+
+def test_includes_host_matches_http_prefixed_ip_rule() -> None:
+    """v9: the generic host matcher must agree with includes_ip on URL rules.
+
+    The bug: ScopeEnforcer had its own matcher with no HTTP branch, so
+    ``http://192.168.2.18:3000/`` was always NOT_INCLUDED while includes_ip
+    matched. The single matcher lives only on ScopeSnapshot now."""
+    snapshot = _snapshot(include=("http://192.168.2.18:3000/",))
+    assert snapshot.includes_host("192.168.2.18")
+    assert not snapshot.includes_host("192.168.2.19")
+
+
+def test_includes_host_matches_http_prefixed_domain_rule() -> None:
+    snapshot = _snapshot(include=("https://example.test/",))
+    assert snapshot.includes_host("example.test")
+    assert not snapshot.includes_host("other.test")
+
+
+def test_includes_host_preserves_bare_and_cidr_and_wildcard_rules() -> None:
+    snapshot = _snapshot(include=("192.0.2.0/28", "10.0.0.1", "*.corp.test"))
+    assert snapshot.includes_host("192.0.2.5")
+    assert snapshot.includes_host("10.0.0.1")
+    assert snapshot.includes_host("scan.corp.test")
+    assert not snapshot.includes_host("corp.test")  # wildcard excludes apex
+    assert not snapshot.includes_host("11.0.0.1")
+
+
+def test_includes_host_matches_url_target_and_host_target_same_rule() -> None:
+    """The value may arrive scheme-stripped or as a URL - same decision."""
+    snapshot = _snapshot(include=("http://192.168.2.18:3000/",))
+    assert snapshot.includes_host("192.168.2.18")
+    assert snapshot.includes_host("http://192.168.2.18:3000")
+
+
+def test_excludes_host_deny_wins_for_url_rule() -> None:
+    snapshot = _snapshot(
+        include=("http://192.168.2.18:3000/",),
+        exclude=("http://192.168.2.18/",),
+    )
+    assert snapshot.excludes_host("192.168.2.18")
+    assert not snapshot.includes_host("192.168.2.18")  # deny-priority
+
+
+# ---------------------------------------------------------------------------
 # Cloud-account scope (M1 Task 12, §4.1.1 方案 B)
 # ---------------------------------------------------------------------------
 

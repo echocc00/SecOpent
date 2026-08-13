@@ -75,20 +75,6 @@ def _split_target(target: str) -> tuple[str, int | None]:
     return target, None
 
 
-def _host_matches_rule(host: str, rule: str) -> bool:
-    if rule.startswith("*."):
-        suffix = rule[2:]
-        return host.endswith("." + suffix) and host != suffix
-    try:
-        network = ipaddress.ip_network(rule, strict=False)
-    except ValueError:
-        return host == rule
-    try:
-        return ipaddress.ip_address(host) in network
-    except ValueError:
-        return False
-
-
 def _is_blocked_ip(ip: str) -> bool:
     """Cloud-metadata / loopback / link-local / unspecified are always blocked."""
     addr = ipaddress.ip_address(ip)
@@ -118,12 +104,12 @@ class ScopeEnforcer:
         if not host:
             return _deny("INVALID_TARGET")
 
-        # 2. Explicit deny (exclude wins).
-        if any(_host_matches_rule(host, rule) for rule in scope.exclude):
+        # 2. Explicit deny (exclude wins) - domain single matcher (v9: HTTP rules).
+        if scope.excludes_host(host):
             return _deny("EXPLICIT_DENY")
 
         # 3. Include match.
-        if not any(_host_matches_rule(host, rule) for rule in scope.include):
+        if not scope.includes_host(host):
             return _deny("NOT_INCLUDED")
 
         # 4. DNS resolve.
