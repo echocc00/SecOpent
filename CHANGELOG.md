@@ -9,6 +9,12 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### Added
+- **feat(mcp)**: 真实 MCP Server 落地——17 个标准编排工具(含新增 `assessment_create`)全部绑定真实 Application Services,stdio(`secopent-mcp`)与 Streamable HTTP(`/mcp`,stateless)双 transport,共享 `create_app()` 组合根;`plan_approve`/`assessment_start` 对 agent 返回结构化 `HUMAN_REQUIRED`(LLM 边界不变,agent 永不触发扫描/审批);`finding_validate` 只读、`report_render` 永不 LLM 润色
+- **feat(control-plane)**: durable job lease(M4 遗留 Task 11 兑现)——`JobStore` 协议 + `SqlAlchemyJobRepository` 原子条件 UPDATE lease,任务状态落 `core_jobs`(Web `/jobs` 首次可见真实任务,重启可恢复);`Assessment.control` 信号列(alembic `3f91c2a7d504`)驱动真暂停/真取消/真恢复:executor step 边界消费信号,pause 停发新任务、cancel 弃置剩余 jobs(SKIPPED)、resume 幂等 drain(`POST /assessments/{id}/resume` + MCP 调度)
+- **feat(api)**: `POST /assessments/{id}/resume` 恢复端点
+- **fix(api)**: `POST /jobs/{id}/retry` 改用 `JobStore.requeue`(幂等 add 曾吞掉更新,第二次 retry 应 409 却 200)
+
 ## [0.5.3] - 2026-08-08
 
 ### v0.5.3 (in progress)
