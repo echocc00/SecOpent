@@ -106,6 +106,36 @@ def test_r3b_flags_audit_chain_record_without_session(tmp_path: Path) -> None:
     assert "R3b" in result.stdout
 
 
+def test_r4_flags_duplicate_scope_matcher(tmp_path: Path) -> None:
+    """A second host-vs-rule matcher outside domain/scope/models.py must fail.
+
+    v9 class: ScopeEnforcer's private _host_matches_rule drifted from
+    _target_matches and rejected every HTTP-prefixed scope rule until v0.6.1.
+    """
+    app = tmp_path / "application"
+    app.mkdir()
+    (app / "scope_enforcer.py").write_text(
+        "def _host_matches_rule(host: str, rule: str) -> bool:\n"
+        "    return host == rule\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 1
+    assert "R4" in result.stdout
+
+
+def test_r4_allows_the_single_source_of_truth(tmp_path: Path) -> None:
+    domain = tmp_path / "domain" / "scope"
+    domain.mkdir(parents=True)
+    (domain / "models.py").write_text(
+        "def _target_matches(self, rule: str, value: str) -> bool:\n"
+        "    return True\n",
+        encoding="utf-8",
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
 def test_r3b_ignores_audit_service_record_in_execution(tmp_path: Path) -> None:
     """execution.py's AuditService(...).record is session-bound via its repo."""
     app = tmp_path / "application"

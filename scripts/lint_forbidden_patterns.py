@@ -12,6 +12,10 @@ Encodes the invariants whose violation produced the v3/v4/v5 incident class
   R3  audit ``.record(...)`` calls in daemon-touching modules must thread
       ``session=`` - a record() without the caller's session opens its own
       SQLite connection and contends for the WAL write lock (v5 leak class).
+  R4  no host-vs-rule matcher outside ``domain/scope/models.py`` -
+      ``ScopeSnapshot`` is the single source of truth for scope matching; a
+      parallel copy drifted apart in v0.5.3/v0.6.0 and rejected every
+      HTTP-prefixed scope rule (v9 two-matchers class, fixed in v0.6.1).
 
 Usage:
     python scripts/lint_forbidden_patterns.py [--root PATH]
@@ -62,6 +66,16 @@ LINE_RULES: tuple[LineRule, ...] = (
             "interfaces/api/main.py",  # SSE snapshot polls (short-lived)
         }),
         message=".open_session() outside sanctioned modules (v4 hot-path connection class)",
+    ),
+    LineRule(
+        rule_id="R4",
+        pattern=r"def (_host_matches_rule|_host_matches|_target_matches|_domain_matches)\b",
+        scope=("",),
+        # domain/scope/models.py owns the ONLY matcher; a second copy (like
+        # ScopeEnforcer's pre-v0.6.1 _host_matches_rule) drifts and re-opens the
+        # v9 two-matchers class. New matching logic must delegate to ScopeSnapshot.
+        allow=frozenset({"domain/scope/models.py"}),
+        message="duplicate host-vs-rule matcher (v9 two-matchers class); delegate to ScopeSnapshot",
     ),
 )
 

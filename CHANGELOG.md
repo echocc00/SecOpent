@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The version single source of truth is `src/secopent/__version__.py`; `scripts/release.sh`
 stamps it and tags the matching `v<version>`.
 
+## [Unreleased]
+
+### Added
+- **防回归(v9 class)**: `execute_assessment` + URL-form scope e2e 回归(`test_http_prefixed_scope_runs_through_executor`);forbidden linter 新增 R4——host-vs-rule matcher 仅允许定义于 `domain/scope/models.py`;postmortem 归档 `docs/architecture/postmortems/v0.6.0-scope-enforcer-bug.md`
+
 ## [0.6.1] - 2026-08-13
 
 ### Fixed

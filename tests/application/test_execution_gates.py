@@ -255,6 +255,75 @@ def test_scope_enforcer_allows_in_scope_target(memory_repositories) -> None:
     assert assessment.status is AssessmentStatus.COMPLETED
 
 
+def _seed_http_prefixed_scope(repos) -> None:  # noqa: ANN001
+    """Seed an assessment whose scope rule is the documented HTTP form (v9)."""
+    from datetime import UTC, datetime
+
+    from secopent.domain.assessments.models import PlanStep
+    from secopent.domain.policy.models import ExecutionMode, RiskClass
+    from secopent.domain.projects.models import Project
+    from secopent.domain.scope.models import ScopeLimits, ScopeSnapshot
+
+    repos.projects.add(Project.create(project_id="p1", name="t"))
+    repos.scopes.add_snapshot(ScopeSnapshot(
+        id="s1", project_id="p1",
+        include=("http://192.168.2.18:3000/",),  # the standard operator form
+        exclude=(), ports=(3000,),
+        limits=ScopeLimits(requests_per_second=10, concurrency=2, max_requests=100),
+        approved_by="a", approved_at=datetime.now(UTC), digest="sha256:scope-url",
+    ))
+    service = AssessmentService(repos.assessments)
+    assessment = service.create(
+        project_id="p1", scope_snapshot_id="s1", mode=ExecutionMode.APPROVAL,
+    )
+    # No explicit `target` on the step (v8 bug B): _check_plan_scope enforces
+    # the scope.include entries themselves - exactly the production shape.
+    service.attach_plan(assessment.id, steps=(
+        PlanStep(
+            key="nuclei-sqli", runner="nuclei", risk=RiskClass.LOW,
+            parameters={}, dependencies=(),
+        ),
+    ))
+    service.approve(
+        assessment_id=assessment.id, approved_by="analyst",
+        approved_risks=frozenset({RiskClass.LOW}),
+        approved_capabilities=frozenset(), scope_digest="sha256:scope-url",
+    )
+
+
+def test_http_prefixed_scope_runs_through_executor(memory_repositories) -> None:
+    """v9 at the executor level: the documented URL-form scope must NOT fail.
+
+    Before v0.6.1, ScopeEnforcer's private matcher rejected every http(s)://
+    rule with NOT_INCLUDED, so `_check_plan_scope` failed the assessment
+    before any scan container launched (issue v9 + v9.5 deployment).
+    """
+    from secopent.application.scope_enforcer import ScopeEnforcer
+
+    _seed_http_prefixed_scope(memory_repositories)
+    assessment = memory_repositories.assessments.items[
+        next(iter(memory_repositories.assessments.items))
+    ]
+    AssessmentService(memory_repositories.assessments).start(assessment.id)
+
+    execute_assessment(
+        assessment_id=assessment.id,
+        assessment_repo=memory_repositories.assessments,
+        scope_repo=memory_repositories.scopes,
+        finding_repo=_MemoryFindingRepo(),
+        audit_repo=memory_repositories.audit,
+        step_runner_factory=lambda scope: _FakeStepRunner((_observation(),)),
+        scope_enforcer=ScopeEnforcer(_NullDnsResolver()),
+    )
+
+    assessment = memory_repositories.assessments.get(assessment.id)
+    assert assessment is not None
+    assert assessment.status is AssessmentStatus.COMPLETED
+    assert "assessment.blocked.scope_violation" not in {
+        e.action for e in memory_repositories.audit.events
+    }
+
+
 # --- T5: AuditChain signed events + permit nonce ----------------------------
 
 
