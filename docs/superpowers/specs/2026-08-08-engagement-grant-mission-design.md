@@ -40,13 +40,11 @@ class EngagementGrant:
     id: str
     project_id: str
     name: str
-    include: tuple[str, ...]       # 授权目标集(URL/IP/域名/CIDR)
-    exclude: tuple[str, ...]
-    ports: tuple[int, ...]
-    risk_caps: frozenset[RiskClass]  # PASSIVE/LOW/ACTIVE/INTRUSIVE;DESTRUCTIVE 拒绝
+    scope: ScopeSnapshot              # ← 授权边界的唯一真相(内嵌 snapshot,见下)
+    risk_caps: frozenset[RiskClass]   # PASSIVE/LOW/ACTIVE/INTRUSIVE;DESTRUCTIVE 拒绝
     valid_from: datetime
     valid_to: datetime
-    created_by: str                # 必为 human
+    created_by: str                   # 必为 human
     created_at: datetime
     status: GrantStatus
     digest: str
@@ -54,15 +52,28 @@ class EngagementGrant:
     def create(...) -> EngagementGrant: ...
     def revoke(self) -> EngagementGrant: ...          # ACTIVE -> REVOKED
     def is_active_at(self, now: datetime) -> bool: ... # 窗口内且 ACTIVE(过期惰性转 EXPIRED)
-    def covers_scope(self, snapshot: ScopeSnapshot) -> bool: ...
+    def covers_scope(self, assessment_scope: ScopeSnapshot) -> bool: ...
     def covers_risks(self, steps: Sequence[PlanStep]) -> bool: ...
 ```
 
-**covers_scope 语义**(复用 [scope/models.py](src/secopent/domain/scope/models.py) 的 matching,不建新匹配器):
-- assessment 的每个 include target:必须是 grant 某个 include 规则的匹配(target 用 `_target_matches` 语义:HTTP 规则剥 scheme 比 host、IP/CIDR 网络成员、域名/通配符)
-- assessment 的 exclude:不做强制(grant 的 exclude 只用于授权边界描述)
-- assessment ports ⊆ grant ports 才允许执行
-- **不可能"授权 /24 扫到 /8"**:include 是精确包含,不是网络包含的父网自动放宽——每个 target 单独匹配
+**为什么要内嵌 `ScopeSnapshot` 而不是存裸 include/exclude/ports**:匹配器只有一份。`_target_matches` 是 `ScopeSnapshot` 的私有实现(v8 Fix A 已修),如果 grant 另存 include/exclude 再写一套匹配,就是复刻 v8 教训的"匹配器分裂"。grant 的授权边界 = 一个由 `ScopeDraft.freeze()` 生成的 snapshot(grant 创建时即冻结),`covers_scope` 直接调 snapshot 的公开方法:
+
+```python
+def covers_scope(self, assessment_scope: ScopeSnapshot) -> bool:
+    """assessment 的每个 include target 都必须落在 grant.scope 内,且端口 ⊆."""
+    if not set(assessment_scope.ports) <= set(self.scope.ports):
+        return False
+    for target in assessment_scope.include:
+        if self.scope.includes_url(target) or self.scope.includes_ip(target) \
+                or self.scope.includes_domain(target):
+            continue
+        return False
+    return True
+```
+
+(`includes_ip` 会 raise DomainValidationError 当 target 不是 IP——调用方捕获后 fall through 到 `includes_domain`;实施时按 `_target_matches` 语义写一个 `scope.includes_target(target)` helper 收敛,三个公开方法任一命中即算。)
+
+**不可能"授权 /24 扫到 /8"**:include 是精确匹配,每个 target 单独命中才算包含。**exclude 不参与 covers_scope**(grant.exclude 由内嵌 snapshot.exclude 表达,只影响 scope 自身的匹配语义)。
 
 **covers_risks**:`all(step.risk in risk_caps for step in plan.steps)`。
 
@@ -70,7 +81,7 @@ class EngagementGrant:
 - `name.strip()` 非空
 - `RiskClass.DESTRUCTIVE not in risk_caps`
 - `valid_to > valid_from`
-- `include` 非空(直接信任 ScopeDraft 级 normalize;grant 复用 `ScopeDraft._normalize_target` 语义做防御)
+- scope 由 `ScopeDraft(...).freeze()` 生成`(ScopeDraft 已强制 include 非空 + normalize)
 
 ### 3.2 新 port + repo
 
@@ -106,25 +117,28 @@ class GrantService:
 
 ### 3.4 审批门改造(`application/assessments.py`)
 
+注意:`approve` 当前签名是 `approved_by` **必选**(assessments.py:57-66),`_require_human(actor_role)` 是函数体首行(assessments.py:75)。改造保持既有调用方兼容:
+
 ```python
-def approve(self, assessment_id, *, approved_by="human", approved_risks=None,
-            approved_capabilities=None, scope_digest="", actor_role="human",
-            grant_id: str | None = None) -> Assessment:
+def approve(self, *, assessment_id, approved_by, approved_risks, approved_capabilities,
+            scope_digest, actor_role="human", grant_id: str | None = None) -> Approval:
     if grant_id:
-        decision = grant_service.authorize(grant_id, scope, plan.steps, now=utc_now())
+        decision = grant_service.authorize(grant_id, assessment_scope, plan.steps, now=utc_now())
         if not decision.allowed:
             raise AssessmentPermissionError(f"grant denied: {decision.reason}")
-        approved_by = f"grant:{grant_id}"     # 审计链记的是 grant 身份
+        approved_by = f"grant:{grant_id}"     # 覆盖调用方传入的 approved_by(防注入)
     else:
         self._require_human(actor_role)
+    # ...原逻辑(scope_digest 校验、Approval.create)不变
 
 def start(self, assessment_id, *, actor_role="human", grant_id=None) -> Assessment:
     # 同构:grant_id -> authorize(scope, plan.steps) -> 放行;否则 _require_human
 ```
 
-⚠️ **注意**:`approve` 当前签名已有 `approved_by` 参数,`_require_human` 在 approve 内调用(assessments.py:75)。grant 路径不改变 `approved_by` 参数语义——**grant 路径下强制 `approved_by=f"grant:{grant_id}"`**,不可被调用方注入(在 `_authorize_via_grant` 内部覆盖)。
+**注意**:`approve`/`start` 内部需要 assessment 的 scope snapshot + plan steps 来做 `authorize`。当前 `approve` 只收 `scope_digest` 字符串(调用方已查 scope)。实施时:
+- `approve`:先 `self._repo.get(assessment_id)` + `get_plan` 已有(原逻辑);**scope snapshot 从 repo 拿**(repo 是否有 get_snapshot 端口——若没有,`authorize` 改为接 `scope_digest` + `plan.steps`,covers_scope 用内存里的 snapshot 由 caller 传入)。实施细节在 plan 阶段定,但**签名不变**、`grant_id` 默认 None 保证向后兼容。
 
-`GrantService` 注入:`AssessmentService` 构造函数加可选 `grant_service: GrantService | None = None`(None 时 grant_id 传入即报错,保证 degrades safe)。
+`GrantService` 注入:`AssessmentService.__init__` 加可选 `grant_service: GrantService | None = None`(None 时 grant_id 传入即报 `AssessmentPermissionError("grant service not configured")`,degrades safe)。
 
 ### 3.5 MCP handler 去死代码(`interfaces/mcp/handlers.py`)
 
@@ -157,9 +171,12 @@ def handler_assessment_start(runtime, *, assessment_id, grant_id=None):
 
 ### 3.6 持久化 + migration
 
-- `core_grants` 表:`id, project_id, name, include(JSON), exclude(JSON), ports(JSON), risk_caps(JSON), valid_from, valid_to, created_by, created_at, status, digest`
-- alembic migration(新 revision)
-- `SqlAlchemyGrantRepository` 序列化/反序列化对齐 `sqlalchemy_grants.py` 现有模式
+- `core_grants` 表:`id, project_id, name, scope_digest, risk_caps(JSON), valid_from, valid_to, created_by, created_at, status, grant_digest`
+- **scope 复用 `core_scope_snapshots` 表**:grant 内嵌的 ScopeSnapshot 用现有 `CoreScopeSnapshot` ORM 持久化(grant → snapshot 是 project 级引用关系,`scope_digest` 关联)——**不新建 scope 列**,避免与 scope snapshot 持久化逻辑重复(v8 教训:不分裂存储)
+- ORM:`CoreEngagementGrant` + `SqlAlchemyGrantRepository` 读写时,scope 由 `SqlAlchemyScopeRepository.get_snapshot(scope_digest)` 组装
+- alembic migration(新 revision:`core_grants` 表 + `scope_snapshot_id` FK)
+
+⚠️ **stamp 注意**:grant 新增表是增量 migration,存量 DB 走 `init_db`/`secopent db upgrade` 自动应用(v0.5.1 F4 已保证增量路径)。
 
 ---
 
