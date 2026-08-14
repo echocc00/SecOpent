@@ -68,7 +68,7 @@ def _bind(handler: Callable[..., object], runtime: McpRuntime) -> Callable[..., 
 
 def _runtime_from_app(app: FastAPI) -> McpRuntime:
     """Read the shared singletons off an app built by ``create_app``."""
-    from ..api.routers.assessments import _run_resume_daemon
+    from ..api.routers.assessments import _run_assessment_daemon, _run_resume_daemon
 
     def _schedule_resume(assessment_id: str) -> None:
         """Run the resume drain in the caller's (already spawned) thread."""
@@ -83,11 +83,39 @@ def _runtime_from_app(app: FastAPI) -> McpRuntime:
             audit_outbox=getattr(st, "outbox_activation", {}).get("recorder"),
         )
 
+    def _schedule_start(assessment_id: str) -> None:
+        """Trigger a FULL new execution (grant path, v0.6.0).
+
+        Mirrors the API /start background task exactly: the daemon owns its
+        own UnitOfWork and reads every singleton off app.state, so the MCP
+        grant path produces the identical execution as a human HTTP start.
+        """
+        st = app.state
+        _run_assessment_daemon(
+            db=st.db,
+            assessment_id=assessment_id,
+            active_executions=getattr(st, "active_executions", None),
+            active_executions_lock=getattr(st, "active_executions_lock", None),
+            emergency_stop=getattr(st, "emergency_stop", None),
+            permit_signer=getattr(st, "permit_signer", None),
+            permit_registry=getattr(st, "permit_registry", None),
+            permit_verifier=getattr(st, "permit_verifier", None),
+            scope_enforcer=getattr(st, "scope_enforcer", None),
+            audit_chain=getattr(st, "audit_chain", None),
+            egress_guard=getattr(st, "egress_guard", None),
+            nft_scope_enforcer=getattr(st, "nft_scope_enforcer", None),
+            netns_isolator=getattr(st, "netns_isolator", None),
+            make_nft_enforcer=getattr(st, "make_nft_enforcer", None),
+            oracle=getattr(st, "oracle", None),
+            audit_outbox=getattr(st, "outbox_activation", {}).get("recorder"),
+        )
+
     return McpRuntime(
         db=app.state.db,
         audit_chain=app.state.audit_chain,
         scope_enforcer=getattr(app.state, "scope_enforcer", None),
         resume_scheduler=_schedule_resume,
+        start_scheduler=_schedule_start,
     )
 
 

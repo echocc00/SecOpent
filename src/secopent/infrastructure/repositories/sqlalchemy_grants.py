@@ -16,6 +16,7 @@ from sqlalchemy import select
 from ...domain.grants.models import EngagementGrant, GrantStatus
 from ...domain.policy.models import RiskClass
 from ...domain.scope.models import ScopeSnapshot
+from ..db.core_models import CoreScopeSnapshot
 from ..db.grants_models import CoreEngagementGrant
 
 
@@ -29,9 +30,12 @@ class SqlAlchemyGrantRepository:
         self._scopes = scope_repo
 
     def add(self, grant: EngagementGrant) -> None:
-        # The embedded boundary MUST live in the same scope store assessments
-        # use - persisting it anywhere else would split the matcher (v8 lesson).
-        self._scopes.add_snapshot(grant.scope)
+        # Persist the embedded boundary in the SAME scope store assessments use
+        # (never a shadow copy - one store, one matcher). Idempotent: a grant
+        # being re-added (e.g. revoke persists the updated status) must not
+        # re-INSERT an already-present snapshot (UNIQUE on core_scope_snapshots).
+        if self._session.get(CoreScopeSnapshot, grant.scope.id) is None:
+            self._scopes.add_snapshot(grant.scope)
         self._session.merge(
             CoreEngagementGrant(
                 id=grant.id,

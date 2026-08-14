@@ -45,6 +45,7 @@ from ...application.report_renderer import ReportData, ReportRenderer
 from ...application.scopes import ScopeService
 from ...domain.assessments.models import Assessment
 from ...domain.assets.graph import AssetGraph
+from ...domain.common.canonical import utc_now
 from ...domain.findings.models import Finding
 from ...domain.intel.models import Vulnerability
 from ...domain.policy.models import ExecutionMode, RiskClass
@@ -78,6 +79,7 @@ class McpRuntime:
     audit_chain: AuditChain
     scope_enforcer: object | None = None
     resume_scheduler: Callable[[str], None] | None = None
+    start_scheduler: Callable[[str], None] | None = None
 
 
 def _audit(
@@ -490,81 +492,192 @@ def handler_plan_generate(
         return _guard("plan_generate", _generate)
 
 
+def _scope_digest(asm_repo: object, scope_repo: object, assessment_id: str) -> str:
+    """Resolve the assessment's scope digest (approve pins it in the Approval).
+
+    Mirrors interfaces/api/routers/approvals.py: it looks up the snapshot from
+    the scope repo and passes its digest. The agent path MUST pin the real
+    digest too - the Approval binds plan + scope digests so the approved
+    execution is exactly what was reviewed.
+    """
+    assessment = asm_repo.get(assessment_id)  # type: ignore[attr-defined]
+    snapshot = (
+        scope_repo.get_snapshot(assessment.scope_snapshot_id)  # type: ignore[attr-defined]
+        if assessment is not None
+        else None
+    )
+    if assessment is None or snapshot is None:
+        raise LookupError(f"assessment {assessment_id} or its scope not found")
+    digest = snapshot.digest
+    if not isinstance(digest, str):  # pragma: no cover - schema guarantees str
+        raise LookupError(f"assessment {assessment_id} scope digest invalid")
+    return digest
+
+
+def _approve_via_grant(
+    service: AssessmentService,
+    asm_repo: object,
+    assessment_id: str,
+    *,
+    approved_risks: list[str] | None,
+    approved_capabilities: list[str] | None,
+    grant_id: str,
+    scope_repo: object,
+) -> dict[str, object]:
+    """Approve then respond with the assessment (approve returns an Approval;
+    the agent-facing shape is the refreshed assessment)."""
+    service.approve(
+        assessment_id=assessment_id,
+        approved_by="agent",  # overridden to grant:<id>
+        approved_risks=frozenset(RiskClass(r) for r in (approved_risks or [])),
+        approved_capabilities=frozenset(approved_capabilities or []),
+        scope_digest=_scope_digest(asm_repo, scope_repo, assessment_id),
+        actor_role="agent",
+        grant_id=grant_id,
+    )
+    refreshed = asm_repo.get(assessment_id)  # type: ignore[attr-defined]
+    if refreshed is None:  # pragma: no cover - just persisted
+        raise LookupError(f"assessment {assessment_id} vanished after approval")
+    return _assessment_out(refreshed)
+
+
 def handler_plan_approve(
     runtime: McpRuntime,
     *,
     assessment_id: str,
     approved_risks: list[str] | None = None,
     approved_capabilities: list[str] | None = None,
+    grant_id: str | None = None,
 ) -> dict[str, object]:
-    """Request human approval of a plan (agent always gets HUMAN_REQUIRED).
+    """Approve a plan. A human approves directly; an agent needs a grant.
 
-    Approval is a human decision (LLM boundary): the handler runs the service
-    with ``actor_role="agent"``, which raises ``AssessmentPermissionError``
-    before any state change - the agent cannot approve, only learn it must ask
-    a human. The ``approved_risks``/``approved_capabilities`` args are accepted
-    but never acted on from the agent path.
+    Without a grant the agent receives structured HUMAN_REQUIRED (unchanged);
+    with a grant the approval is authorized against the grant's scope+risk
+    boundary and recorded as ``grant:<id>`` (v0.6.0).
     """
+    if not grant_id:
+        return _human_required(
+            "plan_approve",
+            assessment_id,
+            "agents need a grant to approve (see grant_list)",
+        )
+    from secopent.application.grants import GrantService
+    from secopent.infrastructure.repositories.sqlalchemy_core import (
+        SqlAlchemyAssessmentRepository,
+        SqlAlchemyScopeRepository,
+    )
+    from secopent.infrastructure.repositories.sqlalchemy_grants import (
+        SqlAlchemyGrantRepository,
+    )
+
     with runtime.db.unit_of_work() as uow:
         session = uow.session
-        service = AssessmentService(SqlAlchemyAssessmentRepository(session))
+        asm_repo = SqlAlchemyAssessmentRepository(session)
+        scope_repo = SqlAlchemyScopeRepository(session)
+        service = AssessmentService(
+            asm_repo,
+            scope_repo=scope_repo,
+            grant_service=GrantService(SqlAlchemyGrantRepository(session)),
+        )
         return _guard(
             "plan_approve",
-            lambda: (
-                # pragma: no cover - never reached: _require_human raises first
-                _assessment_out(
-                    service.approve(
-                        assessment_id=assessment_id,
-                        approved_by="agent",
-                        approved_risks=frozenset(
-                            RiskClass(r)
-                            for r in (approved_risks or [])
-                        ),
-                        approved_capabilities=frozenset(approved_capabilities or []),
-                        scope_digest="",
-                        actor_role="agent",
-                    )
-                )
-                if False
-                else _human_required(
-                    "plan_approve",
-                    assessment_id,
-                    "agents cannot approve assessments (human-only action)",
-                )
+            lambda: _approve_via_grant(
+                service, asm_repo, assessment_id,
+                approved_risks=approved_risks,
+                approved_capabilities=approved_capabilities,
+                grant_id=grant_id,
+                scope_repo=scope_repo,
             ),
         )
-
-
-_AGENT_START_NEVER_REACHED = object()
 
 
 def handler_assessment_start(
-    runtime: McpRuntime, *, assessment_id: str
+    runtime: McpRuntime, *, assessment_id: str, grant_id: str | None = None
 ) -> dict[str, object]:
-    """Request starting an assessment (agent always gets HUMAN_REQUIRED).
+    """Start an assessment. A human starts directly; an agent needs a grant.
 
-    Starting triggers real scanning - a human decision (LLM boundary). The
-    handler never fires the background executor; it returns a structured
-    HUMAN_REQUIRED result so the agent relays the request to the operator.
+    Starting triggers real scanning - the grant must still authorize at start
+    time (a revoked/expired grant cannot start). Without a grant the agent
+    receives structured HUMAN_REQUIRED (unchanged).
     """
+    if not grant_id:
+        return _human_required(
+            "assessment_start",
+            assessment_id,
+            "agents need a grant to start (see grant_list)",
+        )
+    from secopent.application.grants import GrantService
+    from secopent.infrastructure.repositories.sqlalchemy_core import (
+        SqlAlchemyAssessmentRepository,
+        SqlAlchemyScopeRepository,
+    )
+    from secopent.infrastructure.repositories.sqlalchemy_grants import (
+        SqlAlchemyGrantRepository,
+    )
+
     with runtime.db.unit_of_work() as uow:
         session = uow.session
-        service = AssessmentService(SqlAlchemyAssessmentRepository(session))
-        return _guard(
+        service = AssessmentService(
+            SqlAlchemyAssessmentRepository(session),
+            scope_repo=SqlAlchemyScopeRepository(session),
+            grant_service=GrantService(SqlAlchemyGrantRepository(session)),
+        )
+        result = _guard(
             "assessment_start",
             lambda: (
-                # pragma: no cover - never reached: _require_human raises first
                 _assessment_out(
-                    service.start(assessment_id, actor_role="agent")
-                )
-                if False
-                else _human_required(
-                    "assessment_start",
-                    assessment_id,
-                    "agents cannot start assessments (human-only action)",
+                    service.start(assessment_id, actor_role="agent",
+                                  grant_id=grant_id)
                 )
             ),
         )
+        if result.get("status") == "success":
+            scheduler = runtime.start_scheduler
+            if scheduler is not None:
+                # A started assessment must actually run, not stall in QUEUED
+                # (the v0.4.0 incident shape). Spawn the executor thread like
+                # the API /start background task (mirrors handler_assessment_resume).
+                import threading
+
+                threading.Thread(
+                    target=scheduler, args=(assessment_id,), daemon=True,
+                    name=f"mcp-start-{assessment_id}",
+                ).start()
+        return result
+
+
+def handler_grant_list(
+    runtime: McpRuntime, *, project_id: str
+) -> dict[str, object]:
+    """List ACTIVE grants for a project (agent discovers what it may run).
+
+    Read-only: exposes the grant's boundary (targets, risk caps, window end)
+    so an agent can decide whether to propose an assessment under a grant -
+    it never exposes the grant lifecycle controls, which are human-only.
+    """
+    from secopent.application.grants import GrantService
+    from secopent.infrastructure.repositories.sqlalchemy_grants import (
+        SqlAlchemyGrantRepository,
+    )
+
+    with runtime.db.unit_of_work() as uow:
+        session = uow.session
+        service = GrantService(SqlAlchemyGrantRepository(session))
+        grants = service.list_active(project_id, now=utc_now())
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "grants": [
+                {
+                    "id": g.id,
+                    "name": g.name,
+                    "scope_include": list(g.scope.include),
+                    "risk_caps": sorted(r.value for r in g.risk_caps),
+                    "valid_to": g.valid_to.isoformat(),
+                }
+                for g in grants
+            ],
+        }
 
 
 def _assessment_control(
@@ -822,6 +935,7 @@ TOOL_HANDLERS: dict[str, Callable[..., object]] = {
     "plan_generate": handler_plan_generate,
     "plan_approve": handler_plan_approve,
     "assessment_start": handler_assessment_start,
+    "grant_list": handler_grant_list,
     "assessment_pause": handler_assessment_pause,
     "assessment_resume": handler_assessment_resume,
     "assessment_cancel": handler_assessment_cancel,
