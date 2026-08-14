@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from ..domain.assessments.models import (
     Approval,
@@ -12,9 +13,14 @@ from ..domain.assessments.models import (
     PlanStep,
 )
 from ..domain.assessments.transitions import assert_transition
+from ..domain.common.canonical import utc_now
 from ..domain.common.errors import DomainError, DomainValidationError
 from ..domain.policy.models import ExecutionMode, RiskClass
 from .ports.repositories import AssessmentRepository
+from .ports.repositories import ScopeRepository as _ScopeRepoPort
+
+if TYPE_CHECKING:
+    from .grants import GrantService
 
 
 class AssessmentPermissionError(DomainError):
@@ -22,8 +28,16 @@ class AssessmentPermissionError(DomainError):
 
 
 class AssessmentService:
-    def __init__(self, repo: AssessmentRepository) -> None:
+    def __init__(
+        self,
+        repo: AssessmentRepository,
+        *,
+        scope_repo: _ScopeRepoPort | None = None,
+        grant_service: GrantService | None = None,
+    ) -> None:
         self._repo = repo
+        self._scope_repo = scope_repo
+        self._grant_service = grant_service
 
     def create(self, *, project_id: str, scope_snapshot_id: str,
                mode: ExecutionMode) -> Assessment:
@@ -63,6 +77,7 @@ class AssessmentService:
         approved_capabilities: frozenset[str],
         scope_digest: str,
         actor_role: str = "human",
+        grant_id: str | None = None,
     ) -> Approval:
         """Record a human approval against the assessment's active plan.
 
@@ -71,8 +86,17 @@ class AssessmentService:
         the approved execution is pinned to exactly the plan + scope the
         approver reviewed. On success the assessment moves to APPROVED and its
         ``approval_id`` is set. Approval is a human decision - never the LLM.
+
+        With ``grant_id`` (agent path, v0.6.0): the grant must authorize the
+        assessment's scope + plan; the recorded approver becomes
+        ``grant:<grant_id>`` (the caller-supplied ``approved_by`` is
+        overridden - an agent can never stamp its own name on an approval).
         """
-        self._require_human(actor_role)
+        if grant_id is not None:
+            self._authorize_via_grant(grant_id, assessment_id)
+            approved_by = f"grant:{grant_id}"
+        else:
+            self._require_human(actor_role)
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
@@ -137,14 +161,55 @@ class AssessmentService:
         if actor_role != "human":
             raise AssessmentPermissionError(f"unknown actor role: {actor_role!r}")
 
-    def start(self, assessment_id: str, *, actor_role: str = "human") -> Assessment:
+    def _authorize_via_grant(self, grant_id: str, assessment_id: str) -> None:
+        """Approve/start via grant: authorize scope + plan, else raise.
+
+        Both approve and start re-check the grant at their own moment - start
+        re-validates because a grant can be revoked between approval and start.
+        Degrades safe: a service built without a scope repo or grant service
+        can never authorize via grant.
+        """
+        if self._grant_service is None:
+            raise AssessmentPermissionError("grant service not configured")
+        if self._scope_repo is None:
+            raise AssessmentPermissionError(
+                "scope repository not configured for grant approval"
+            )
+        assessment = self._repo.get(assessment_id)
+        if assessment is None:
+            raise LookupError(f"assessment {assessment_id} not found")
+        scope = self._scope_repo.get_snapshot(assessment.scope_snapshot_id)
+        if scope is None:
+            raise DomainValidationError("assessment scope not found")
+        plan = self._repo.get_plan(assessment.active_plan_id) if assessment.active_plan_id else None
+        steps = tuple(plan.steps) if plan is not None else ()
+        decision = self._grant_service.authorize(
+            grant_id, scope, steps, now=utc_now()
+        )
+        if not decision.allowed:
+            raise AssessmentPermissionError(
+                f"grant denied: {decision.reason}"
+            )
+
+    def start(
+        self,
+        assessment_id: str,
+        *,
+        actor_role: str = "human",
+        grant_id: str | None = None,
+    ) -> Assessment:
         """Human-only: APPROVED -> QUEUED, triggering real execution.
 
         Requires an approved plan + approval; the actual scan runs in a
         background executor (see ``application.execution``). Start is a human
-        decision - never the LLM.
+        decision - never the LLM. With ``grant_id`` (agent path, v0.6.0) the
+        grant must still authorize the scope + plan at START time - a revoked
+        or expired grant cannot start a previously-approved run.
         """
-        self._require_human(actor_role)
+        if grant_id is not None:
+            self._authorize_via_grant(grant_id, assessment_id)
+        else:
+            self._require_human(actor_role)
         assessment = self._repo.get(assessment_id)
         if assessment is None:
             raise LookupError(f"assessment {assessment_id} not found")
