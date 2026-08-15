@@ -103,6 +103,36 @@ def build_parser() -> argparse.ArgumentParser:
             required=True,
             help="Database URL (postgresql://...) or SQLite path.",
         )
+    grant = subparsers.add_parser(
+        "grant",
+        help="Manage EngagementGrants (human-only create/revoke; read-only list).",
+    )
+    grant_sub = grant.add_subparsers(dest="grant_action", required=True)
+    create = grant_sub.add_parser(
+        "create", help="Create a grant for a project (human-only; agent DENIED)."
+    )
+    create.add_argument("--db", required=True, help="Database URL or SQLite path.")
+    create.add_argument("--project", required=True, help="Project id (proj-...).")
+    create.add_argument("--name", required=True, help="Human-readable grant description.")
+    create.add_argument(
+        "--include", required=True, nargs="+",
+        help="Scope targets (URL/IP/domain/CIDR); repeatable / space separated.",
+    )
+    create.add_argument(
+        "--risk-caps", required=True,
+        help="Comma-separated RiskClass values (passive,low,active,intrusive).",
+    )
+    create.add_argument("--from", dest="from_iso", required=True, help="ISO-8601 start (Z).")
+    create.add_argument("--to", dest="to_iso", required=True, help="ISO-8601 end (Z).")
+    create.add_argument(
+        "--ports", default="80,443", help="In-scope ports (default 80,443)."
+    )
+    lst = grant_sub.add_parser("list", help="List ACTIVE grants for a project.")
+    lst.add_argument("--db", required=True, help="Database URL or SQLite path.")
+    lst.add_argument("--project", required=True, help="Project id (proj-...).")
+    revoke = grant_sub.add_parser("revoke", help="Revoke a grant (human-only).")
+    revoke.add_argument("--db", required=True, help="Database URL or SQLite path.")
+    revoke.add_argument("--grant", required=True, help="Grant id (grant-...).")
     return parser
 
 
@@ -387,6 +417,29 @@ def _cmd_db(action: str, db_url: str) -> int:
     return 0
 
 
+def _cmd_grant(args: Any) -> int:
+    """Dispatch the grant subcommands (human-only create/revoke, list)."""
+    from .grants import cmd_grant_create, cmd_grant_list, cmd_grant_revoke
+
+    if args.grant_action == "create":
+        return cmd_grant_create(
+            db=args.db,
+            project=args.project,
+            name=args.name,
+            include=args.include,
+            risk_caps=args.risk_caps,
+            from_iso=args.from_iso,
+            to_iso=args.to_iso,
+            ports=args.ports,
+        )
+    if args.grant_action == "list":
+        return cmd_grant_list(db=args.db, project=args.project)
+    if args.grant_action == "revoke":
+        return cmd_grant_revoke(db=args.db, grant=args.grant)
+    print(f"error: unknown grant action: {args.grant_action}")
+    return 1
+
+
 def _cmd_db_autostamp_baseline(url: str, cfg: Any) -> None:
     """v0.5.1 F4: stamp a pre-alembic DB (v0.2.x) at the baseline so the
     documented stop-then-migrate flow (`secopent db upgrade`) works - without
@@ -435,6 +488,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_vacuum(args.db)
     if args.command == "db":
         return _cmd_db(args.db_action, args.db)
+    if args.command == "grant":
+        return _cmd_grant(args)
     parser.print_help()
     return 1
 
