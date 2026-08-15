@@ -593,6 +593,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # degrades to the null backend, never a broken boot. The LLM only ever
     # proposes/drafts - the deterministic layer decides.
     llm_backend = _build_llm_backend()
+    app.state.llm_backend = llm_backend
     app.state.model_gateway = RemoteModelGateway(
         local_backend=llm_backend, redactor=RedactionEngine()
     )

@@ -45,6 +45,7 @@ from ...application.report_renderer import ReportData, ReportRenderer
 from ...application.scopes import ScopeService
 from ...domain.assessments.models import Assessment
 from ...domain.assets.graph import AssetGraph
+from ...domain.catalog.models import AssetType
 from ...domain.common.canonical import utc_now
 from ...domain.findings.models import Finding
 from ...domain.intel.models import Vulnerability
@@ -80,6 +81,7 @@ class McpRuntime:
     scope_enforcer: object | None = None
     resume_scheduler: Callable[[str], None] | None = None
     start_scheduler: Callable[[str], None] | None = None
+    llm_backend: object | None = None
 
 
 def _audit(
@@ -646,6 +648,173 @@ def handler_assessment_start(
         return result
 
 
+def handler_mission_create(
+    runtime: McpRuntime,
+    *,
+    project_id: str,
+    target: str,
+    intent: str,
+    grant_id: str,
+    risk_cap: str | None = None,
+) -> dict[str, object]:
+    """Dispatch a high-level mission: the project decides what to run.
+
+    One call completes the whole chain inside the caller's transaction:
+    validate the grant covers the target -> create scope + assessment -> plan
+    via the LLM planner (deterministic floor when no backend) -> approve via
+    grant -> start via grant -> schedule the executor thread. The agent only
+    declares WHAT (target + intent); HOW (which test classes) is decided here.
+    """
+    from ...application.grants import GrantService
+    from ...application.llm_planner import LLMPlanner
+    from ...domain.common.canonical import utc_now
+    from ...domain.policy.models import RiskClass
+    from ...domain.scope.models import ScopeDraft, ScopeLimits
+    from ...infrastructure.repositories.sqlalchemy_core import (
+        SqlAlchemyAssessmentRepository,
+        SqlAlchemyScopeRepository,
+    )
+    from ...infrastructure.repositories.sqlalchemy_grants import (
+        SqlAlchemyGrantRepository,
+    )
+
+    if risk_cap is not None:
+        try:
+            requested_cap = RiskClass(risk_cap)
+        except ValueError:
+            return _error("INVALID_ARGUMENT", f"invalid risk_cap: {risk_cap!r}")
+
+    with runtime.db.unit_of_work() as uow:
+        session = uow.session
+        grants = GrantService(SqlAlchemyGrantRepository(session))
+        grant = grants.get_active(grant_id, now=utc_now())
+        if grant is None:
+            return _error("GRANT_NOT_FOUND", f"grant {grant_id} is not active")
+        if grant.project_id != project_id:
+            return _error("GRANT_NOT_FOUND", "grant does not belong to this project")
+
+        scope = ScopeDraft(
+            project_id=project_id,
+            include=(target,),
+            exclude=(),
+            ports=(80, 443),
+            limits=ScopeLimits(5.0, 3, 50_000),
+        ).freeze(snapshot_id=f"mscope-{uuid.uuid4().hex[:8]}",
+                 approved_by=f"grant:{grant_id}")
+        if not grant.covers_scope(scope):
+            return _error(
+                "GRANT_SCOPE_MISMATCH",
+                f"target {target} not covered by grant {grant_id}",
+            )
+        # The mission's effective risk ceiling: the grant's MAX cap by default
+        # (a broad grant may use its full authorized range), or the requested
+        # cap which must NOT exceed the grant (the agent cannot escalate).
+        grant_cap = max(grant.risk_caps, key=_risk_rank)
+        if risk_cap is None:
+            effective_cap = grant_cap
+        else:
+            if _risk_rank(requested_cap) > _risk_rank(grant_cap):
+                return _error(
+                    "GRANT_RISK_NOT_APPROVED",
+                    f"risk_cap {risk_cap!r} exceeds grant caps "
+                    f"({','.join(sorted(r.value for r in grant.risk_caps))})",
+                )
+            effective_cap = requested_cap
+
+        scope_repo = SqlAlchemyScopeRepository(session)
+        scope_repo.add_snapshot(scope)
+        asm_repo = SqlAlchemyAssessmentRepository(session)
+        service = AssessmentService(
+            asm_repo,
+            scope_repo=scope_repo,
+            grant_service=grants,
+        )
+        assessment = service.create(
+            project_id=project_id, scope_snapshot_id=scope.id,
+            mode=ExecutionMode.APPROVAL,
+        )
+
+        catalog = SqlAlchemyCatalogRepository(session).latest_catalog()
+        backend = runtime.llm_backend
+        planner = LLMPlanner(backend=backend, catalog=catalog)  # type: ignore[arg-type]
+        plan = planner.generate(
+            plan_id=f"plan-{uuid.uuid4().hex[:12]}",
+            assessment_id=assessment.id,
+            asset_types=(_asset_type_for_target(target),),
+            intent=intent,
+            risk_cap=effective_cap,
+        )
+        service.attach_plan(assessment.id, steps=plan.steps)
+
+        service.approve(
+            assessment_id=assessment.id,
+            approved_by="agent",  # overridden to grant:<id>
+            approved_risks=frozenset(grant.risk_caps),
+            approved_capabilities=frozenset(),
+            scope_digest=scope.digest,
+            actor_role="agent",
+            grant_id=grant_id,
+        )
+        started = service.start(assessment.id, actor_role="agent", grant_id=grant_id)
+        _audit(
+            runtime,
+            session=session,
+            actor="agent",
+            action="mission.created",
+            resource_type="mission",
+            resource_id=assessment.id,
+            payload={
+                "grant_id": grant_id, "target": target, "intent": intent,
+                "plan_steps": len(plan.steps),
+                "llm_backend": type(backend).__name__ if backend is not None else "none",
+            },
+        )
+        result = _assessment_out(started)
+        # result["status"] is the assessment status; add mission context
+        result["assessment_id"] = assessment.id
+        session.commit()
+
+    scheduler = runtime.start_scheduler
+    if scheduler is not None:
+        import threading
+
+        threading.Thread(
+            target=scheduler, args=(assessment.id,), daemon=True,
+            name=f"mcp-mission-{assessment.id}",
+        ).start()
+    return result
+
+
+def _asset_type_for_target(target: str) -> AssetType:
+    """Sniff an asset type from a mission target (URL/IP/domain/cloud account)."""
+    import ipaddress
+
+    if target.startswith(("http://", "https://")):
+        return AssetType.WEB_APP
+    if ":" in target and "/" not in target:
+        # host:port -> IP_PORT; provider:account -> CLOUD_ACCOUNT (no scheme)
+        return AssetType.IP_PORT
+    try:
+        ipaddress.ip_network(target, strict=False)
+        return AssetType.IP_PORT
+    except ValueError:
+        return AssetType.WEB_APP
+
+
+# Risk ladder for effective-cap comparison (mission cannot exceed its grant).
+_RISK_RANK: dict[RiskClass, int] = {
+    RiskClass.PASSIVE: 0,
+    RiskClass.LOW: 1,
+    RiskClass.ACTIVE: 2,
+    RiskClass.INTRUSIVE: 3,
+    RiskClass.DESTRUCTIVE: 4,
+}
+
+
+def _risk_rank(risk: RiskClass) -> int:
+    return _RISK_RANK[risk]
+
+
 def handler_grant_list(
     runtime: McpRuntime, *, project_id: str
 ) -> dict[str, object]:
@@ -936,6 +1105,7 @@ TOOL_HANDLERS: dict[str, Callable[..., object]] = {
     "plan_approve": handler_plan_approve,
     "assessment_start": handler_assessment_start,
     "grant_list": handler_grant_list,
+    "mission_create": handler_mission_create,
     "assessment_pause": handler_assessment_pause,
     "assessment_resume": handler_assessment_resume,
     "assessment_cancel": handler_assessment_cancel,

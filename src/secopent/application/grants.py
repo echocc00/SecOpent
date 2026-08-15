@@ -108,6 +108,18 @@ class GrantService:
             g for g in self._repo.list_for_project(project_id) if g.is_active_at(now)
         )
 
+    def get_active(self, grant_id: str, *, now: datetime) -> EngagementGrant | None:
+        """Fetch a grant ONLY if it exists and is currently active.
+
+        mission_create uses this to validate the grant before building any
+        state; a missing/revoked/expired grant returns None (no exception -
+        the caller reports the structured denial).
+        """
+        grant = self._repo.get(grant_id)
+        if grant is None or not grant.is_active_at(now):
+            return None
+        return grant
+
     # -- internals -----------------------------------------------------------------
 
     @staticmethod

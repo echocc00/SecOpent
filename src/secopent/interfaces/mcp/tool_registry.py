@@ -35,6 +35,7 @@ STANDARD_ORCHESTRATION_TOOLS: tuple[str, ...] = (
     "plan_approve",
     "assessment_start",
     "grant_list",
+    "mission_create",
     "assessment_pause",
     "assessment_resume",
     "assessment_cancel",

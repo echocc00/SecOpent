@@ -116,6 +116,7 @@ def _runtime_from_app(app: FastAPI) -> McpRuntime:
         scope_enforcer=getattr(app.state, "scope_enforcer", None),
         resume_scheduler=_schedule_resume,
         start_scheduler=_schedule_start,
+        llm_backend=getattr(app.state, "llm_backend", None),
     )
 
 

@@ -18,11 +18,12 @@ def test_standard_tools_are_the_six_groups() -> None:
     assert "scope_freeze" in STANDARD_ORCHESTRATION_TOOLS
     assert "plan_generate" in STANDARD_ORCHESTRATION_TOOLS
     assert "assessment_start" in STANDARD_ORCHESTRATION_TOOLS
-    assert "grant_list" in STANDARD_ORCHESTRATION_TOOLS  # v0.6.0
+    assert "grant_list" in STANDARD_ORCHESTRATION_TOOLS  # v0.6.3
+    assert "mission_create" in STANDARD_ORCHESTRATION_TOOLS  # v0.6.3 B2
     assert "assessment_create" in STANDARD_ORCHESTRATION_TOOLS
     assert "finding_validate" in STANDARD_ORCHESTRATION_TOOLS
     assert "report_render" in STANDARD_ORCHESTRATION_TOOLS
-    assert len(STANDARD_ORCHESTRATION_TOOLS) == 18
+    assert len(STANDARD_ORCHESTRATION_TOOLS) == 19
 
 
 def test_register_self_written_and_invoke() -> None:
