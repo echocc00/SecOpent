@@ -37,10 +37,28 @@
 | `grant_list(project_id)` | agent ✓ | 列出该项目的 ACTIVE grants(边界、risk caps、过期时间) |
 | `plan_approve(..., grant_id)` | agent(带 grant)| 边界内放行,记录 `grant:<id>`;无 grant → HUMAN_REQUIRED |
 | `assessment_start(..., grant_id)` | agent(带 grant)| 边界内触发真实执行;无 grant → HUMAN_REQUIRED |
+| **`mission_create(target, intent, grant_id, risk_cap?)`** | agent(带 grant)| **一步下发任务**:agent 只声明"测谁 + 什么意图",项目内 LLM 决定跑哪些测试类(见 §5) |
 
 创建/吊销 grant 不走 MCP(见 §4)。
 
-## 4. 创建与吊销(管理员)
+## 4. Mission——agent 下发任务,项目决定用例(v0.6.3 Phase B)
+
+**用法**:agent 说"测 1.1.1.1 找暴露的管理面板",而不是手拼 scope+plan+approve+start:
+
+```
+mission_create(project_id, target="http://8.133.200.235/",
+               intent="find exposed admin panels", grant_id="grant-xxx")
+```
+
+一次调用完成:**grant 校验(active + target ∈ 授权边界)→ 建 scope+assessment → LLM 从 TestCatalog 选用例 → grant 批准 → 启动 → 后台执行**。审计记一条 `mission.created`(含 grant_id / target / intent / plan 步数 / 用哪个 LLM 后端)。
+
+**用例怎么选的(项目内 LLM 决定)**:
+1. **确定性下限**:catalog 对目标资产类型(WEB_APP / IP_PORT)要求的测试类**必选**——LLM 不能减
+2. **LLM 加分项**:按 intent 从 catalog 全量类里选相关的加上(解析失败/未知 id → 丢弃)
+3. **风险封顶**:mission 的 `risk_cap`(缺省 = grant 的最高授权)过滤;LLM 报超限的类直接丢弃;**mission 声明的 risk_cap 不能超过 grant**(agent 不能自我提权)
+4. **LLM 不可用 → 自动降级**:无 backend / 模型报错 → 只用确定性下限,mission 仍能跑
+
+## 5. 创建与吊销(管理员)
 
 当前通过 CLI 或直接调用 `GrantService`(UI 集成待 Phase B)。示例(CLI REPL 或测试脚本):
 
@@ -86,7 +104,7 @@ with db.unit_of_work() as uow:
 
 吊销后:现有 approve 可能还持有 APPROVED 状态,但**下一次 start 会被拒绝**(start 重新校验 grant)。
 
-## 5. 安全建议
+## 6. 安全建议
 
 1. **最短授权窗口**:按 engagement 定 valid_to,别开"永久 grant"
 2. **最窄 scope**:只列本次要打的目标;不要顺手包含整个网段
@@ -94,7 +112,7 @@ with db.unit_of_work() as uow:
 4. **审计抽查**:`GET /audit/chain` 可查 `grant:<id>` 批准记录,确认 agent 行为跟你授权的一致
 5. **不共享凭据**:grant 绑定 project;新客户开新 project 新 grant
 
-## 6. RAQ
+## 7. RAQ
 
 - **agent 能自己建 grant 吗?** 不能。`create_human` 强制 `actor_role="human"`,agent 调用即 DENY。
 - **guard 过期后正在跑的评估会停吗?** 不会中断已运行(Approved→Running 的已放行);revoke 只影响未来的 approve/start。
