@@ -22,6 +22,9 @@ from secopent.domain.projects.models import Project
 from secopent.domain.scope.models import ScopeDraft, ScopeLimits, ScopeSnapshot
 
 _NOW = datetime(2026, 8, 8, tzinfo=UTC)
+# WIDE window: authorize(now=utc_now()) runs with the REAL clock; grants must
+# stay active regardless of when the suite runs.
+_FAR_FUTURE = datetime(2099, 1, 1, tzinfo=UTC)
 
 
 @dataclass
@@ -50,7 +53,7 @@ def _grant(repo: _MemoryGrantRepo) -> EngagementGrant:
     g = EngagementGrant.create(
         project_id="p1", name="g", scope=_grant_boundary("http://target"),
         risk_caps=frozenset({RiskClass.LOW}),
-        valid_from=_NOW - timedelta(days=1), valid_to=_NOW + timedelta(days=7),
+        valid_from=_NOW, valid_to=_FAR_FUTURE,
         created_by="operator-1", created_at=_NOW,
     )
     repo.add(g)

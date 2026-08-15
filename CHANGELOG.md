@@ -9,6 +9,16 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### v0.6.3 (in progress, EngagementGrant - Phase A)
+- **feat(grants)**: `EngagementGrant` 授权契据域模型——人创建的一次性预授权(绑定 project + 内嵌 ScopeSnapshot 作边界 + risk caps + 有效期 + revoke),`covers_scope` 精确定义(每目标单独匹配,"授权 /24 ≠ 能扫 /8"),DESTRUCTIVE 构造拒绝
+- **feat(grants)**: `GrantService`——create_human/revoke human-only(agent 建授权 = DENY),`authorize` 纯门(GRANT_NOT_FOUND/INACTIVE/SCOPE_MISMATCH/RISK_NOT_APPROVED)
+- **feat(grants)**: `AssessmentService.approve/start` 增加 `grant_id` 路径——授权边界内 agent 可 approve/start,审计记 `grant:<id>`(agent 无法自盖章);start 时重新校验(revoked/过期 的 grant 不能启动已批准的执行);无 grant 的 agent 行为不变(HUMAN_REQUIRED)
+- **feat(grants)**: 持久化 `core_grants` 表(alembic 增量迁移,幂等)+ embedded scope 复用 `core_scope_snapshots`(单一 matcher)— v0.5.x 存量 DB 走 `secopent db upgrade` 自动迁移
+- **feat(mcp)**: `plan_approve`/`assessment_start` 删除 `if False else _human_required` 死代码,grant_id 透传真实执行;`grant_list` 新工具(agent 发现可用授权)
+- **fix(execution)**: MCP grant-start 现在触发完整 executor(此前只置 QUEUED——v0.4.0 事故形态),`start_scheduler` 与 HTTP `/start` background task 完全一致
+- **fix(grants)**: `SqlAlchemyGrantRepository.add` 幂等(revoke 重写不撞 UNIQUE)
+- **docs**: `docs/deployment/grants.md` 运维指引(创建/吊销/安全建议/RAQ)
+
 ## [0.6.2] - 2026-08-13
 
 ### Added
