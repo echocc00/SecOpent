@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.6.5] - 2026-08-16
+
 ### v0.6.5 (in progress, CLI grant entry point)
 - **feat(cli)**: `secopent grant create/list/revoke`——grant 生命周期的人侧入口(v0.6.3 只接了 MCP 后端 + 数据库 + service,没有任何人类通道:无 REST / UI / CLI)。CLI 恒传 `actor_role="human"`(service 仍拒绝 agent),create 校验 project 存在(SQLite 默认不强制 FK)+ risk caps + scope 复用 `core_scope_snapshots`,list 只显示 ACTIVE,revoke 即时吊销(start 重新校验)
 
