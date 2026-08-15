@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-15
+
 ### v0.6.3 (in progress, EngagementGrant - Phase A)
 - **feat(grants)**: `EngagementGrant` 授权契据域模型——人创建的一次性预授权(绑定 project + 内嵌 ScopeSnapshot 作边界 + risk caps + 有效期 + revoke),`covers_scope` 精确定义(每目标单独匹配,"授权 /24 ≠ 能扫 /8"),DESTRUCTIVE 构造拒绝
 - **feat(grants)**: `GrantService`——create_human/revoke human-only(agent 建授权 = DENY),`authorize` 纯门(GRANT_NOT_FOUND/INACTIVE/SCOPE_MISMATCH/RISK_NOT_APPROVED)
