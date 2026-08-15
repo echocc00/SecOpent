@@ -32,3 +32,6 @@ scripts/test_case_appmodel.py
 scripts/test_real_finding_pipeline.py
 scripts/test_security_boundaries.py
 scripts/fix-nuclei-9x-templates-dir.patch
+
+# Strix peer-agent runtime artifacts
+strix_runs/
