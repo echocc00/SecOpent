@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-08-15
+
 ### v0.6.4 (in progress, Mission - Phase B)
 - **feat(llm-planner)**: `LLMPlanner`——按 mission intent 从 TestCatalog 选用例:确定性 required 下限(LLM 只能加不能减)+ LLM 加分项(catalog 校验、未知 id 丢弃)+ risk_cap 过滤(floor 与加分项同受封顶);LLM 报错/非 JSON/null backend → 自动降级为 required-only(mission 不因模型故障失败)
 - **feat(mcp)**: `mission_create(target, intent, grant_id, risk_cap?)` 一步任务下发——grant 校验(active + target ∈ 边界 + risk_cap 不超授权)→ 建 scope+assessment → LLM 规划 → grant approve → grant start → 调度 executor;审计 `mission.created`(grant_id/target/intent/plan 步/LLM 后端);`GrantService.get_active` 只读门
