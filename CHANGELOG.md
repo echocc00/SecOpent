@@ -9,6 +9,14 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### v0.7.0 (in progress, ReasoningLoop skeleton)
+- **feat(reasoning-loop)**: domain models (LoopId/Phase/State/Budget/Step/Plan + ProposeAction Pydantic)
+- **feat(reasoning-loop)**: deterministic termination evaluator (no LLM decides loop end)
+- **feat(reasoning-loop)**: three-gate composition (Schema/Policy/Permit) + MockLoopActionProposer
+- **feat(reasoning-loop)**: ReasoningLoopOrchestrator with MOCK execution (no real tool/container yet)
+- **test(reasoning-loop)**: 67 unit + integration + e2e tests, tracer-bullet vertical slice
+- **NOT YET**: real proposer, JobService wiring, Handbooks, AttackChain integration, MCP tools, DB persistence
+
 ## [0.6.5] - 2026-08-16
 
 ### v0.6.5 (in progress, CLI grant entry point)
