@@ -5,8 +5,9 @@ import hashlib
 import re
 import secrets
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -284,3 +285,114 @@ class LoopContext:
             "elapsed_seconds": self.elapsed_seconds,
         }
         return hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyDecision:
+    """Output of PolicyGate; ``verdict`` is deterministic."""
+
+    verdict: Literal["allow", "deny"]
+    reason: str
+    deny_code: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GateVerdict:
+    """Output of a single gate (Schema / Policy / Permit).
+
+    Exactly one of ``passed=True`` (with optional ``permit_id``) or
+    ``passed=False`` (with ``deny_code``) is set per call.
+    """
+
+    passed: bool
+    reason: str
+    deny_code: str | None = None
+    permit_id: str | None = None
+    permit_ttl_seconds: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LoopState:
+    """Snapshot of one ReasoningLoop instance.
+
+    The orchestrator produces a new ``LoopState`` per ``step``; nothing
+    here is mutable, so audit/replay stays trivial.
+    """
+
+    loop_id: LoopId
+    assessment_id: str
+    phase: LoopPhase
+    policy_snapshot: str
+    budget: LoopBudget
+    context_hash: str
+    catalog_required_remaining: frozenset[str]
+    catalog_required_executed: frozenset[str]
+    consecutive_no_signal: int
+    consecutive_policy_rejected: int
+    started_at: datetime
+    last_step_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class LoopStep:
+    """Per-step audit record (replayable, signed via AuditChain)."""
+
+    step_id: str
+    loop_id: LoopId
+    step_number: int
+    timestamp: datetime
+    context_hash_before: str
+    proposed_action: ProposeAction
+    propose_tokens_used: int
+    propose_latency_ms: int
+    propose_rationale: str
+    schema_check_passed: bool
+    policy_decision: PolicyDecision
+    permit_id: str | None
+    tool_or_case_id: str | None
+    execution_result_digest: str
+    evidence_refs: tuple[str, ...]
+    observation_signals: tuple[str, ...]
+    catalog_class_matched: frozenset[str]
+    oracle_progressed: bool
+    correlation_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class LoopTerminationPolicy:
+    """All-deterministic termination configuration. LLM MUST NOT write this."""
+
+    max_steps: int
+    max_wall_clock_seconds: int
+    max_total_tokens: int
+    no_signal_streak_to_converge: int
+    policy_rejected_streak_to_stop: int
+    # NOTE (spec §6.1): `require_catalog_floor_green` was REMOVED. Catalog
+    # floor is the Assessment's gate (CoverageService), NOT a loop termination
+    # condition. The loop runs ON TOP of the floor; termination is decided by
+    # budget / no-signal / policy-rejection / emergency only. Floor progress is
+    # surfaced to the LLM via LoopContext.catalog_* as informational input.
+    require_min_confirmed: int
+
+    @classmethod
+    def default(cls) -> LoopTerminationPolicy:
+        return cls(
+            max_steps=50,
+            max_wall_clock_seconds=1800,
+            max_total_tokens=200_000,
+            no_signal_streak_to_converge=5,
+            policy_rejected_streak_to_stop=3,
+            require_min_confirmed=0,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LoopPlan:
+    """The plan a ReasoningLoop follows — its termination policy + audit anchor."""
+
+    plan_id: str
+    loop_id: LoopId
+    assessment_id: str
+    termination_policy: LoopTerminationPolicy
+    policy_snapshot: str
+    created_at: datetime
