@@ -1,6 +1,7 @@
 """Frozen dataclasses for ReasoningLoop state and data (spec §3)."""
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..common.canonical import canonical_json
 
 _LOOP_ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
@@ -171,3 +174,113 @@ class ProposeAction(BaseModel):
     @property
     def tool_id(self) -> str | None:
         return self.payload.get("tool_id")
+
+
+@dataclass(frozen=True, slots=True)
+class ObservationSummary:
+    """Compact summary of one Observation, used inside LoopContext.
+
+    ``token_estimate`` is the LLM-side cost of including this summary
+    verbatim in a prompt — the context builder uses it to budget the
+    observation budget of ``LoopContext``.
+    """
+
+    observation_id: str
+    tool_or_case_id: str
+    target_digest: str
+    key_signals: tuple[str, ...]
+    confidence: float
+    has_full_text: bool
+    full_text_ref: str | None
+    token_estimate: int
+
+
+@dataclass(frozen=True, slots=True)
+class AvailableCapability:
+    """Lightweight pointer to a registered tool/case the proposer may choose."""
+
+    capability_id: str
+    kind: str  # "tool" | "case"
+    summary: str
+    risk_class: str
+    cwe: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class PendingHypothesis:
+    """Pointer to an AttackChain hypothesis awaiting verification."""
+
+    hypothesis_id: str
+    description: str
+    needed_cwe: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LoopContext:
+    """Structured input the proposer consumes. Immutable; content-addressed."""
+
+    asset_subgraph: tuple[str, ...]
+    recent_observations: tuple[ObservationSummary, ...]
+    observation_token_count: int
+    catalog_already_executed: frozenset[str]
+    catalog_still_required: frozenset[str]
+    catalog_floor_progress: float
+    unconfirmed_candidates: tuple[str, ...]
+    confirmed_findings_recent: tuple[str, ...]
+    chain_hypotheses_pending: tuple[PendingHypothesis, ...]
+    available_tools: tuple[AvailableCapability, ...]
+    available_cases: tuple[AvailableCapability, ...]
+    available_peers: tuple[str, ...]
+    budget_remaining: LoopBudgetSnapshot
+    loop_step: int
+    max_steps: int
+    elapsed_seconds: int
+
+    def context_hash(self) -> str:
+        body = {
+            "asset_subgraph": list(self.asset_subgraph),
+            "recent_observations": [
+                {
+                    "observation_id": o.observation_id,
+                    "tool_or_case_id": o.tool_or_case_id,
+                    "target_digest": o.target_digest,
+                    "key_signals": list(o.key_signals),
+                    "confidence": o.confidence,
+                    "has_full_text": o.has_full_text,
+                    "full_text_ref": o.full_text_ref,
+                    "token_estimate": o.token_estimate,
+                }
+                for o in self.recent_observations
+            ],
+            "observation_token_count": self.observation_token_count,
+            "catalog_already_executed": sorted(self.catalog_already_executed),
+            "catalog_still_required": sorted(self.catalog_still_required),
+            "catalog_floor_progress": self.catalog_floor_progress,
+            "unconfirmed_candidates": list(self.unconfirmed_candidates),
+            "confirmed_findings_recent": list(self.confirmed_findings_recent),
+            "chain_hypotheses_pending": [
+                {"hypothesis_id": h.hypothesis_id, "description": h.description,
+                 "needed_cwe": list(h.needed_cwe)}
+                for h in self.chain_hypotheses_pending
+            ],
+            "available_tools": [
+                {"capability_id": t.capability_id, "kind": t.kind, "summary": t.summary,
+                 "risk_class": t.risk_class, "cwe": list(t.cwe)}
+                for t in self.available_tools
+            ],
+            "available_cases": [
+                {"capability_id": c.capability_id, "kind": c.kind, "summary": c.summary,
+                 "risk_class": c.risk_class, "cwe": list(c.cwe)}
+                for c in self.available_cases
+            ],
+            "available_peers": list(self.available_peers),
+            "budget_remaining": {
+                "steps_remaining": self.budget_remaining.steps_remaining,
+                "tokens_remaining": self.budget_remaining.tokens_remaining,
+                "wall_seconds_remaining": self.budget_remaining.wall_seconds_remaining,
+            },
+            "loop_step": self.loop_step,
+            "max_steps": self.max_steps,
+            "elapsed_seconds": self.elapsed_seconds,
+        }
+        return hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()

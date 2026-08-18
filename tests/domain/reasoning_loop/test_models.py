@@ -9,8 +9,10 @@ from pydantic import ValidationError
 from secopent.domain.reasoning_loop.models import (
     LoopActionType,
     LoopBudget,
+    LoopContext,
     LoopId,
     LoopPhase,
+    ObservationSummary,
     ProposeAction,
 )
 
@@ -185,3 +187,108 @@ def test_propose_action_payload_required_keys_per_action_type() -> None:
         ProposeAction.model_validate(
             {**base, "action_type": "request_oracle", "payload": {}}
         )
+
+
+def test_observation_summary_token_count_present() -> None:
+    s = ObservationSummary(
+        observation_id="obs-1",
+        tool_or_case_id="nuclei",
+        target_digest="sha256:" + "a" * 64,
+        key_signals=("new_endpoint:/api/users",),
+        confidence=0.6,
+        has_full_text=False,
+        full_text_ref=None,
+        token_estimate=120,
+    )
+    assert s.token_estimate == 120
+    assert s.has_full_text is False
+
+
+def test_loop_context_context_hash_deterministic() -> None:
+    ctx_a = LoopContext(
+        asset_subgraph=(),
+        recent_observations=(),
+        observation_token_count=0,
+        catalog_already_executed=frozenset({"web:sql-injection"}),
+        catalog_still_required=frozenset({"web:xss"}),
+        catalog_floor_progress=0.5,
+        unconfirmed_candidates=(),
+        confirmed_findings_recent=(),
+        chain_hypotheses_pending=(),
+        available_tools=(),
+        available_cases=(),
+        available_peers=(),
+        budget_remaining=LoopBudget.default().snapshot(),
+        loop_step=3,
+        max_steps=50,
+        elapsed_seconds=42,
+    )
+    ctx_b = LoopContext(
+        asset_subgraph=(),
+        recent_observations=(),
+        observation_token_count=0,
+        catalog_already_executed=frozenset({"web:sql-injection"}),
+        catalog_still_required=frozenset({"web:xss"}),
+        catalog_floor_progress=0.5,
+        unconfirmed_candidates=(),
+        confirmed_findings_recent=(),
+        chain_hypotheses_pending=(),
+        available_tools=(),
+        available_cases=(),
+        available_peers=(),
+        budget_remaining=LoopBudget.default().snapshot(),
+        loop_step=3,
+        max_steps=50,
+        elapsed_seconds=42,
+    )
+    assert ctx_a.context_hash() == ctx_b.context_hash()
+
+
+def test_loop_context_context_hash_changes_on_field_change() -> None:
+    base = dict(
+        asset_subgraph=(),
+        recent_observations=(),
+        observation_token_count=0,
+        catalog_already_executed=frozenset(),
+        catalog_still_required=frozenset(),
+        catalog_floor_progress=0.0,
+        unconfirmed_candidates=(),
+        confirmed_findings_recent=(),
+        chain_hypotheses_pending=(),
+        available_tools=(),
+        available_cases=(),
+        available_peers=(),
+        budget_remaining=LoopBudget.default().snapshot(),
+        loop_step=0,
+        max_steps=50,
+        elapsed_seconds=0,
+    )
+    h0 = LoopContext(**base).context_hash()
+    h1 = LoopContext(**{**base, "loop_step": 1}).context_hash()
+    assert h0 != h1
+    # Hash must be 64 hex chars (sha256).
+    import re
+    assert re.fullmatch(r"[0-9a-f]{64}", h0)
+
+
+def test_loop_context_is_frozen() -> None:
+    ctx = LoopContext(
+        asset_subgraph=(),
+        recent_observations=(),
+        observation_token_count=0,
+        catalog_already_executed=frozenset(),
+        catalog_still_required=frozenset(),
+        catalog_floor_progress=0.0,
+        unconfirmed_candidates=(),
+        confirmed_findings_recent=(),
+        chain_hypotheses_pending=(),
+        available_tools=(),
+        available_cases=(),
+        available_peers=(),
+        budget_remaining=LoopBudget.default().snapshot(),
+        loop_step=0,
+        max_steps=50,
+        elapsed_seconds=0,
+    )
+    with pytest.raises((AttributeError, TypeError)):
+        ctx.loop_step = 99  # type: ignore[misc]
