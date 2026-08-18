@@ -200,6 +200,48 @@ reasoning-loop §5 第 346-348 行把 `require_catalog_floor_green=True` 设为 
 | EmergencyStop | EMERGENCY_STOPPED |
 | 用户手动 stop | STOPPED |
 
+### 6.3 循环内可暂停/续跑（人审批介入，已拍板要做）
+
+**动机**：循环是长时、烧 token 的过程，且 LLM 提议可能越出人预期。operator 需要能在循环运行中**暂停**（不问断完成也不硬杀），人审当前上下文后**续跑**，全程审计。这符合"人在回路"定位，也是控成本手段。
+
+**状态扩展**（`LoopPhase` 新增）：
+```python
+PAUSED = "paused"       # operator 或确定性策略请求暂停
+RESUMED = "resumed"     # 记录已从暂停恢复（中间态，不入稳态）
+```
+终态保留 §6.2 的 `BUDGET_EXHAUSTED / CONVERGED / POLICY_BLOCKED / EMERGENCY_STOPPED / STOPPED`；`PAUSED` 是**可中断态**（可暂停 → 续跑 → 循环继续），`STOPPED` 是**终态**（不可续跑）。
+
+**暂停语义**：
+- `pause(loop_id, actor, reason)`：仅**在两个 job 的边界**暂停（不中断正在执行的 loop job——执行已完成或取消该 job，但不破坏已产出的 Observation/CAS）。对齐现有的 `StepGate`（`orchestrator.py:_check_gate` 的 "paused" 语义）。
+- 暂停时：不再签发新 Permit、不再调 LLM 提议、已产出的 Observation 保留。
+- 暂停写入：`LoopState.phase = PAUSED` + `loop.paused` 审计事件（actor/reason/上下文快照）。
+
+**续跑语义**：
+- `resume(loop_id, actor)`：**人审后显式续跑**，需经审批标记（`approved_by` + 签名，对齐 `assessment.approve` 模式）。续跑可选参数 `modified_context`（operator 可裁剪/追加 LoopContext 提示，如"注意某已知发现"）。
+- 续跑时：重新评估预算（暂停期间墙钟/成本不归零，但可配置"暂停期不计入墙钟"）——默认**墙钟暂停期不计**，token 预算暂停期本就无消耗。
+- 续跑写入：`LoopState.phase = RESUMED` + `loop.resumed` 审计事件 + allowed_actions 恢复。
+
+**guard**：
+- 暂停/续跑都是 human-only（agent 调用 403，对齐 `signing_keys` rotate 门禁）。
+- 续跑必须显式（不许"暂停后自动续跑"）——防止有 operator 忘了就没意义。
+- 暂停申请有超时（默认 60s 无人确认则忽略暂停请求，循环继续；或配置成"请求暂停后等待直到确认"——默认后者：暂停请求必须得到确认才算暂停，否则循环继续推进，避免暂停请求无人理时循环空转）。
+
+**多暂停安全**：
+- 并发 pause 幂等（同一 loop 只暂停一次，第二次 pause 返回当前已 PAUSED）。
+- 续跑前检查：若已 STOPPED/EMERGENCY_STOPPED，拒绝续跑。
+- 暂停期间 EmergencyStop 仍优先（EMERGENCY_STOPPED 覆盖 PAUSED）。
+
+**对接终止策略**：暂停/续跑次数设上限（默认 3 次暂停），超过则循环进入 `STOPPED`（防无限暂停消耗资源）。
+
+**落地**：`domain/reasoning_loop/models.py` 加 `PAUSED/RESUMED` + `pause_attempts` 字段；`application/ports/loop_gates.py` 或 `ReasoningOrchestrator` 加 `pause()/resume()`；`interfaces/api/routers/loops.py` 加 `POST /loops/{id}/pause` + `POST /loops/{id}/resume`（human-only）；CLI `secopent loop pause/resume`。
+
+**测试**（TDD）：
+- `pause` 在两 job 边界暂停，不中断已产观察；暂停期间不签新 Permit
+- `resume` 需 human 审批 + 签名；agent 403
+- resume 后墙钟暂停期不计、token 预算续跑
+- 第二次 pause 幂等；STOPPED 后 resume 拒绝；EmergencyStop 覆盖 PAUSED
+- pause > 3 次 → STOPPED
+
 ---
 
 ## 7. 三道门 + 执行平面（沿用，收敛重复）
@@ -216,10 +258,10 @@ reasoning-loop §7 定义 `LoopJob(Job)` 子类 + `job_type="loop_step"`。**弃
 
 ## 8. 预算 + 降级 + 审计（沿用）
 
-- 预算：沿用 reasoning-loop §10（步数 50 / token 200K / 墙钟 1800s / 单步 8K / 错误率连续 5 步）
+- 预算：沿用 reasoning-loop §10（步数 50 / token 200K / 墙钟 1800s / 单步 8K / 错误率连续 5 步）。暂停期墙钟不计（§6.3）。
 - 降级链：LLM 提议不可用 → LLMPlanner 单次模式 → 仅 catalog floor。**降级必须写 `loop.fallback_used` 审计事件**（不静默，对应 Cybergym 教训）
-- 审计：沿用 reasoning-loop §12.3 的 6 个事件类型（created/step_proposed/gate_rejected/step_executed/terminated/fallback_used）
-- 持久化：`core_reasoning_loops` + `core_loop_steps`（表结构沿用 reasoning-loop §12.1）；LoopContext CAS 化（context_hash 关联，不做全量进 step 行）
+- 审计：沿用 reasoning-loop §12.3 的 6 个事件类型（created/step_proposed/gate_rejected/step_executed/terminated/fallback_used）+ `loop.paused` / `loop.resumed`（§6.3）
+- 持久化：`core_reasoning_loops` + `core_loop_steps`（表结构沿用 reasoning-loop §12.1，补 `phase=PAUSED` + `pause_attempts` 字段）；LoopContext CAS 化（context_hash 关联，不做全量进 step 行）
 
 ---
 
@@ -253,12 +295,16 @@ reasoning-loop §7 定义 `LoopJob(Job)` 子类 + `job_type="loop_step"`。**弃
 0.7.4  Handbooks 注入（已 8 份，直接用）
 0.7.5  AttackChain 假设闭环接线
 0.7.6  ★ DIFF_SEMANTIC Oracle（DiffSemanticVerifier + registry + verifier_factory 分流）
-0.7.7  MCP/CLI/Web 入口
-0.7.8  ★ A/B 验收（Juice Shop/crAPI/vulhub）
+0.7.7  ★ 循环内暂停/续跑（loop.paused/resumed 状态 + human-only pause/resume API
+       + 两 job 边界暂停 + 暂停期墙钟不计 + 暂停次数上限 3）
+0.7.8  MCP/CLI/Web 入口
+0.7.9  ★ A/B 验收（Juice Shop/crAPI/vulhub）
        · 对照组：仅 catalog
        · 实验组：catalog + ReasoningLoop + DIFF_SEMANTIC
-       · 判据：oracle 确认增量 > 0 且成本可接受 → 放行；否则冻结
+       · 判据：oracle 确认增量 > 0 且单次成本 < 对照组 1.5x → 放行；否则冻结
 ```
+
+**（总阶段 0.7.0-0.7.9，DW 8-12 周；暂停/续跑 0.7.7 是放行的治理必要条件之一。）**
 
 **总工期**：8-11 周。DIFF_SEMANTIC（0.7.6）是**放行必要条件**——没有它，逻辑类候选无法确认，循环增量不可证明。
 
@@ -273,13 +319,13 @@ reasoning-loop §7 定义 `LoopJob(Job)` 子类 + `job_type="loop_step"`。**弃
 - ❌ 不新建 LoopJob 子类（普通 Job + 元数据）
 - ❌ 不新造基础 oracle（DIFF_SEMANTIC 是逻辑类的补充，不是替代 echo/oob）
 - ❌ RACE 等新 VulnType 暂不扩展（先 A/B 验证 IDOR/AUTH_BYPASS）
-- ❌ 不自动触发循环（默认手动 loop_create，A/B 验证价值后再考虑自动）
+- ❌ 不自动触发循环（默认手动 loop_create，A/B 验证价值后再考虑自动；含"暂停后自动续跑"——续跑必须显式人审）
 - ❌ 不做 Cybergym 级评测设施
 - ❌ LLM 不裁决、不改 scope、不签名、不确认
 
 ---
 
-## 12. 评审 checklist（收敛后的待定项）
+## 12. 评审 checklist（全部已拍板）
 
 - [x] Loop 位置：Orchestrator 协作模式（已定，非新 daemon）
 - [x] 三道门顺序：Schema→Policy→Permit（已定，不改）
@@ -287,11 +333,11 @@ reasoning-loop §7 定义 `LoopJob(Job)` 子类 + `job_type="loop_step"`。**弃
 - [x] catalog floor 与循环终止解耦（已收敛）
 - [x] DIFF_SEMANTIC 合并进权威版（本次核心增量）
 - [x] peer agent / Handbooks 过时事实已修正
-- [ ] Loop 触发时机：默认手动（建议，待确认）
-- [ ] 循环内可暂停/续跑（人审批介入）：首版不做，迭代（建议）
-- [ ] Loop 状态进 DB（core_reasoning_loops 表，建议）确认
-- [ ] 预算默认值（50 步 / 1800s / 200K token）确认
-- [ ] A/B 判据阈值（增量>0 + 成本 < 对照组 1.5x）确认
+- [x] Loop 触发时机：**默认手动 loop_create**（A/B 验证价值后再考虑自动）
+- [x] 循环内可暂停/续跑：**要做**（人审批介入，见 §6.3 强制章节）
+- [x] Loop 状态进 DB：**确认**（`core_reasoning_loops` + `core_loop_steps` 表）
+- [x] 预算默认值：**50 步 / 1800s 墙钟 / 200K token**（可配）
+- [x] A/B 判据阈值：**oracle 确认增量 > 0 且单次成本 < 对照组 1.5x** 才放行
 
 ---
 
