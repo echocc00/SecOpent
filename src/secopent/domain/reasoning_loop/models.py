@@ -5,6 +5,9 @@ import re
 import secrets
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _LOOP_ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
@@ -97,3 +100,74 @@ class LoopBudgetSnapshot:
     steps_remaining: int
     tokens_remaining: int
     wall_seconds_remaining: int
+
+
+class LoopActionType(str, Enum):
+    """Closed set of action kinds the LLM/Mock proposer may emit."""
+
+    RUN_TOOL = "run_tool"
+    RUN_CASE = "run_case"
+    REQUEST_PEER = "request_peer"
+    REQUEST_ORACLE = "request_oracle"
+    REQUEST_CHAIN = "request_chain"
+    ABORT_STEP = "abort_step"
+
+
+class _ProposeActionPayload(BaseModel):
+    """Per-action-type payload validator.
+
+    Each action type requires its own keys; missing keys fail validation.
+    Unknown keys (i.e. anything not in the per-type schema) are rejected
+    via ``extra='forbid'`` to harden against prompt-injection overflow.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # run_tool / run_case / request_peer
+    tool_id: str | None = None
+    case_id: str | None = None
+    peer_name: str | None = None
+    instruction: str | None = None
+    # run_tool / run_case
+    parameters: dict[str, Any] | None = None
+    # request_oracle / request_chain
+    candidate_id: str | None = None
+    hypothesis_id: str | None = None
+
+
+class ProposeAction(BaseModel):
+    """LLM/Mock proposer output. Strict schema; never bypasses Schema Gate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: LoopActionType
+    payload: dict[str, Any]
+    rationale: str = Field(min_length=50, max_length=500)
+    confidence: float = Field(ge=0.0, le=1.0)
+    hypothesis_id: str | None = None
+    catalog_class_targeted: str | None = None
+
+    @field_validator("payload")
+    @classmethod
+    def _validate_payload(cls, v: dict[str, Any], info: Any) -> dict[str, Any]:
+        action_type = info.data.get("action_type")
+        required: dict[str, list[str]] = {
+            "run_tool": ["tool_id", "parameters"],
+            "run_case": ["case_id", "parameters"],
+            "request_peer": ["peer_name", "instruction"],
+            "request_oracle": ["candidate_id"],
+            "request_chain": ["hypothesis_id"],
+            "abort_step": [],
+        }
+        missing = [k for k in required.get(action_type, []) if k not in v]
+        if missing:
+            raise ValueError(
+                f"action_type={action_type!r} requires payload keys {missing!r}"
+            )
+        # Also enforce forbidden keys per action type via _ProposeActionPayload.
+        _ProposeActionPayload.model_validate({k: v.get(k) for k in v if v.get(k) is not None})
+        return v
+
+    @property
+    def tool_id(self) -> str | None:
+        return self.payload.get("tool_id")

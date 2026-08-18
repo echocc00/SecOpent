@@ -4,8 +4,15 @@ from __future__ import annotations
 import re
 
 import pytest
+from pydantic import ValidationError
 
-from secopent.domain.reasoning_loop.models import LoopBudget, LoopId, LoopPhase
+from secopent.domain.reasoning_loop.models import (
+    LoopActionType,
+    LoopBudget,
+    LoopId,
+    LoopPhase,
+    ProposeAction,
+)
 
 
 def test_loop_id_is_8_char_hex() -> None:
@@ -104,3 +111,77 @@ def test_loop_budget_exhaustion_predicates() -> None:
         wall_seconds_used=1800,
     )
     assert drained.exhausted()
+
+
+def test_action_type_is_closed_enum() -> None:
+    assert LoopActionType.RUN_TOOL.value == "run_tool"
+    # Literal-ish: rejected at Pydantic layer when we use it as a field type.
+
+
+def test_propose_action_run_tool_minimal() -> None:
+    pa = ProposeAction(
+        action_type=LoopActionType.RUN_TOOL,
+        payload={"tool_id": "nuclei", "parameters": {"tags": ["sql-injection"]}},
+        rationale="Catalog floor for SQLi not yet run on /api/users endpoint.",
+        confidence=0.7,
+    )
+    assert pa.action_type is LoopActionType.RUN_TOOL
+    assert pa.tool_id == "nuclei"  # convenience accessor
+
+
+def test_propose_action_rejects_extra_fields_strict() -> None:
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate(
+            {
+                "action_type": "run_tool",
+                "payload": {"tool_id": "nuclei", "parameters": {}},
+                "rationale": "x" * 80,
+                "confidence": 0.5,
+                "rogue_field": "should not be accepted",
+            }
+        )
+
+
+def test_propose_action_rationale_length_window() -> None:
+    base = {
+        "action_type": "run_tool",
+        "payload": {"tool_id": "nuclei", "parameters": {}},
+        "confidence": 0.5,
+    }
+    # Too short (<50 chars after stripping).
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate({**base, "rationale": "short"})
+    # Too long (>500 chars).
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate({**base, "rationale": "a" * 501})
+    # Just right.
+    pa = ProposeAction.model_validate({**base, "rationale": "x" * 80})
+    assert len(pa.rationale) == 80
+
+
+def test_propose_action_confidence_window() -> None:
+    base = {
+        "action_type": "run_tool",
+        "payload": {"tool_id": "nuclei", "parameters": {}},
+        "rationale": "x" * 80,
+    }
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate({**base, "confidence": -0.1})
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate({**base, "confidence": 1.1})
+    ProposeAction.model_validate({**base, "confidence": 0.0})
+    ProposeAction.model_validate({**base, "confidence": 1.0})
+
+
+def test_propose_action_payload_required_keys_per_action_type() -> None:
+    base = {"rationale": "x" * 80, "confidence": 0.5}
+    # run_tool requires tool_id + parameters
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate(
+            {**base, "action_type": "run_tool", "payload": {}}
+        )
+    # request_oracle requires candidate_id
+    with pytest.raises(ValidationError):
+        ProposeAction.model_validate(
+            {**base, "action_type": "request_oracle", "payload": {}}
+        )
