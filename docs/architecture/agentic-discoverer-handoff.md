@@ -1,5 +1,7 @@
 # Agentic Discoverer：LLM 自主逻辑漏洞探索能力设计与交接
 
+> ⚠️ **本文件已并入权威版**: 详见 `sepcs/2026-08-19-reasoning-discoverer-unified-design.md`（合并 L1/L2/L3 + DIFF_SEMANTIC + 过时事实修订）。本文件保留作设计过程记录，其 L1/L2/L3 分级与 DIFF_SEMANTIC 细节已被权威版吸收。
+
 > 日期：2026-08-06
 > 状态：设计完成（L1+L2+L3），待实现计划
 > 动机：Cybergym / Strix 暴露 SecOpent 盲区——业务逻辑漏洞（越权、竞态、支付篡改、状态机绕过）无签名可命中，对确定性扫描与 echo/oob 验证不可见
