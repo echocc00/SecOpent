@@ -19,6 +19,7 @@ from ...domain.reasoning_loop.models import (
 )
 from ..ports.loop_context import LoopContextBuilder
 from ..ports.loop_state import LoopStateRepository
+from .chain_bridge import ChainBridge
 from .handbook_selector import HandbookSelector
 from .summarizer import ObservationSummarizer
 
@@ -49,6 +50,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         tool_provider: ToolCapabilityProvider | None = None,
         summarizer: ObservationSummarizer | None = None,
         handbook_selector: HandbookSelector | None = None,
+        chain_bridge: ChainBridge | None = None,
     ) -> None:
         self._catalog = catalog
         self._state_repo = state_repo
@@ -75,6 +77,12 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         # ``_HANDBOOK_MAX_TOKENS`` inside the selector, so BudgetGate sees a
         # capped contribution from handbooks.
         self._handbook_selector = handbook_selector
+        # ``chain_bridge`` (v0.7.5 Task 1) feeds ChainEngine pending-verification
+        # tasks into LoopContext.chain_hypotheses_pending so the SchemaGate's
+        # SCHEMA_UNKNOWN_HYPOTHESIS check sees real hypothesis ids. Defaults to
+        # None = empty pending (pre-v0.7.5 behavior), keeping older callers and
+        # unit tests unchanged.
+        self._chain_bridge = chain_bridge
 
     def _derive_keywords(
         self, recent_observations: tuple[ObservationSummary, ...]
@@ -146,6 +154,15 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         keywords = self._derive_keywords(recent_observations)
         handbook_hints = self._select_handbook_hints(keywords)
 
+        # v0.7.5 Task 1: attack-chain pending hypotheses. When a chain_bridge is
+        # injected, surface ChainEngine's un-verified pending links so the
+        # SchemaGate's SCHEMA_UNKNOWN_HYPOTHESIS check has real hypothesis ids
+        # to validate request_chain against. Empty when no bridge (backward
+        # compatible).
+        chain_hypotheses_pending = (
+            self._chain_bridge.sync() if self._chain_bridge is not None else ()
+        )
+
         return LoopContext(
             asset_subgraph=self._asset_provider(assessment_id),
             recent_observations=recent_observations,
@@ -155,7 +172,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
             catalog_floor_progress=progress,
             unconfirmed_candidates=(),
             confirmed_findings_recent=(),
-            chain_hypotheses_pending=(),
+            chain_hypotheses_pending=chain_hypotheses_pending,
             available_tools=available_tools,
             available_cases=(),
             available_peers=(),

@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from secopent.application.chain_engine import ChainEngine
+from secopent.application.reasoning_loop.chain_bridge import ChainBridge
 from secopent.application.reasoning_loop.context_builder import (
     DefaultLoopContextBuilder,
 )
@@ -14,7 +16,10 @@ from secopent.application.reasoning_loop.in_memory_state import (
     InMemoryLoopStateRepository,
 )
 from secopent.application.reasoning_loop.summarizer import ObservationSummarizer
+from secopent.domain.adapters.contracts import Severity
 from secopent.domain.catalog.models import AssetType, RequiredTestClass, TestCatalog
+from secopent.domain.findings.chain_templates import default_chain_templates
+from secopent.domain.findings.models import Finding, FindingStatus
 from secopent.domain.policy.models import RiskClass
 from secopent.domain.reasoning_loop.models import (
     HandbookSummary,
@@ -296,3 +301,64 @@ def test_context_hash_covers_handbook_hints() -> None:
     assert ctx_a.handbook_hints != ()
     assert ctx_b.handbook_hints == ()
     assert ctx_a.context_hash() != ctx_b.context_hash()
+
+
+def _confirmed(
+    finding_id: str, cwe: str, asset: str, severity: Severity = Severity.HIGH
+) -> Finding:
+    return Finding(
+        id=finding_id,
+        fingerprint=f"fp-{finding_id}",
+        title=f"t-{cwe}",
+        asset=asset,
+        severity=severity,
+        cwe=(cwe,),
+        status=FindingStatus.VALIDATED,
+    )
+
+
+def test_context_builder_surfaces_pending_hypotheses_via_chain_bridge() -> None:
+    """V0.7.5 Task 1: when a chain_bridge is injected, confirmed findings feed
+    the ChainEngine and the resulting pending hypotheses land in
+    LoopContext.chain_hypotheses_pending instead of the hardcoded () — fixing
+    the SchemaGate SCHEMA_UNKNOWN_HYPOTHESIS seam."""
+    engine = ChainEngine(templates=default_chain_templates())
+    bridge = ChainBridge(
+        engine=engine,
+        finding_provider=lambda: (_confirmed("finding:a", "CWE-287", "http://app/login"),),
+    )
+    catalog = TestCatalog(version="t-1", mappings={})
+    state_repo = InMemoryLoopStateRepository()
+    builder = DefaultLoopContextBuilder(
+        catalog=catalog,
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: (),
+        chain_bridge=bridge,
+    )
+    lid = LoopId(value="abcd1234")
+    state_repo.save(_state(lid, frozenset()))
+    ctx = builder.build(lid)
+
+    assert len(ctx.chain_hypotheses_pending) >= 1
+    assert all(
+        h.hypothesis_id and h.needed_cwe for h in ctx.chain_hypotheses_pending
+    )
+
+
+def test_context_builder_without_chain_bridge_keeps_empty_pending() -> None:
+    """V0.7.5 Task 1: default (no chain_bridge) keeps chain_hypotheses_pending
+    == () — backward compatible with existing callers."""
+    catalog = TestCatalog(version="t-1", mappings={})
+    state_repo = InMemoryLoopStateRepository()
+    builder = DefaultLoopContextBuilder(
+        catalog=catalog,
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: (),
+    )
+    lid = LoopId(value="abcd1234")
+    state_repo.save(_state(lid, frozenset()))
+    ctx = builder.build(lid)
+
+    assert ctx.chain_hypotheses_pending == ()
