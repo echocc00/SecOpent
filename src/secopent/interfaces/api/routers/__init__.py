@@ -13,6 +13,7 @@ from .evidence import router as evidence_router
 from .findings import router as findings_router
 from .intel import router as intel_router
 from .jobs import router as jobs_router
+from .loops import router as loops_router
 from .peer_agents import router as peer_agents_router
 from .plans import router as plans_router
 from .projects import router as projects_router
@@ -34,6 +35,7 @@ __all__ = [
     "plans_router",
     "approvals_router",
     "jobs_router",
+    "loops_router",
     "assets_router",
     "evidence_router",
     "reports_router",

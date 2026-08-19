@@ -39,6 +39,10 @@ from ...application.emergency_stop import EmergencyStop
 from ...application.health import BundleSignatureState
 from ...application.oracle_service import OracleService
 from ...application.prompt_injection import PromptInjectionGuard
+from ...application.reasoning_loop.in_memory_state import (
+    InMemoryLoopStateRepository,
+)
+from ...application.reasoning_loop.pause_control import PauseControlService
 from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.scope_enforcer import ScopeEnforcer
 from ...application.secret_store import SecretStore
@@ -87,6 +91,7 @@ from ...infrastructure.peer_agents.in_memory_peer_runs import (
 )
 from ...infrastructure.peer_agents.null_harness import NullPeerAgentHarness
 from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
+from ...infrastructure.reasoning_loop.loop_approval import SignedLoopApproval
 from ...infrastructure.repositories.sqlalchemy_audit_chain import (
     SqlAlchemySignedAuditEventStore,
 )
@@ -117,6 +122,7 @@ from .routers import (
     findings_router,
     intel_router,
     jobs_router,
+    loops_router,
     peer_agents_router,
     plans_router,
     projects_router,
@@ -373,6 +379,7 @@ def _register_api(app: FastAPI) -> None:
     app.include_router(signing_keys_router)
     app.include_router(catalog_router)
     app.include_router(peer_agents_router)
+    app.include_router(loops_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -518,6 +525,16 @@ def create_app(engine: Engine | None = None) -> FastAPI:
         permit_revoker=permit_registry,
         container_terminator=DockerContainerTerminator(),
         audit=audit_chain,
+    )
+    # ReasoningLoop pause/resume (v0.7.7 Task 5): human-only control plane. The
+    # service writes its loop.paused/loop.resumed events to the same signed
+    # AuditChain (satisfies AuditRecorder); pause/resume state is in-memory for
+    # now (DB persistence is v0.7.8). Read by the /loops router and the MCP
+    # loop_pause/loop_resume tools via request.app.state / McpRuntime.
+    app.state.loop_control = PauseControlService(
+        state_repo=InMemoryLoopStateRepository(),
+        audit=audit_chain,
+        approval=SignedLoopApproval(),
     )
     # Egress guard (app-layer pre-check; nftables kernel enforcement in W2-B)
     # and prompt-injection guard (validates agent actions on the proposal path).
@@ -689,6 +706,7 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.outbox_activation = app.state.outbox_activation
     api.state.peer_agent_service = app.state.peer_agent_service
     api.state.mcp_tool_registry = app.state.mcp_tool_registry
+    api.state.loop_control = app.state.loop_control
     _register_api(api)
     app.mount("/api", api)
 

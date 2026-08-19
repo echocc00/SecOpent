@@ -40,6 +40,9 @@ STANDARD_ORCHESTRATION_TOOLS: tuple[str, ...] = (
     "assessment_resume",
     "assessment_cancel",
     "assessment_status",
+    # reasoning loop control (human-only at the service layer)
+    "loop_pause",
+    "loop_resume",
     # asset
     "asset_list",
     # finding / evidence

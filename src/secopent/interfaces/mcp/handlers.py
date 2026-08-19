@@ -40,7 +40,9 @@ from ...application.assessments import (
 from ...application.audit import AuditService
 from ...application.audit_chain import AuditChain
 from ...application.planner import Planner
+from ...application.ports.loop_approval import ApprovalRejected
 from ...application.projects import ProjectService
+from ...application.reasoning_loop.pause_control import PauseControlService
 from ...application.report_renderer import ReportData, ReportRenderer
 from ...application.scopes import ScopeService
 from ...domain.assessments.models import Assessment
@@ -82,6 +84,7 @@ class McpRuntime:
     resume_scheduler: Callable[[str], None] | None = None
     start_scheduler: Callable[[str], None] | None = None
     llm_backend: object | None = None
+    loop_control: PauseControlService | None = None
 
 
 def _audit(
@@ -131,6 +134,10 @@ def _guard(action: str, fn: Callable[[], _T]) -> dict[str, object]:
     try:
         return fn()  # type: ignore[return-value]
     except AssessmentPermissionError as exc:
+        return _human_required(action, "", str(exc))
+    except ApprovalRejected as exc:
+        # Loop pause/resume is human-only: the service rejects the agent, and
+        # the agent must learn a human must act (structured, never a raw 403).
         return _human_required(action, "", str(exc))
     except LookupError as exc:
         return _error("NOT_FOUND", str(exc))
@@ -1093,6 +1100,72 @@ def handler_report_render(
         return _guard("report_render", _render)
 
 
+def handler_loop_pause(
+    runtime: McpRuntime, *, loop_id: str, reason: str
+) -> dict[str, object]:
+    """Pause a ReasoningLoop.
+
+    Loop pause/resume is a HUMAN action (spec §6.3): the caller here is the
+    AGENT, so PauseControlService raises ApprovalRejected, which ``_guard``
+    maps to structured HUMAN_REQUIRED - the loop is not controllable by the
+    agent at the MCP layer.
+    """
+    from ...domain.reasoning_loop.models import LoopId
+
+    def _run() -> dict[str, object]:
+        service = runtime.loop_control
+        if service is None:
+            raise LookupError("loop control not configured")
+        state = service.pause(
+            loop_id=LoopId(loop_id),
+            actor="agent",
+            reason=reason,
+            actor_role="agent",
+        )
+        return {
+            "status": "ok",
+            "loop_id": state.loop_id.value,
+            "phase": state.phase.value,
+        }
+
+    return _guard("loop_pause", _run)
+
+
+def handler_loop_resume(
+    runtime: McpRuntime,
+    *,
+    loop_id: str,
+    approved_by: str | None = None,
+    signature: str | None = None,
+) -> dict[str, object]:
+    """Resume a paused ReasoningLoop.
+
+    Human-only (spec §6.3): the agent caller is rejected by the service
+    (ApprovalRejected) -> structured HUMAN_REQUIRED.
+    """
+    from ...domain.reasoning_loop.models import LoopId
+
+    def _run() -> dict[str, object]:
+        service = runtime.loop_control
+        if service is None:
+            raise LookupError("loop control not configured")
+        state = service.resume(
+            loop_id=LoopId(loop_id),
+            actor="agent",
+            actor_role="agent",
+            approved_by=approved_by,
+            signature=signature,
+        )
+        return {
+            "status": "ok",
+            "loop_id": state.loop_id.value,
+            "phase": state.phase.value,
+            "pause_attempts": state.pause_attempts,
+        }
+
+    return _guard("loop_resume", _run)
+
+
 # Registry of every standard orchestration tool -> its handler (used by
 # build_default_registry when a runtime is wired).
 TOOL_HANDLERS: dict[str, Callable[..., object]] = {
@@ -1110,6 +1183,8 @@ TOOL_HANDLERS: dict[str, Callable[..., object]] = {
     "assessment_resume": handler_assessment_resume,
     "assessment_cancel": handler_assessment_cancel,
     "assessment_status": handler_assessment_status,
+    "loop_pause": handler_loop_pause,
+    "loop_resume": handler_loop_resume,
     "asset_list": handler_asset_list,
     "finding_list": handler_finding_list,
     "finding_validate": handler_finding_validate,
