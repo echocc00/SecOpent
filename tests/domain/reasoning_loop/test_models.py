@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from secopent.domain.reasoning_loop.models import (
     GateVerdict,
+    HandbookSummary,
     LoopActionType,
     LoopBudget,
     LoopContext,
@@ -273,6 +274,14 @@ def test_loop_context_context_hash_changes_on_field_change() -> None:
     h0 = LoopContext(**base).context_hash()
     h1 = LoopContext(**{**base, "loop_step": 1}).context_hash()
     assert h0 != h1
+    # v0.7.4: handbook_hints participates in content-addressing. Isolate the
+    # field (same key_signals) so a regression where the hash omits it fails.
+    handbook = (HandbookSummary(id="h1", title="t", attack_surface=("as",),
+                                recon_endpoints=("re",), payload_classes=("pc",),
+                                verification_hint="vh"),)
+    h2 = LoopContext(**{**base, "handbook_hints": handbook}).context_hash()
+    assert h0 != h2
+    assert h1 != h2
     # Hash must be 64 hex chars (sha256).
     import re
     assert re.fullmatch(r"[0-9a-f]{64}", h0)
