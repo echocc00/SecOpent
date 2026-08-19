@@ -95,8 +95,16 @@ class SqlAlchemyJobRepository:
         return tuple(_to_job(row) for row in self._session.query(CoreJob).all())
 
     def leaseable(self, now: datetime) -> tuple[Job, ...]:
-        """Jobs leaseable now: READY, or LEASED with an expired lease."""
-        result: list[Job] = []
+        """Jobs leaseable now: READY, or LEASED with an expired lease.
+
+        Reasoning-loop jobs (``plan_step_key`` starting with ``loop:``) are
+        ordered first so loop steps don't starve behind ordinary work; within
+        each group the query order is preserved (a stable partition). Mirrors
+        ``MemoryJobStore`` so the two stores stay behaviorally equivalent
+        (test_job_store equivalence matrix).
+        """
+        loop_jobs: list[Job] = []
+        ordinary: list[Job] = []
         for job in self.all():
             stale_lease = (
                 job.status is JobStatus.LEASED
@@ -104,8 +112,11 @@ class SqlAlchemyJobRepository:
                 and job.lease_expires_at <= now
             )
             if job.status is JobStatus.READY or stale_lease:
-                result.append(job)
-        return tuple(result)
+                if job.plan_step_key.startswith("loop:"):
+                    loop_jobs.append(job)
+                else:
+                    ordinary.append(job)
+        return tuple(loop_jobs + ordinary)
 
     # --- writes ------------------------------------------------------------
 

@@ -158,6 +158,29 @@ def test_mark_ready_and_leaseable_filters(factory, sql_store) -> None:  # noqa: 
 
 
 @pytest.mark.parametrize("factory", [_memory_store, "sql"], ids=["memory", "sql"])
+def test_leaseable_prioritizes_loop_jobs_first(factory, sql_store) -> None:  # noqa: ANN001
+    """Orchestrator ordering (§10 / v0.7.2 Task 4): ``loop:`` plan_step_key jobs
+    lease ahead of ordinary work.
+
+    A reasoning-loop step must not starve behind an unlimited queue of normal
+    jobs, so ``leaseable`` returns any job whose ``plan_step_key`` starts with
+    ``loop:`` before non-loop jobs. Non-loop only jobs keep their relative
+    (insertion) order -- the loop prefix must not reorder them.
+    """
+    store = sql_store if factory == "sql" else factory()
+    # Non-loop job added FIRST, loop job added SECOND -- the loop ones still win.
+    store.add(_ready(id="n1", key="digest:scan"))
+    store.add(_ready(id="l1", key="loop:abcd1234:1"))
+    store.add(_ready(id="l2", key="loop:abcd1234:2"))
+    store.add(_ready(id="n2", key="digest:exploit"))
+
+    ids = [j.id for j in store.leaseable(_T0)]
+    # loop jobs first, preserving their relative order, then non-loop jobs
+    # in their original (insertion) order.
+    assert ids == ["l1", "l2", "n1", "n2"]
+
+
+@pytest.mark.parametrize("factory", [_memory_store, "sql"], ids=["memory", "sql"])
 def test_skip_marks_abandoned_job(factory, sql_store) -> None:  # noqa: ANN001
     store = sql_store if factory == "sql" else factory()
     store.add(_ready())

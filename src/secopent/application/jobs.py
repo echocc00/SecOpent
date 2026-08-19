@@ -130,9 +130,15 @@ class MemoryJobStore:
         )
 
     def leaseable(self, now: datetime) -> tuple[Job, ...]:
-        """Jobs that can be leased now: READY, or LEASED with an expired lease."""
+        """Jobs that can be leased now: READY, or LEASED with an expired lease.
+
+        Reasoning-loop jobs (``plan_step_key`` starting with ``loop:``) are
+        ordered first so loop steps don't starve behind ordinary work; within
+        each group the insertion order is preserved (a stable partition).
+        """
         with self._lock:
-            result = []
+            loop_jobs: list[Job] = []
+            ordinary: list[Job] = []
             for job in self._jobs.values():
                 stale_lease = (
                     job.status is JobStatus.LEASED
@@ -140,8 +146,11 @@ class MemoryJobStore:
                     and job.lease_expires_at <= now
                 )
                 if job.status is JobStatus.READY or stale_lease:
-                    result.append(job)
-            return tuple(result)
+                    if job.plan_step_key.startswith("loop:"):
+                        loop_jobs.append(job)
+                    else:
+                        ordinary.append(job)
+            return tuple(loop_jobs + ordinary)
 
     def _require(self, job_id: str) -> Job:
         """Internal lookup: raise JobNotFoundError on a missing job."""
