@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # --- Projects ---
@@ -513,6 +513,61 @@ class CatalogOut(BaseModel):
     version: str
     digest: str
     mappings: dict[str, list[RequiredTestClassIn]]
+
+
+# --- ReasoningLoop control plane (spec §6.3; v0.7.7 + v0.7.8 Task 6) ---
+class LoopCreateBody(BaseModel):
+    """Body for POST /loops (human-only loop creation; agent -> 403)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actor: str
+    actor_role: str = "human"
+    assessment_id: str
+    # Optional budget overrides (defaults to LoopBudget.default when omitted).
+    max_steps: int | None = None
+    max_wall_seconds: int | None = None
+    max_total_tokens: int | None = None
+
+
+class LoopStopBody(BaseModel):
+    """Body for POST /loops/{id}/stop (human-only; agent -> 403)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actor: str
+    reason: str = ""
+    actor_role: str = "human"
+
+
+class LoopBudgetRemainingOut(BaseModel):
+    """Read-only snapshot of a loop's remaining budget."""
+
+    steps: int
+    tokens: int
+    wall_seconds: int
+
+
+class LoopOut(BaseModel):
+    """Read-only status for GET /loops/{id} (agent + human callable)."""
+
+    loop_id: str
+    assessment_id: str
+    phase: str
+    budget_remaining: LoopBudgetRemainingOut
+    step_count: int
+    context_hash: str
+
+
+class StepOut(BaseModel):
+    """One recorded ReasoningLoop step (replayable audit record)."""
+
+    step_id: str
+    loop_id: str
+    step_number: int
+    action_type: str | None
+    tool_or_case_id: str | None
+    oracle_progressed: bool
 
 
 # Generic actor-role body shared by human-only lifecycle actions (cases/appmodels).

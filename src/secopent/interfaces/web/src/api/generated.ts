@@ -146,13 +146,41 @@ export interface paths {
          * Start Assessment
          * @description Trigger assessment execution: APPROVED -> QUEUED, then run in background.
          *
-         *     Human-only (triggers real scans). The Orchestrator runs in a daemon thread
-         *     (``application.execution.execute_assessment``); this endpoint returns
-         *     immediately with status=QUEUED. Progress streams via the SSE endpoint
-         *     (``GET /assessments/{id}/events``) which polls ``assessment.status``.
-         *     Findings are persisted with ``assessment_id`` as they are correlated.
+         *     Human-only (triggers real scans). The Orchestrator runs as a FastAPI
+         *     background task (``application.execution.execute_assessment``); this
+         *     endpoint returns immediately with status=QUEUED. Progress streams via the
+         *     SSE endpoint (``GET /assessments/{id}/events``) which polls
+         *     ``assessment.status``. Findings are persisted with ``assessment_id`` as
+         *     they are correlated.
          */
         post: operations["start_assessment_assessments__assessment_id__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assessments/{assessment_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Resume
+         * @description Resume a PAUSED assessment: PAUSED -> RUNNING, then drain remaining jobs.
+         *
+         *     Control-plane continuation (agent-callable, symmetric with pause): the
+         *     durable core_jobs store makes re-dispatch idempotent, so only the jobs
+         *     left READY by the pause run. The drain runs as a background thread
+         *     (``_run_resume_daemon``); this endpoint returns immediately with
+         *     status=RUNNING. A live executor that is still draining ignores the
+         *     RESUME_REQUESTED signal (it is already executing).
+         */
+        post: operations["start_resume_assessments__assessment_id__resume_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -433,6 +461,76 @@ export interface paths {
         get: operations["verify_chain_audit_verify_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Chain
+         * @description Export the SIGNED chain; ``redacted=true`` masks GDPR-redacted keys.
+         *
+         *     Every event's hash commitment is preserved either way - redaction only
+         *     masks PII plaintext in the exported payloads.
+         */
+        get: operations["export_chain_audit_chain_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate Audit Chain
+         * @description Rotate the audit log (§12): the new segment continues from the prior
+         *     tail, so rotation never breaks chain verification.
+         *
+         *     Human-only. The rotation event joins the request transaction (3.6): it
+         *     commits or rolls back atomically with the response.
+         */
+        post: operations["rotate_audit_chain_audit_rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/redact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redact Audit Event
+         * @description GDPR: mark PII keys redacted on a stored event; the hash commitment
+         *     is preserved and the deletion is itself recorded in the chain.
+         *
+         *     Human-only. The redaction event joins the request transaction (3.6).
+         */
+        post: operations["redact_audit_event_audit_redact_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1097,6 +1195,199 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/peer-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agents */
+        get: operations["list_agents_peer_agents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assessments/{assessment_id}/peer-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_assessments__assessment_id__peer_runs_get"];
+        put?: never;
+        /**
+         * Launch Run
+         * @description Launch a peer agent against the assessment's approved scope.
+         *
+         *     Fetches the assessment's scope snapshot + the latest test catalog from
+         *     the DB, then delegates to ``PeerAgentService.launch``. Domain errors map
+         *     to 4xx; the service only produces candidate Observations (never Confirmed).
+         */
+        post: operations["launch_run_assessments__assessment_id__peer_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/peer-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_peer_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/peer-runs/{run_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Run */
+        post: operations["stop_run_peer_runs__run_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loops/{loop_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Loop
+         * @description Read-only status of a loop (agent + human callable; no actor gating).
+         *
+         *     Returns the phase, remaining budget snapshot, executed step count and
+         *     context hash. Unknown loop -> 404; unconfigured app -> 503.
+         */
+        get: operations["get_loop_loops__loop_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loops/{loop_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Loop
+         * @description Stop a loop into EMERGENCY_STOPPED (human only; agent -> 403).
+         *
+         *     Mirrors the orchestrator's ``emergency_stop`` semantics (direct transition,
+         *     NOT via ``run_step`` so a PAUSED loop is still killable) and the MCP
+         *     ``loop_stop`` handler. Idempotent for an already-stopped loop (200).
+         *     Unknown loop -> 404; unconfigured app -> 503.
+         */
+        post: operations["stop_loop_loops__loop_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Loop
+         * @description Create a loop in INITIALIZING (human only; agent -> 403).
+         *
+         *     Builds a fresh LoopState via the domain models (default budget unless
+         *     overridden) and records a signed ``loop.created`` event. Returns 201 with
+         *     the new loop id + phase.
+         */
+        post: operations["create_loop_loops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loops/{loop_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause Loop
+         * @description Pause a loop (human only; agent -> 403).
+         *
+         *     Returns the loop id + phase. Already-paused loops are idempotent (200).
+         */
+        post: operations["pause_loop_loops__loop_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/loops/{loop_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Loop
+         * @description Resume a paused loop under a human-signed approval (agent -> 403).
+         *
+         *     Missing/empty signature -> 401 (ApprovalRequired); expired pause budget ->
+         *     409; a stopped/terminal loop cannot resume -> 409; unknown loop -> 404.
+         */
+        post: operations["resume_loop_loops__loop_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1446,6 +1737,26 @@ export interface components {
             /** Value */
             value: string;
         };
+        /**
+         * AssetType
+         * @description Catalog of asset types addressed by required test classes.
+         * @enum {string}
+         */
+        AssetType: "web_app" | "api" | "ip_port" | "cloud_account" | "container_k8s";
+        /**
+         * AuditChainEventOut
+         * @description A signed chain event (id / action / hash commitment / signature).
+         */
+        AuditChainEventOut: {
+            /** Event Id */
+            event_id: string;
+            /** Action */
+            action: string;
+            /** Event Hash */
+            event_hash: string;
+            /** Signature */
+            signature: string;
+        };
         /** AuditEventOut */
         AuditEventOut: {
             /** Id */
@@ -1471,6 +1782,30 @@ export interface components {
              * Format: date-time
              */
             occurred_at: string;
+        };
+        /** AuditRedactRequest */
+        AuditRedactRequest: {
+            /** Event Id */
+            event_id: string;
+            /** Keys */
+            keys: string[];
+            /** Actor */
+            actor: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+        };
+        /** AuditRotateRequest */
+        AuditRotateRequest: {
+            /** Actor */
+            actor: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
         };
         /** AuditVerifyOut */
         AuditVerifyOut: {
@@ -1853,6 +2188,206 @@ export interface components {
             /** Dependencies */
             dependencies: string[];
         };
+        /**
+         * LoopBudgetRemainingOut
+         * @description Read-only snapshot of a loop's remaining budget.
+         */
+        LoopBudgetRemainingOut: {
+            /** Steps */
+            steps: number;
+            /** Tokens */
+            tokens: number;
+            /** Wall Seconds */
+            wall_seconds: number;
+        };
+        /**
+         * LoopCreateBody
+         * @description Body for POST /loops (human-only loop creation; agent -> 403).
+         */
+        LoopCreateBody: {
+            /** Actor */
+            actor: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+            /** Assessment Id */
+            assessment_id: string;
+            /** Max Steps */
+            max_steps?: number | null;
+            /** Max Wall Seconds */
+            max_wall_seconds?: number | null;
+            /** Max Total Tokens */
+            max_total_tokens?: number | null;
+        };
+        /**
+         * LoopOut
+         * @description Read-only status for GET /loops/{id} (agent + human callable).
+         */
+        LoopOut: {
+            /** Loop Id */
+            loop_id: string;
+            /** Assessment Id */
+            assessment_id: string;
+            /** Phase */
+            phase: string;
+            budget_remaining: components["schemas"]["LoopBudgetRemainingOut"];
+            /** Step Count */
+            step_count: number;
+            /** Context Hash */
+            context_hash: string;
+        };
+        /**
+         * LoopPauseRequest
+         * @description Body for POST /loops/{id}/pause (human actor required).
+         */
+        LoopPauseRequest: {
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+        };
+        /**
+         * LoopResumeRequest
+         * @description Body for POST /loops/{id}/resume (human actor + signed approval).
+         */
+        LoopResumeRequest: {
+            /** Actor */
+            actor: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+            /** Approved By */
+            approved_by?: string | null;
+            /** Signature */
+            signature?: string | null;
+            /** Nonce */
+            nonce?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Modified Context */
+            modified_context?: unknown | null;
+        };
+        /**
+         * LoopStopBody
+         * @description Body for POST /loops/{id}/stop (human-only; agent -> 403).
+         */
+        LoopStopBody: {
+            /** Actor */
+            actor: string;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+            /**
+             * Actor Role
+             * @default human
+             */
+            actor_role: string;
+        };
+        /** ObservationSummaryOut */
+        ObservationSummaryOut: {
+            /** External Id */
+            external_id: string;
+            /** Asset Identity */
+            asset_identity: string;
+            /** Title */
+            title: string;
+            /** Severity */
+            severity: string;
+            /** Cwe */
+            cwe: string[];
+        };
+        /** PeerAgentDescriptorOut */
+        PeerAgentDescriptorOut: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: string;
+            /** License */
+            license: string;
+            /** Trust Level */
+            trust_level: string;
+            /** Capabilities */
+            capabilities: string[];
+            /** Cost Class */
+            cost_class: string;
+            default_budget: components["schemas"]["PeerBudgetOut"];
+            /** Image Digest */
+            image_digest: string;
+        };
+        /** PeerBudgetOut */
+        PeerBudgetOut: {
+            /** Max Wall Seconds */
+            max_wall_seconds: number;
+            /** Max Cost Units */
+            max_cost_units: number;
+        };
+        /** PeerRunLaunchRequest */
+        PeerRunLaunchRequest: {
+            /** Agent Name */
+            agent_name: string;
+            /** Targets */
+            targets: string[];
+            asset_type: components["schemas"]["AssetType"];
+            /** Actor */
+            actor: string;
+            /** Permit Id */
+            permit_id: string;
+        };
+        /** PeerRunOut */
+        PeerRunOut: {
+            /** Id */
+            id: string;
+            /** Agent Name */
+            agent_name: string;
+            /** Agent Version */
+            agent_version: string;
+            /** Assessment Id */
+            assessment_id: string;
+            /** Targets */
+            targets: string[];
+            budget: components["schemas"]["PeerBudgetOut"];
+            /** Permit Id */
+            permit_id: string;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+        };
+        /** PeerRunOutcomeOut */
+        PeerRunOutcomeOut: {
+            run: components["schemas"]["PeerRunOut"];
+            /** Observations */
+            observations: components["schemas"]["ObservationSummaryOut"][];
+            /** Rejected */
+            rejected: components["schemas"]["RejectedFindingOut"][];
+        };
+        /** PeerRunStopOut */
+        PeerRunStopOut: {
+            /** Run Id */
+            run_id: string;
+            /** Terminated */
+            terminated: boolean;
+        };
+        /** PeerRunStopRequest */
+        PeerRunStopRequest: {
+            /** Actor */
+            actor: string;
+            /** Reason */
+            reason: string;
+        };
         /** PlanCreate */
         PlanCreate: {
             /** Assessment Id */
@@ -1927,6 +2462,19 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** RejectedFindingOut */
+        RejectedFindingOut: {
+            /** Finding Id */
+            finding_id: string;
+            /** Asset */
+            asset: string;
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+            /** Detail */
+            detail: string;
         };
         /** ReportGenerate */
         ReportGenerate: {
@@ -2555,6 +3103,37 @@ export interface operations {
             };
         };
     };
+    start_resume_assessments__assessment_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     emergency_stop_assessments__assessment_id__stop_post: {
         parameters: {
             query?: never;
@@ -2981,6 +3560,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditVerifyOut"];
+                };
+            };
+        };
+    };
+    export_chain_audit_chain_get: {
+        parameters: {
+            query?: {
+                redacted?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_audit_chain_audit_rotate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditRotateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditChainEventOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    redact_audit_event_audit_redact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditRedactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditChainEventOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4222,6 +4898,335 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agents_peer_agents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerAgentDescriptorOut"][];
+                };
+            };
+        };
+    };
+    list_runs_assessments__assessment_id__peer_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerRunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    launch_run_assessments__assessment_id__peer_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerRunLaunchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerRunOutcomeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_peer_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_run_peer_runs__run_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeerRunStopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeerRunStopOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_loop_loops__loop_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoopOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_loop_loops__loop_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoopStopBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_loop_loops_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoopCreateBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_loop_loops__loop_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoopPauseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_loop_loops__loop_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                loop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoopResumeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

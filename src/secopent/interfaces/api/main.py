@@ -714,6 +714,8 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     api.state.peer_agent_service = app.state.peer_agent_service
     api.state.mcp_tool_registry = app.state.mcp_tool_registry
     api.state.loop_control = app.state.loop_control
+    api.state.loop_state_repo = app.state.loop_state_repo
+    api.state.loop_step_repo = app.state.loop_step_repo
     _register_api(api)
     app.mount("/api", api)
 
