@@ -7,7 +7,8 @@ so v0.7.3 (Handbooks) and v0.7.5 (AttackChain wiring) can substitute them.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 from ...domain.catalog.models import TestCatalog
 from ...domain.reasoning_loop.models import (
@@ -51,6 +52,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         summarizer: ObservationSummarizer | None = None,
         handbook_selector: HandbookSelector | None = None,
         chain_bridge: ChainBridge | None = None,
+        candidate_provider: Callable[[], Iterable[Any]] | None = None,
     ) -> None:
         self._catalog = catalog
         self._state_repo = state_repo
@@ -83,6 +85,13 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         # None = empty pending (pre-v0.7.5 behavior), keeping older callers and
         # unit tests unchanged.
         self._chain_bridge = chain_bridge
+        # ``candidate_provider`` (v0.7.6 Task 6) supplies the unconfirmed
+        # logic candidates (each carrying its diff spec on ``.diff``). Their ids
+        # are surfaced in LoopContext.unconfirmed_candidates so the proposer can
+        # request oracles on them. Defaults to None = empty, keeping older
+        # callers/tests unchanged. Only the ids ride in LoopContext — the diff
+        # spec itself lives on the candidate object (spec §5.4 挂载关系).
+        self._candidate_provider = candidate_provider
 
     def _derive_keywords(
         self, recent_observations: tuple[ObservationSummary, ...]
@@ -163,6 +172,13 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
             self._chain_bridge.sync() if self._chain_bridge is not None else ()
         )
 
+        # v0.7.6 Task 6: unconfirmed logic candidate ids (diff spec travels on
+        # the candidate object, not in LoopContext). Default empty = backward
+        # compatible with callers that don't surface candidates.
+        unconfirmed_candidates = tuple(
+            c.id for c in (self._candidate_provider() if self._candidate_provider else ())
+        )
+
         return LoopContext(
             asset_subgraph=self._asset_provider(assessment_id),
             recent_observations=recent_observations,
@@ -170,7 +186,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
             catalog_already_executed=state.catalog_required_executed,
             catalog_still_required=remaining,
             catalog_floor_progress=progress,
-            unconfirmed_candidates=(),
+            unconfirmed_candidates=unconfirmed_candidates,
             confirmed_findings_recent=(),
             chain_hypotheses_pending=chain_hypotheses_pending,
             available_tools=available_tools,

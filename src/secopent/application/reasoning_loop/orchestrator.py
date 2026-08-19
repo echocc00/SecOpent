@@ -56,6 +56,7 @@ from .audit import (
 )
 from .budget_gate import BudgetGateImpl
 from .feedback import LoopFeedback
+from .loop_oracle import LoopOracleVerifier
 
 
 class LoopNotFoundError(DomainError):
@@ -133,6 +134,7 @@ class ReasoningLoopOrchestrator:
         audit: AuditRecorder,
         clock: Callable[[], datetime] | None = None,
         budget_gate: BudgetGateImpl | None = None,
+        loop_oracle: LoopOracleVerifier | None = None,
     ) -> None:
         self.state_repo = state_repo
         self.step_repo = step_repo
@@ -151,6 +153,13 @@ class ReasoningLoopOrchestrator:
         # exactly as before. The gate is checked with the per-step token
         # projection so an over-limit step denies BEFORE the proposer runs.
         self._budget_gate = budget_gate
+        # ``loop_oracle`` (v0.7.6 Task 6) is the DIFF_SEMANTIC closed-loop
+        # coordinator: when wired, a ``request_oracle`` action runs the real
+        # OracleEngine (resolving the candidate, dispatching the diff/rescan
+        # verifier). Defaults to None so loops that don't surface an oracle
+        # (existing tests/dev) keep the mock request_oracle step (oracle_progressed
+        # False) exactly as before.
+        self._loop_oracle = loop_oracle
 
     # ------------------------------------------------------------------ create
     def create_loop(
@@ -259,8 +268,15 @@ class ReasoningLoopOrchestrator:
                 reason=permit_v.reason,
             )
 
-        # 7. MOCK execute (v0.7.0 — no real tool/container call).
-        step = self._mock_execute(loop_id, context, proposed, permit_v.permit_id or "")
+        # 7. Execute (v0.7.0 mock; a request_oracle step with a wired loop oracle
+        #    runs the real OracleEngine instead — the DIFF_SEMANTIC closed loop).
+        is_oracle = proposed.action_type is LoopActionType.REQUEST_ORACLE
+        if is_oracle and self._loop_oracle is not None:
+            step = self._execute_oracle_step(
+                loop_id, context, proposed, permit_v.permit_id or ""
+            )
+        else:
+            step = self._mock_execute(loop_id, context, proposed, permit_v.permit_id or "")
         self.step_repo.add(step)
         self._audit.record(
             actor="reasoning_loop",
@@ -274,17 +290,20 @@ class ReasoningLoopOrchestrator:
                 "tokens_used": step.propose_tokens_used,
             },
         )
+        executed_payload: dict[str, object] = {
+            "step_id": step.step_id,
+            "tool_or_case_id": step.tool_or_case_id,
+            "result_digest": step.execution_result_digest,
+            "signals": list(step.observation_signals),
+        }
+        if is_oracle:
+            executed_payload["oracle_progressed"] = step.oracle_progressed
         self._audit.record(
             actor="reasoning_loop",
             action=LOOP_STEP_EXECUTED,
             resource_type="reasoning_loop",
             resource_id=loop_id.value,
-            payload={
-                "step_id": step.step_id,
-                "tool_or_case_id": step.tool_or_case_id,
-                "result_digest": step.execution_result_digest,
-                "signals": list(step.observation_signals),
-            },
+            payload=executed_payload,
         )
 
         # 8. Feedback -> next state.
@@ -432,6 +451,52 @@ class ReasoningLoopOrchestrator:
             observation_signals=(),  # mock: no real signal; real impl populates from Observation
             catalog_class_matched=frozenset(),
             oracle_progressed=False,
+            correlation_id=f"corr-{secrets.token_hex(4)}",
+        )
+
+    def _execute_oracle_step(
+        self,
+        loop_id: LoopId,
+        context: LoopContext,
+        action: ProposeAction,
+        permit_id: str,
+    ) -> LoopStep:
+        """Run a request_oracle step through the real OracleEngine (v0.7.6 Task 6).
+
+        Resolves the candidate referenced by the payload, verifies it via the
+        loop oracle (which dispatches the diff/rescan verifier), and records the
+        outcome. ``oracle_progressed`` is True only when the oracle deterministically
+        resolved (CONFIRMED / REFUTED); INCONCLUSIVE means escalated to human and
+        is surfaced as not-progressed. Proves OracleEngine itself is unchanged —
+        only the resolution + dispatch happen here.
+        """
+        candidate_id = str(action.payload.get("candidate_id") or "")
+        assert self._loop_oracle is not None  # guarded in run_step
+        outcome = self._loop_oracle.verify(
+            candidate_id, actor="reasoning_loop"
+        )
+        result_digest = (
+            f"oracle:{outcome.status.value}({outcome.successes}/{outcome.attempts})"
+        )
+        return LoopStep(
+            step_id=f"step-{secrets.token_hex(4)}",
+            loop_id=loop_id,
+            step_number=int(uuid.uuid4().int & 0xFFFFFFFF),
+            timestamp=self._clock(),
+            context_hash_before=context.context_hash(),
+            proposed_action=action,
+            propose_tokens_used=_MOCK_STEP_TOKENS,
+            propose_latency_ms=50,
+            propose_rationale=action.rationale,
+            schema_check_passed=True,
+            policy_decision=PolicyDecision(verdict="allow", reason="ok"),
+            permit_id=permit_id,
+            tool_or_case_id=candidate_id,
+            execution_result_digest=result_digest,
+            evidence_refs=(),
+            observation_signals=(),
+            catalog_class_matched=frozenset(),
+            oracle_progressed=outcome.resolved,
             correlation_id=f"corr-{secrets.token_hex(4)}",
         )
 

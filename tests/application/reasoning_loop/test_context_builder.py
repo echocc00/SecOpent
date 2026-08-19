@@ -362,3 +362,67 @@ def test_context_builder_without_chain_bridge_keeps_empty_pending() -> None:
     ctx = builder.build(lid)
 
     assert ctx.chain_hypotheses_pending == ()
+
+
+def _logic_candidate(candidate_id: str) -> object:
+    """A CandidateFinding-like logic candidate carrying a diff spec."""
+    from secopent.domain.verification.diff_semantic import (
+        DiffSemanticPayload,
+        Expectation,
+    )
+    from secopent.domain.verification.models import CandidateFinding, VulnType
+
+    return CandidateFinding(
+        id=candidate_id,
+        observation_id="obs-1",
+        vuln_type=VulnType.IDOR,
+        target="https://x.test/",
+        diff=DiffSemanticPayload(
+            candidate_id=candidate_id,
+            baseline_request={"method": "GET", "url": "/baseline"},
+            assertion_request={"method": "GET", "url": "/assertion"},
+            expectation=Expectation.DENY,
+        ),
+    )
+
+
+def test_context_builder_surfaces_logic_candidates_in_unconfirmed() -> None:
+    """V0.7.6 Task 6: when a candidate_provider is injected, the ids of the
+    logic candidates (carrying their diff spec) land in
+    LoopContext.unconfirmed_candidates so the proposer can request oracles on
+    them."""
+    catalog = TestCatalog(version="t-1", mappings={})
+    state_repo = InMemoryLoopStateRepository()
+    builder = DefaultLoopContextBuilder(
+        catalog=catalog,
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: (),
+        candidate_provider=lambda: (
+            _logic_candidate("cand-idor-1"),
+            _logic_candidate("cand-privesc-2"),
+        ),
+    )
+    lid = LoopId(value="abcd1234")
+    state_repo.save(_state(lid, frozenset()))
+    ctx = builder.build(lid)
+
+    assert ctx.unconfirmed_candidates == ("cand-idor-1", "cand-privesc-2")
+
+
+def test_context_builder_without_candidate_provider_keeps_empty_unconfirmed() -> None:
+    """V0.7.6 Task 6: default (no candidate_provider) keeps
+    unconfirmed_candidates == () — backward compatible."""
+    catalog = TestCatalog(version="t-1", mappings={})
+    state_repo = InMemoryLoopStateRepository()
+    builder = DefaultLoopContextBuilder(
+        catalog=catalog,
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: (),
+    )
+    lid = LoopId(value="abcd1234")
+    state_repo.save(_state(lid, frozenset()))
+    ctx = builder.build(lid)
+
+    assert ctx.unconfirmed_candidates == ()
