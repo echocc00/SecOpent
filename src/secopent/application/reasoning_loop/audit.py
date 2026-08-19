@@ -12,6 +12,9 @@ LOOP_STEP_EXECUTED = "loop.step_executed"
 LOOP_TERMINATED = "loop.terminated"
 LOOP_FALLBACK_USED = "loop.fallback_used"
 LOOP_BACKEND_UNAVAILABLE = "loop.backend_unavailable"
+# v0.7.7 Task 3: human pause/resume events (spec §6.3).
+LOOP_PAUSED = "loop.paused"
+LOOP_RESUMED = "loop.resumed"
 
 ALL_LOOP_ACTIONS: tuple[str, ...] = (
     LOOP_CREATED,
@@ -21,4 +24,6 @@ ALL_LOOP_ACTIONS: tuple[str, ...] = (
     LOOP_TERMINATED,
     LOOP_FALLBACK_USED,
     LOOP_BACKEND_UNAVAILABLE,
+    LOOP_PAUSED,
+    LOOP_RESUMED,
 )
