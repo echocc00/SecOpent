@@ -33,6 +33,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
+from ...domain.findings.attack_chain import AttackChain, ChainStatus
 from ...domain.findings.models import Finding
 from ...domain.reasoning_loop.models import PendingHypothesis
 from ..chain_engine import ChainEngine, PendingVerificationTask
@@ -51,6 +52,17 @@ class PendingPriority:
     hypothesis_id: str
     priority_score: int
     chain_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ConcludedChain:
+    """A chain the engine reports fully confirmed — the loop may stop proposing
+    work on it. ``template_id`` is the stable logical identity (the engine's own
+    ``chain.id`` carries a volatile uuid per hypothesize call, so it is not a
+    reliable cross-sync handle). Ordering of ``concluded_chains()`` is
+    deterministic: sorted by ``template_id``."""
+
+    template_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +158,7 @@ class ChainBridge:
         self._engine = engine
         self._finding_provider = finding_provider
         self._store = store if store is not None else InMemoryHypothesesStore()
+        self._last_chains: tuple[AttackChain, ...] = ()
 
     def sync(self) -> tuple[PendingHypothesis, ...]:
         """Feed confirmed findings → hypotheses → pending tasks → hypotheses.
@@ -156,6 +169,7 @@ class ChainBridge:
         """
         findings = self._finding_provider()
         chains = self._engine.hypothesize_from_findings(findings)
+        self._last_chains = chains
         tasks = self._engine.pending_verification_tasks(chains)
         tasks_iter = iter(tasks)
         results: list[PendingHypothesis] = []
@@ -183,6 +197,21 @@ class ChainBridge:
                 )
                 results.append(self._to_hypothesis(hypothesis_id, task))
         return tuple(results)
+
+    def concluded_chains(self) -> tuple[ConcludedChain, ...]:
+        """Chains the last ``sync()`` reported fully CONFIRMED — the loop may
+        stop proposing verification work on these.
+
+        Derived honestly from the engine's own status (stored last-sync chains),
+        never hand-computed here. Deterministic order: sorted by ``template_id``.
+        """
+        concluded = [
+            ConcludedChain(template_id=chain.template_id)
+            for chain in self._last_chains
+            if chain.status is ChainStatus.CONFIRMED
+        ]
+        concluded.sort(key=lambda c: c.template_id)
+        return tuple(concluded)
 
     @staticmethod
     def valid_hypothesis(

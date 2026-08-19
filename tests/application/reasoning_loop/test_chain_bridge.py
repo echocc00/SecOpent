@@ -12,6 +12,7 @@ from __future__ import annotations
 from secopent.application.chain_engine import ChainEngine
 from secopent.application.reasoning_loop.chain_bridge import (
     ChainBridge,
+    ConcludedChain,
     PendingPriority,
 )
 from secopent.domain.adapters.contracts import Severity
@@ -155,3 +156,108 @@ def test_mark_progress_removes_from_pending() -> None:
     # And next_priorities no longer ranks the resolved hypothesis.
     ranked = {p.hypothesis_id for p in bridge.next_priorities(after)}
     assert target not in ranked
+
+
+class GrowingFindingProvider:
+    """Returns the findings recorded so far, so one bridge reflects growing
+    evidence across sync() calls — the closed-loop re-verification driver."""
+
+    def __init__(self) -> None:
+        self._findings: list[Finding] = []
+
+    def add(self, finding: Finding) -> None:
+        self._findings.append(finding)
+
+    def __call__(self) -> tuple[Finding, ...]:
+        return tuple(self._findings)
+
+
+def test_reverification_moves_chain_to_confirmed_and_clears_pending() -> None:
+    """Task 3 closed loop: as more findings get VALIDATED, re-running the engine
+    moves a hypothesis's chain to CONFIRMED and its pending link disappears."""
+    provider = GrowingFindingProvider()
+    bridge = ChainBridge(
+        engine=ChainEngine(templates=default_chain_templates()),
+        finding_provider=provider,
+    )
+    # Stage 1: only the EARLY auth-bypass link is confirmed; the later IDOR
+    # link (CWE-639/284) is still missing → it surfaces as pending.
+    provider.add(_confirmed("finding:a", "CWE-287", "http://app/login"))
+    first_pending = bridge.sync()
+    idor = [h for h in first_pending if set(h.needed_cwe) & {"CWE-639", "CWE-284"}]
+    assert len(idor) >= 1
+    idor_id = idor[0].hypothesis_id
+
+    # Stage 2: the completing finding (CWE-639 in a VALIDATED finding) arrives.
+    provider.add(_confirmed("finding:b", "CWE-639", "http://app/account"))
+    second_pending = bridge.sync()
+    # The chain is now CONFIRMED; the engine emits no pending task for it, so
+    # the earlier IDOR hypothesis is gone from the pending set.
+    assert all(h.hypothesis_id != idor_id for h in second_pending)
+    assert second_pending != first_pending
+    # And the loop has a chain it may stop proposing work on.
+    concluded_ids = {c.template_id for c in bridge.concluded_chains()}
+    assert "auth-bypass-plus-idor" in concluded_ids
+
+
+def test_broken_link_keeps_pending() -> None:
+    """A template link whose CWE is NEVER provided stays pending across repeated
+    sync() — the chain stays HYPOTHESIS and the pending set is retained."""
+    provider = GrowingFindingProvider()
+    bridge = ChainBridge(
+        engine=ChainEngine(templates=default_chain_templates()),
+        finding_provider=provider,
+    )
+    provider.add(_confirmed("finding:a", "CWE-287", "http://app/login"))
+    first = bridge.sync()
+    idor = [h for h in first if set(h.needed_cwe) & {"CWE-639", "CWE-284"}]
+    assert len(idor) == 1
+    idor_id = idor[0].hypothesis_id
+
+    second = bridge.sync()
+    second_ids = {h.hypothesis_id for h in second}
+    assert idor_id in second_ids
+    # No evidence changed → the pending set is identical (same id + set).
+    assert first == second
+    assert "auth-bypass-plus-idor" not in {
+        c.template_id for c in bridge.concluded_chains()
+    }
+
+
+def test_sync_idempotent() -> None:
+    """Two consecutive sync() calls over identical findings are a no-op: the
+    SAME tuple (same ids + order) is returned each time."""
+    provider = GrowingFindingProvider()
+    bridge = ChainBridge(
+        engine=ChainEngine(templates=default_chain_templates()),
+        finding_provider=provider,
+    )
+    provider.add(_confirmed("finding:a", "CWE-287", "http://app/login"))
+    provider.add(_confirmed("finding:ssrf", "CWE-918", "http://app/fetch"))
+    first = bridge.sync()
+    second = bridge.sync()
+    assert len(first) >= 1
+    assert first == second
+
+
+def test_concluded_chains_filters() -> None:
+    """concluded_chains() returns the CONFIRMED chain and excludes the still-
+    HYPOTHESIS one, deterministically."""
+    provider = GrowingFindingProvider()
+    bridge = ChainBridge(
+        engine=ChainEngine(templates=default_chain_templates()),
+        finding_provider=provider,
+    )
+    # auth: both links confirmed → CONFIRMED. ssrf: only link 1 matches
+    # (no CWE-918), so it stays HYPOTHESIS.
+    provider.add(_confirmed("finding:auth", "CWE-287", "http://app/login"))
+    provider.add(_confirmed("finding:idor", "CWE-639", "http://app/account"))
+    provider.add(_confirmed("finding:ssrf", "CWE-200", "http://169.254.169.254/meta"))
+    bridge.sync()
+
+    concluded = bridge.concluded_chains()
+    assert isinstance(concluded, tuple)
+    assert all(isinstance(c, ConcludedChain) for c in concluded)
+    concluded_ids = {c.template_id for c in concluded}
+    assert "auth-bypass-plus-idor" in concluded_ids
+    assert "ssrf-to-cloud-creds" not in concluded_ids
