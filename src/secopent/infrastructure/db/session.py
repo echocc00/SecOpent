@@ -28,6 +28,7 @@ from . import (  # noqa: F401
     finding_models,
     intel_models,
     job_models,
+    loop_models,
     outbox_models,
     report_models,
     signed_audit_models,
