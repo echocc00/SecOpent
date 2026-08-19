@@ -51,7 +51,7 @@ def test_upgrade_after_autostamp_applies_only_deltas(tmp_path: Path) -> None:
     url = f"sqlite:///{(tmp_path / 'legacy.db').as_posix()}"
     assert main(["db", "upgrade", "--db", url]) == 0
 
-    assert _version(engine) == "bd0a1c2e3f40"  # head = baseline + outbox + control + grants
+    assert _version(engine) == "d3f4a5b6c7d8"  # baseline + outbox + control + grants + loops
     with Session(engine) as session:
         outbox = session.execute(
             text(
@@ -89,7 +89,7 @@ def test_db_upgrade_cli_autostamps_legacy_db(tmp_path: Path) -> None:
     url = f"sqlite:///{(tmp_path / 'legacy.db').as_posix()}"
     assert main(["db", "upgrade", "--db", url]) == 0
 
-    assert _version(engine) == "bd0a1c2e3f40"  # baseline + outbox + control + grants = head
+    assert _version(engine) == "d3f4a5b6c7d8"  # baseline + outbox + control + grants + loops = head
     with Session(engine) as session:
         outbox = session.execute(
             text(
