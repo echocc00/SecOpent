@@ -133,6 +133,34 @@ def build_parser() -> argparse.ArgumentParser:
     revoke = grant_sub.add_parser("revoke", help="Revoke a grant (human-only).")
     revoke.add_argument("--db", required=True, help="Database URL or SQLite path.")
     revoke.add_argument("--grant", required=True, help="Grant id (grant-...).")
+    loop = subparsers.add_parser(
+        "loop",
+        help="ReasoningLoop diagnostics (create/status/stop/history).",
+    )
+    loop_sub = loop.add_subparsers(dest="loop_action", required=True)
+    loop_create = loop_sub.add_parser(
+        "create",
+        help="Create a ReasoningLoop for an assessment (prints its loop_id).",
+    )
+    loop_create.add_argument(
+        "--assessment-id", required=True, help="Assessment id (assess-...)."
+    )
+    loop_create.add_argument("--max-steps", type=int, default=None,
+                             help="Max steps (default: LoopBudget.default).")
+    loop_create.add_argument("--max-wall-seconds", type=int, default=None,
+                             help="Max wall-clock seconds (default: LoopBudget.default).")
+    loop_create.add_argument("--max-total-tokens", type=int, default=None,
+                             help="Max total tokens (default: LoopBudget.default).")
+    loop_create.add_argument("--actor", default="op",
+                             help="Acting human identity (default: op).")
+    loop_status = loop_sub.add_parser("status", help="Report a loop's phase.")
+    loop_status.add_argument("--loop-id", required=True, help="Loop id (8 hex chars).")
+    loop_history = loop_sub.add_parser("history", help="List a loop's steps.")
+    loop_history.add_argument("--loop-id", required=True, help="Loop id (8 hex chars).")
+    loop_stop = loop_sub.add_parser("stop", help="Stop a loop (emergency stop).")
+    loop_stop.add_argument("--loop-id", required=True, help="Loop id (8 hex chars).")
+    loop_stop.add_argument("--actor", default="op",
+                           help="Acting human identity (default: op).")
     return parser
 
 
@@ -440,6 +468,28 @@ def _cmd_grant(args: Any) -> int:
     return 1
 
 
+def _cmd_loop(args: Any) -> int:
+    """Dispatch the loop subcommands (create/status/stop/history)."""
+    from .loop import cmd_loop_create, cmd_loop_history, cmd_loop_status, cmd_loop_stop
+
+    if args.loop_action == "create":
+        return cmd_loop_create(
+            args.assessment_id,
+            max_steps=args.max_steps,
+            max_wall_seconds=args.max_wall_seconds,
+            max_total_tokens=args.max_total_tokens,
+            actor=args.actor,
+        )
+    if args.loop_action == "status":
+        return cmd_loop_status(args.loop_id)
+    if args.loop_action == "history":
+        return cmd_loop_history(args.loop_id)
+    if args.loop_action == "stop":
+        return cmd_loop_stop(args.loop_id, args.actor)
+    print(f"error: unknown loop action: {args.loop_action}")
+    return 1
+
+
 def _cmd_db_autostamp_baseline(url: str, cfg: Any) -> None:
     """v0.5.1 F4: stamp a pre-alembic DB (v0.2.x) at the baseline so the
     documented stop-then-migrate flow (`secopent db upgrade`) works - without
@@ -490,6 +540,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_db(args.db_action, args.db)
     if args.command == "grant":
         return _cmd_grant(args)
+    if args.command == "loop":
+        return _cmd_loop(args)
     parser.print_help()
     return 1
 
