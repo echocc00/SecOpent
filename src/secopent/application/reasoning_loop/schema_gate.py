@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from ...domain.reasoning_loop.models import (
     GateVerdict,
+    LoopActionType,
     LoopContext,
     ProposeAction,
 )
@@ -74,8 +75,9 @@ class SchemaGateImpl(SchemaGate):
                     )
 
             # Now strict-revalidate the whole payload.
+            validated: ProposeAction
             try:
-                ProposeAction.model_validate(data)
+                validated = ProposeAction.model_validate(data)
             except ValidationError as exc:
                 first_err = exc.errors()[0]
                 err_type = first_err["type"]
@@ -86,17 +88,45 @@ class SchemaGateImpl(SchemaGate):
                         reason=f"action_type {data.get('action_type')!r} not allowed",
                         deny_code="SCHEMA_INVALID_ACTION_TYPE",
                     )
+                if err_type == "extra_forbidden":
+                    return GateVerdict(
+                        passed=False,
+                        reason=f"extra field not permitted at {loc}",
+                        deny_code="SCHEMA_EXTRA_FIELDS",
+                    )
                 if "rationale" in loc:
                     return GateVerdict(
                         passed=False,
                         reason="rationale length out of range",
-                        deny_code="SCHEMA_RATIONALE_OUT_OF_RANGE",
+                        deny_code="SCHEMA_RATIONALE_TOO_SHORT",
                     )
                 return GateVerdict(
                     passed=False,
                     reason=str(first_err["msg"]),
                     deny_code="SCHEMA_VALIDATION_FAILED",
                 )
+
+            # Shape passed: now check references against the LoopContext.
+            # The proposer may only route work to capabilities/hypotheses that
+            # actually exist in context, never to hallucinated ones.
+            if validated.action_type is LoopActionType.RUN_TOOL:
+                tool_id = validated.payload.get("tool_id")
+                known = {c.capability_id for c in context.available_tools}
+                if tool_id not in known:
+                    return GateVerdict(
+                        passed=False,
+                        reason=f"tool_id {tool_id!r} not in available_tools",
+                        deny_code="SCHEMA_UNKNOWN_TOOL",
+                    )
+            if validated.action_type is LoopActionType.REQUEST_CHAIN:
+                hypothesis_id = validated.payload.get("hypothesis_id")
+                known_hyp = {h.hypothesis_id for h in context.chain_hypotheses_pending}
+                if hypothesis_id not in known_hyp:
+                    return GateVerdict(
+                        passed=False,
+                        reason=f"hypothesis_id {hypothesis_id!r} not pending",
+                        deny_code="SCHEMA_UNKNOWN_HYPOTHESIS",
+                    )
 
             return GateVerdict(passed=True, reason="schema_ok")
         except Exception as exc:  # belt-and-braces; gate MUST always return a verdict
