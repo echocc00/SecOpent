@@ -10,9 +10,10 @@ out_of_scope/not_approved).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 
 class JobStatus(StrEnum):
@@ -66,3 +67,8 @@ class Job:
     result_digest: str = ""
     failure_class: str = ""
     dependencies: tuple[str, ...] = ()
+    # Optional per-job payload (e.g. loop step metadata); deliberately NOT
+    # persisted by the SQLAlchemy store until a schema column exists. Added
+    # backward-compatibly (default-only) so existing Job constructions and DB
+    # mappings are unaffected.
+    parameters: dict[str, Any] = field(default_factory=dict)
