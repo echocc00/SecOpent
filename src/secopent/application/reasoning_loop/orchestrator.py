@@ -57,6 +57,7 @@ from .audit import (
 from .budget_gate import BudgetGateImpl
 from .feedback import LoopFeedback
 from .loop_oracle import LoopOracleVerifier
+from .pause_control import PauseBudgetExceeded, PauseControlService
 
 
 class LoopNotFoundError(DomainError):
@@ -135,6 +136,7 @@ class ReasoningLoopOrchestrator:
         clock: Callable[[], datetime] | None = None,
         budget_gate: BudgetGateImpl | None = None,
         loop_oracle: LoopOracleVerifier | None = None,
+        pause_control: PauseControlService | None = None,
     ) -> None:
         self.state_repo = state_repo
         self.step_repo = step_repo
@@ -160,6 +162,13 @@ class ReasoningLoopOrchestrator:
         # (existing tests/dev) keep the mock request_oracle step (oracle_progressed
         # False) exactly as before.
         self._loop_oracle = loop_oracle
+        # ``pause_control`` (v0.7.7 Task 6) is the PauseControlService wired at
+        # the composition root. It is OPTIONAL: loops that never surface a
+        # human pause (existing tests/callers) leave it None and are unaffected.
+        # When set, ``resume_loop`` drives it (human-only gate + wall-clock
+        # credit) and translates an over-budget pause into a forced terminal
+        # transition (PauseBudgetExceeded -> POLICY_BLOCKED + loop.terminated).
+        self._pause_control = pause_control
 
     # ------------------------------------------------------------------ create
     def create_loop(
@@ -331,6 +340,127 @@ class ReasoningLoopOrchestrator:
             loop_id, new_phase, step_recorded=step,
             signals_count=len(step.observation_signals),
         )
+
+    # ------------------------------------------------- human control plane
+    def emergency_stop(
+        self, loop_id: LoopId, *, actor: str, reason: str
+    ) -> LoopState:
+        """Kill a loop into the terminal EMERGENCY_STOPPED phase.
+
+        The emergency stop is a DIRECT state transition — it deliberately does
+        NOT ride on ``run_step``, because a PAUSED loop short-circuits in
+        ``_NON_AUTO_STEP_PHASES`` (``run_step`` never advances it). EmergencyStop
+        must take priority over PAUSED: a paused loop is still a *live* loop and
+        must remain killable. ``evaluate_termination`` already encodes
+        EMERGENCY_STOPPED as the highest-priority phase, so once the state's
+        phase is set, every later step/terminal check treats it as dead.
+
+        Idempotent for the audit: calling again on an already-EMERGENCY_STOPPED
+        loop returns the current state without a duplicate ``loop.terminated``
+        event. Backward compatible: existing callers never call this.
+        """
+        state = self.state_repo.get(loop_id)
+        if state is None:
+            raise LoopNotFoundError(f"loop_id {loop_id.value!r} not found")
+        if state.phase is LoopPhase.EMERGENCY_STOPPED:
+            return state
+        now = self._clock()
+        new_state = replace(state, phase=LoopPhase.EMERGENCY_STOPPED, last_step_at=now)
+        self.state_repo.save(new_state)
+        self._audit.record(
+            actor=actor,
+            action=LOOP_TERMINATED,
+            resource_type="reasoning_loop",
+            resource_id=loop_id.value,
+            payload={
+                "final_phase": LoopPhase.EMERGENCY_STOPPED.value,
+                "reason": "emergency_stop",
+                "human_reason": reason,
+                "from_phase": state.phase.value,
+            },
+        )
+        return new_state
+
+    def resume_loop(
+        self,
+        *,
+        loop_id: LoopId,
+        actor: str,
+        actor_role: str = "human",
+        approved_by: str | None = None,
+        signature: str | None = None,
+        nonce: str | None = None,
+        expires_at: datetime | None = None,
+        modified_context: object | None = None,
+    ) -> LoopState:
+        """Resume a paused loop through the composed PauseControlService.
+
+        This is the orchestrator's human-resume entry point. It delegates the
+        human-only gate + approval + wall-clock credit to PauseControlService,
+        then applies the *forced-terminal* translation for an over-budget pause:
+
+        - ``PauseBudgetExceeded`` (pause_attempts reached ``max_pauses``) is
+          translated into a terminal ``POLICY_BLOCKED`` transition + a
+          ``loop.terminated`` event with ``reason="pause_budget"``. The system
+          deliberately refuses to invent a STOPPED enum (spec §6.3); the pause
+          budget is a termination *policy* limit, and POLICY_BLOCKED ("policy
+          forbids continuing") is the closest existing terminal phase to that
+          meaning.
+        - any other exception (ApprovalRejected / ApprovalRequired /
+          ``DomainError`` for a dead/stopped loop, ``LookupError``) propagates
+          unchanged — a dead loop cannot be resumed and that stays a hard error.
+
+        The loop must have been composed with a ``pause_control`` (default
+        None); otherwise this raises a clear wiring error.
+        """
+        control = self._pause_control
+        if control is None:
+            raise DomainError(
+                "resume_loop() requires the orchestrator to be composed with a "
+                "PauseControlService (pause_control=...)"
+            )
+        try:
+            return control.resume(
+                loop_id=loop_id,
+                actor=actor,
+                actor_role=actor_role,
+                approved_by=approved_by,
+                signature=signature,
+                nonce=nonce,
+                expires_at=expires_at,
+                modified_context=modified_context,
+            )
+        except PauseBudgetExceeded as exc:
+            # Forced terminal: the loop may not pause past its human budget.
+            return self._force_pause_budget_termination(loop_id, exc, actor)
+
+    def _force_pause_budget_termination(
+        self, loop_id: LoopId, exc: PauseBudgetExceeded, actor: str
+    ) -> LoopState:
+        """Transition the loop to a terminal phase after an over-budget pause.
+
+        Reads the current (still-PAUSED) state, flips it to POLICY_BLOCKED, and
+        records a deterministic ``loop.terminated`` event with
+        reason="pause_budget" so the forced termination is auditable and the
+        loop is dead to future pause/resume/step calls.
+        """
+        state = self.state_repo.get(loop_id)
+        if state is None:
+            raise LoopNotFoundError(f"loop_id {loop_id.value!r} not found")
+        new_state = replace(state, phase=LoopPhase.POLICY_BLOCKED, last_step_at=self._clock())
+        self.state_repo.save(new_state)
+        self._audit.record(
+            actor=actor,
+            action=LOOP_TERMINATED,
+            resource_type="reasoning_loop",
+            resource_id=loop_id.value,
+            payload={
+                "final_phase": LoopPhase.POLICY_BLOCKED.value,
+                "reason": "pause_budget",
+                "detail": str(exc),
+            },
+        )
+        return new_state
 
     # ------------------------------------------------------------- internal
     def _record_backend_unavailable(
