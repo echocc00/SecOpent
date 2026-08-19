@@ -17,8 +17,13 @@ instructed to emit strict JSON matching that schema.
 from __future__ import annotations
 
 import json
+import re
 
-from ...domain.reasoning_loop.models import LoopContext, ProposeAction
+from ...domain.reasoning_loop.models import (
+    LoopContext,
+    ObservationSummary,
+    ProposeAction,
+)
 
 _SECTION_HEADERS: tuple[str, ...] = (
     "[ASSETS]",
@@ -29,17 +34,48 @@ _SECTION_HEADERS: tuple[str, ...] = (
     "[HISTORY]",
 )
 
-# Spec §10: observations carry only the digest, never a raw URL/PII target.
-_OBSERVATION_KEYS: tuple[str, ...] = (
-    "observation_id",
-    "tool_or_case_id",
-    "target_digest",
-    "key_signals",
-    "confidence",
-    "has_full_text",
-    "full_text_ref",
-    "token_estimate",
-)
+# ``full_text_ref`` MUST be a site-relative path — never a raw URL / absolute
+# URI. Anything else (http(s)://..., data:, //host, etc.) is stripped to keep
+# the serializer's no-raw-URL contract (§10). ASCII path chars + '/' '.' '-' '_'.
+_RELATIVE_REF_RE = re.compile(r"^[a-zA-Z0-9_./-]+$")
+_URL_PREFIXES: tuple[str, ...] = ("http://", "https://", "//", "data:", "file:")
+
+
+def _sanitize_full_text_ref(ref: str | None) -> str | None:
+    """Return ``ref`` only if it is a safe relative path, else ``None``.
+
+    Prevents an upstream producer from smuggling an absolute URL / scheme
+    prefix into the LLM prompt. ``None`` omits the field entirely.
+    """
+    if ref is None:
+        return None
+    lowered = ref.lower()
+    if any(lowered.startswith(p) for p in _URL_PREFIXES):
+        return None
+    if not _RELATIVE_REF_RE.fullmatch(ref):
+        return None
+    return ref
+
+
+def _project_observation(obs: ObservationSummary) -> dict[str, object]:
+    """Project one ``ObservationSummary`` onto its serializable dict.
+
+    Only the summary fields are emitted (never the raw evidence body); the
+    ``full_text_ref`` is sanitized to a relative path (dropped if invalid).
+    """
+    projected: dict[str, object] = {
+        "observation_id": obs.observation_id,
+        "tool_or_case_id": obs.tool_or_case_id,
+        "target_digest": obs.target_digest,
+        "key_signals": list(obs.key_signals),
+        "confidence": obs.confidence,
+        "has_full_text": obs.has_full_text,
+        "token_estimate": obs.token_estimate,
+    }
+    sanitized_ref = _sanitize_full_text_ref(obs.full_text_ref)
+    if sanitized_ref is not None:
+        projected["full_text_ref"] = sanitized_ref
+    return projected
 
 
 def _document(ctx: LoopContext) -> dict[str, object]:
@@ -47,15 +83,7 @@ def _document(ctx: LoopContext) -> dict[str, object]:
     return {
         "assets": list(ctx.asset_subgraph),
         "observations": [
-            {
-                key: (
-                    list(getattr(obs, key))
-                    if key == "key_signals"
-                    else getattr(obs, key)
-                )
-                for key in _OBSERVATION_KEYS
-                if getattr(obs, key) is not None or key != "full_text_ref"
-            }
+            _project_observation(obs)
             for obs in ctx.recent_observations
         ],
         "catalog": {

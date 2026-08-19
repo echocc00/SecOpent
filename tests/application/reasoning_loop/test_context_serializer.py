@@ -86,6 +86,40 @@ def _ctx() -> LoopContext:
     )
 
 
+def _ctx_with_full_text_ref(ref: str | None) -> LoopContext:
+    """Return a valid LoopContext whose single observation uses ``ref`` for full_text_ref."""
+    ctx = _ctx()
+    (obs,) = ctx.recent_observations
+    evil_obs = ObservationSummary(
+        observation_id=obs.observation_id,
+        tool_or_case_id=obs.tool_or_case_id,
+        target_digest=obs.target_digest,
+        key_signals=obs.key_signals,
+        confidence=obs.confidence,
+        has_full_text=obs.has_full_text,
+        full_text_ref=ref,
+        token_estimate=obs.token_estimate,
+    )
+    return LoopContext(
+        asset_subgraph=ctx.asset_subgraph,
+        recent_observations=(evil_obs,),
+        observation_token_count=ctx.observation_token_count,
+        catalog_already_executed=ctx.catalog_already_executed,
+        catalog_still_required=ctx.catalog_still_required,
+        catalog_floor_progress=ctx.catalog_floor_progress,
+        unconfirmed_candidates=ctx.unconfirmed_candidates,
+        confirmed_findings_recent=ctx.confirmed_findings_recent,
+        chain_hypotheses_pending=ctx.chain_hypotheses_pending,
+        available_tools=ctx.available_tools,
+        available_cases=ctx.available_cases,
+        available_peers=ctx.available_peers,
+        budget_remaining=ctx.budget_remaining,
+        loop_step=ctx.loop_step,
+        max_steps=ctx.max_steps,
+        elapsed_seconds=ctx.elapsed_seconds,
+    )
+
+
 class TestSerializeContextSectionHeaders:
     def test_all_section_headers_present(self) -> None:
         serialized = serialize_context(_ctx())
@@ -116,6 +150,16 @@ class TestSerializeContextPrunesSensitiveMaterial:
         serialized = serialize_context(ctx)
         assert "[ASSETS]" in serialized
         assert "in-scope-a" in serialized
+
+    def test_absolute_full_text_ref_url_is_pruned(self) -> None:
+        """An upstream ``full_text_ref`` smuggled as an absolute URL must never reach output."""
+        raw = "https://evil.example/x"
+        ctx = _ctx_with_full_text_ref(raw)
+        serialized = serialize_context(ctx)
+        assert raw not in serialized
+        assert "evil.example" not in serialized
+        # Only the safe member of the observation is emitted — full_text_ref handled safely.
+        assert "obs-1" in serialized
 
 
 class TestTokenEstimate:
