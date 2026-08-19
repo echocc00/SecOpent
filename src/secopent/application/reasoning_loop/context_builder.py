@@ -11,6 +11,7 @@ from collections.abc import Callable
 
 from ...domain.catalog.models import TestCatalog
 from ...domain.reasoning_loop.models import (
+    AvailableCapability,
     LoopContext,
     LoopId,
     ObservationSummary,
@@ -20,6 +21,7 @@ from ..ports.loop_state import LoopStateRepository
 
 AssetSubgraphProvider = Callable[[str], tuple[str, ...]]
 ObservationProvider = Callable[[LoopId], tuple[ObservationSummary, ...]]
+ToolCapabilityProvider = Callable[[str], tuple[AvailableCapability, ...]]
 
 
 class DefaultLoopContextBuilder(LoopContextBuilder):
@@ -30,11 +32,20 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         state_repo: LoopStateRepository,
         asset_subgraph_provider: AssetSubgraphProvider,
         observation_provider: ObservationProvider,
+        tool_provider: ToolCapabilityProvider | None = None,
     ) -> None:
         self._catalog = catalog
         self._state_repo = state_repo
         self._asset_provider = asset_subgraph_provider
         self._observation_provider = observation_provider
+        # ``tool_provider`` supplies the registered scan-tool capabilities the
+        # proposer may route ``run_tool`` work to. It is a per-assessment
+        # callable (assessment_id -> the tools in scope/catalogued) so the
+        # SchemaGate's SCHEMA_UNKNOWN_TOOL check has a real, knowledge-backed
+        # capability set instead of the empty tuple (the v0.7.1 seam fix; it
+        # was "built but not wired"). Defaults to empty so callers that don't
+        # surface tools (older unit tests) get no loadable tools.
+        self._tool_provider = tool_provider
 
     def build(self, loop_id: LoopId) -> LoopContext:
         state = self._state_repo.get(loop_id)
@@ -43,6 +54,11 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         assessment_id = state.assessment_id
         recent_observations = self._observation_provider(loop_id)
         token_count = sum(o.token_estimate for o in recent_observations)
+        # Registered scan-tool capabilities for this assessment (knowledgeed
+        # source for the SchemaGate SCHEMA_UNKNOWN_TOOL check).
+        available_tools = (
+            self._tool_provider(assessment_id) if self._tool_provider else ()
+        )
 
         # Compute catalog required classes from the catalog (per-assessment
         # mappings are out of scope for v0.7.0 — the state carries them).
@@ -63,7 +79,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
             unconfirmed_candidates=(),
             confirmed_findings_recent=(),
             chain_hypotheses_pending=(),
-            available_tools=(),
+            available_tools=available_tools,
             available_cases=(),
             available_peers=(),
             budget_remaining=state.budget.snapshot(),

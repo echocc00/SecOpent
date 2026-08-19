@@ -23,11 +23,13 @@ from secopent.application.reasoning_loop.llm_backend import (
     LoopLLMBackend,
     ProposalOutcome,
 )
+from secopent.application.reasoning_loop.proposer import RealLoopActionProposer
 from secopent.domain.common.errors import DomainError
 from secopent.domain.reasoning_loop.models import (
     LoopActionType,
     LoopBudgetSnapshot,
     LoopContext,
+    ProposeAction,
 )
 
 
@@ -48,6 +50,19 @@ class FakeLLMBackend(LoopLLMBackend):
 
 def _prompt_ok() -> str:
     return '{"action_type":"run_tool","payload":{"tool_id":"nuclei","parameters":{"template":"x"}},"rationale":"probe adjacent endpoint for auth bypass","confidence":0.7}'  # noqa: E501
+
+
+# A strict-schema-valid prompt for the proposer behavior tests (Task 4). The
+# T1 ``_prompt_ok`` fixture above intentionally carries a <50-char rationale,
+# which the strict ProposeAction schema (min_length=50) rejects — the proposer
+# MUST treat it as bad output, so these tests use a fully-valid prompt whose
+# rationale satisfies the schema.
+_VALID_PROMPT = (
+    '{"action_type":"run_tool",'
+    '"payload":{"tool_id":"nuclei","parameters":{"template":"x"}},'
+    '"rationale":"probe the adjacent endpoint for a local file disclosure to '
+    'confirm scope inclusion and validate the perimeter","confidence":0.7}'
+)
 
 
 def _ctx() -> LoopContext:
@@ -136,3 +151,44 @@ class TestFixtures:
         ctx = _ctx()
         assert isinstance(ctx, LoopContext)
         assert ctx.context_hash()
+
+
+class TestRealProposer:
+    """RealLoopActionProposer behavior (Task 4): LLM call -> strict ProposeAction.
+
+    ``propose`` returns a typed ``LLMProposalResult``; the composition adapter
+    maps non-OK outcomes onto the orchestrator's ``LoopActionProposer`` port
+    (None). These tests assert the proposer's own degradation vocabulary.
+    """
+
+    def test_valid_json_yields_ProposeAction(self) -> None:
+        backend = FakeLLMBackend([_VALID_PROMPT])
+        proposer = RealLoopActionProposer(backend=backend)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.OK
+        assert isinstance(res.action, ProposeAction)
+        assert res.action.action_type is LoopActionType.RUN_TOOL
+        assert res.action.tool_id == "nuclei"
+
+    def test_bad_json_retries_once_then_ok(self) -> None:
+        backend = FakeLLMBackend(["{not json", _VALID_PROMPT])
+        proposer = RealLoopActionProposer(backend=backend, max_retries=1)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.OK
+        assert isinstance(res.action, ProposeAction)
+        assert len(backend.calls) == 2
+
+    def test_bad_json_exhausts_retries_is_retryable(self) -> None:
+        backend = FakeLLMBackend(["{not json", "still not json"])
+        proposer = RealLoopActionProposer(backend=backend, max_retries=1)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.RETRYABLE
+        assert res.action is None
+        assert len(backend.calls) == 2
+
+    def test_backend_unavailable_is_hard_error(self) -> None:
+        backend = FakeLLMBackend([LLMBackendUnavailable("down")])
+        proposer = RealLoopActionProposer(backend=backend)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.BACKEND_UNAVAILABLE
+        assert res.action is None

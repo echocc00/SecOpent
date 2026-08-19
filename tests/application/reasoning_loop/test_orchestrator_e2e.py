@@ -34,6 +34,7 @@ from secopent.application.reasoning_loop.schema_gate import SchemaGateImpl
 from secopent.domain.catalog.models import TestCatalog
 from secopent.domain.policy.models import ExecutionMode, PolicyDecision
 from secopent.domain.reasoning_loop.models import (
+    AvailableCapability,
     LoopActionType,
     LoopId,
     LoopPhase,
@@ -88,6 +89,24 @@ def _action(rationale: str = "rationale " * 12) -> ProposeAction:
     )
 
 
+def _tool_capabilities(assessment_id: str) -> tuple[AvailableCapability, ...]:
+    """Registered scan-tool capabilities the mock proposer may route to.
+
+    Aligned with the mock proposer's ``run_tool(tool_id="nuclei")`` so the
+    SchemaGate's SCHEMA_UNKNOWN_TOOL check has a knowledge-backed set instead
+    of the empty tuple (v0.7.1 seam fix).
+    """
+    return (
+        AvailableCapability(
+            capability_id="nuclei",
+            kind="tool",
+            summary="template-driven web/API vulnerability scanner",
+            risk_class="active",
+            cwe=("CWE-89", "CWE-79"),
+        ),
+    )
+
+
 def _make_orchestrator(
     script: list[ProposeAction],
 ) -> tuple[ReasoningLoopOrchestrator, _FakeAuditRepo]:
@@ -99,6 +118,7 @@ def _make_orchestrator(
         state_repo=state_repo,
         asset_subgraph_provider=lambda aid: (),  # type: ignore[arg-type, return-value]
         observation_provider=lambda lid: (),  # type: ignore[arg-type, return-value]
+        tool_provider=_tool_capabilities,
     )
     proposer = MockLoopActionProposer(script=script)
     signer = PermitSigner()
