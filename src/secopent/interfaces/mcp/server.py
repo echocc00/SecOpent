@@ -118,6 +118,8 @@ def _runtime_from_app(app: FastAPI) -> McpRuntime:
         start_scheduler=_schedule_start,
         llm_backend=getattr(app.state, "llm_backend", None),
         loop_control=getattr(app.state, "loop_control", None),
+        loop_state_repo=getattr(app.state, "loop_state_repo", None),
+        loop_step_repo=getattr(app.state, "loop_step_repo", None),
     )
 
 

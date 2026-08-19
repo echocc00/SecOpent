@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TypeVar
 
 from sqlalchemy.orm import Session
@@ -41,7 +41,14 @@ from ...application.audit import AuditService
 from ...application.audit_chain import AuditChain
 from ...application.planner import Planner
 from ...application.ports.loop_approval import ApprovalRejected
+from ...application.ports.loop_state import LoopStateRepository
+from ...application.ports.loop_step import LoopStepRepository
 from ...application.projects import ProjectService
+from ...application.reasoning_loop.audit import (
+    LOOP_CREATED,
+    LOOP_RESOURCE_TYPE,
+    LOOP_TERMINATED,
+)
 from ...application.reasoning_loop.pause_control import PauseControlService
 from ...application.report_renderer import ReportData, ReportRenderer
 from ...application.scopes import ScopeService
@@ -85,6 +92,12 @@ class McpRuntime:
     start_scheduler: Callable[[str], None] | None = None
     llm_backend: object | None = None
     loop_control: PauseControlService | None = None
+    # ReasoningLoop state/step repos (v0.7.8 Task 4). ``loop_status``/``history``
+    # read them; ``loop_create``/``stop`` write state. Wired to the same
+    # in-memory stores the /loops control plane uses (see server.py), so the
+    # agent and the human control surface observe the same loops.
+    loop_state_repo: LoopStateRepository | None = None
+    loop_step_repo: LoopStepRepository | None = None
 
 
 def _audit(
@@ -1166,6 +1179,242 @@ def handler_loop_resume(
     return _guard("loop_resume", _run)
 
 
+def _loop_repos(
+    runtime: McpRuntime,
+) -> tuple[LoopStateRepository, LoopStepRepository]:
+    """The loop state/step repos, or a loud config error when not wired.
+
+    The MCP transport wires these onto the runtime (see server.py); an
+    unconfigured runtime fails loudly rather than reporting a false loop.
+    """
+    state_repo = runtime.loop_state_repo
+    step_repo = runtime.loop_step_repo
+    if state_repo is None or step_repo is None:
+        raise LookupError("loop repos not configured")
+    return state_repo, step_repo
+
+
+def handler_loop_status(
+    runtime: McpRuntime, *, loop_id: str
+) -> dict[str, object]:
+    """Read-only status probe for a ReasoningLoop (agent + human callable).
+
+    Returns the loop's phase, executed step count, remaining budget snapshot
+    and context hash. Unknown loop -> structured NOT_FOUND via ``_guard``.
+    """
+    from ...domain.reasoning_loop.models import LoopId
+
+    def _run() -> dict[str, object]:
+        state_repo, step_repo = _loop_repos(runtime)
+        state = state_repo.get(LoopId(loop_id))
+        if state is None:
+            raise LookupError(f"loop {loop_id!r} not found")
+        steps = step_repo.list_for_loop(state.loop_id)
+        budget = state.budget.snapshot()
+        return {
+            "status": "success",
+            "loop_id": state.loop_id.value,
+            "assessment_id": state.assessment_id,
+            "phase": state.phase.value,
+            "step_count": len(steps),
+            "budget_remaining": {
+                "steps": budget.steps_remaining,
+                "tokens": budget.tokens_remaining,
+                "wall_seconds": budget.wall_seconds_remaining,
+            },
+            "context_hash": state.context_hash,
+        }
+
+    return _guard("loop_status", _run)
+
+
+def handler_loop_history(
+    runtime: McpRuntime, *, loop_id: str
+) -> dict[str, object]:
+    """Read-only step history for a ReasoningLoop (agent + human callable).
+
+    Returns every recorded step (step_id / step_number / action_type /
+    tool_or_case_id / oracle_progressed). Unknown loop -> NOT_FOUND.
+    """
+    from ...domain.reasoning_loop.models import LoopId
+
+    def _run() -> dict[str, object]:
+        state_repo, step_repo = _loop_repos(runtime)
+        state = state_repo.get(LoopId(loop_id))
+        if state is None:
+            raise LookupError(f"loop {loop_id!r} not found")
+        steps = step_repo.list_for_loop(state.loop_id)
+        return {
+            "status": "success",
+            "loop_id": loop_id,
+            "steps": [
+                {
+                    "step_id": step.step_id,
+                    "step_number": step.step_number,
+                    "action_type": step.proposed_action.action_type.value,
+                    "tool_or_case_id": step.tool_or_case_id,
+                    "oracle_progressed": step.oracle_progressed,
+                }
+                for step in steps
+            ],
+        }
+
+    return _guard("loop_history", _run)
+
+
+def handler_loop_create(
+    runtime: McpRuntime,
+    *,
+    assessment_id: str,
+    grant_id: str | None = None,
+    max_steps: int | None = None,
+    max_wall_seconds: int | None = None,
+    max_total_tokens: int | None = None,
+) -> dict[str, object]:
+    """Create a ReasoningLoop for an assessment. HUMAN only (grant required).
+
+    A grant authorizes a human to start the loop; an agent without a grant
+    receives structured HUMAN_REQUIRED. Builds a fresh INITIALIZING loop state
+    (default budget derived from ``LoopBudget.default`` unless overridden) and
+    records a signed ``loop.created`` audit event.
+    """
+    if not grant_id:
+        return _human_required(
+            "loop_create",
+            assessment_id,
+            "humans need a grant to create a loop (see grant_list)",
+        )
+    from ...domain.common.canonical import utc_now
+    from ...domain.reasoning_loop.models import (
+        LoopBudget,
+        LoopId,
+        LoopPhase,
+        LoopPlan,
+        LoopState,
+        LoopTerminationPolicy,
+    )
+
+    def _run() -> dict[str, object]:
+        state_repo, _step_repo = _loop_repos(runtime)
+        now = utc_now()
+        loop_id = LoopId.new()
+        base = LoopBudget.default()
+        budget = LoopBudget(
+            max_steps=max_steps if max_steps is not None else base.max_steps,
+            max_total_tokens=(
+                max_total_tokens if max_total_tokens is not None
+                else base.max_total_tokens
+            ),
+            max_wall_seconds=(
+                max_wall_seconds if max_wall_seconds is not None
+                else base.max_wall_seconds
+            ),
+        )
+        plan = LoopPlan(
+            plan_id=f"plan-{uuid.uuid4().hex[:12]}",
+            loop_id=loop_id,
+            assessment_id=assessment_id,
+            termination_policy=LoopTerminationPolicy.default(),
+            policy_snapshot="mcp:loop:default",
+            created_at=now,
+        )
+        state = LoopState(
+            loop_id=plan.loop_id,
+            assessment_id=plan.assessment_id,
+            phase=LoopPhase.INITIALIZING,
+            policy_snapshot=plan.policy_snapshot,
+            budget=budget,
+            context_hash="0" * 64,
+            catalog_required_remaining=frozenset(),
+            catalog_required_executed=frozenset(),
+            consecutive_no_signal=0,
+            consecutive_policy_rejected=0,
+            started_at=now,
+            last_step_at=None,
+        )
+        state_repo.save(state)
+        runtime.audit_chain.record(
+            actor="human",
+            action=LOOP_CREATED,
+            resource_type=LOOP_RESOURCE_TYPE,
+            resource_id=loop_id.value,
+            payload={
+                "assessment_id": assessment_id,
+                "grant_id": grant_id,
+                "budget": {
+                    "max_steps": budget.max_steps,
+                    "max_total_tokens": budget.max_total_tokens,
+                    "max_wall_seconds": budget.max_wall_seconds,
+                },
+            },
+        )
+        return {
+            "status": "success",
+            "loop_id": loop_id.value,
+            "phase": state.phase.value,
+        }
+
+    return _guard("loop_create", _run)
+
+
+def handler_loop_stop(
+    runtime: McpRuntime, *, loop_id: str, grant_id: str | None = None,
+    actor: str = "human",
+) -> dict[str, object]:
+    """Stop a ReasoningLoop. HUMAN only (grant required).
+
+    A grant authorizes a human to stop the loop; an agent without a grant
+    receives structured HUMAN_REQUIRED. Transitions the loop to the terminal
+    ``EMERGENCY_STOPPED`` phase (the orchestrator's emergency-stop semantics)
+    and records a signed ``loop.terminated`` audit event. Idempotent for an
+    already-stopped loop.
+    """
+    if not grant_id:
+        return _human_required(
+            "loop_stop",
+            loop_id,
+            "humans need a grant to stop a loop (see grant_list)",
+        )
+    from ...domain.common.canonical import utc_now
+    from ...domain.reasoning_loop.models import LoopId, LoopPhase
+
+    def _run() -> dict[str, object]:
+        state_repo, _step_repo = _loop_repos(runtime)
+        lid = LoopId(loop_id)
+        state = state_repo.get(lid)
+        if state is None:
+            raise LookupError(f"loop {loop_id!r} not found")
+        if state.phase is not LoopPhase.EMERGENCY_STOPPED:
+            now = utc_now()
+            stopped = replace(state, phase=LoopPhase.EMERGENCY_STOPPED,
+                              last_step_at=now)
+            state_repo.save(stopped)
+            runtime.audit_chain.record(
+                actor=actor or "human",
+                action=LOOP_TERMINATED,
+                resource_type=LOOP_RESOURCE_TYPE,
+                resource_id=loop_id,
+                payload={
+                    "final_phase": LoopPhase.EMERGENCY_STOPPED.value,
+                    "reason": "emergency_stop",
+                    "human_reason": "stopped via MCP loop_stop (grant)",
+                    "from_phase": state.phase.value,
+                },
+            )
+            return {
+                "status": "success",
+                "loop_id": loop_id,
+                "phase": LoopPhase.EMERGENCY_STOPPED.value,
+            }
+        return {
+            "status": "success",
+            "loop_id": loop_id,
+            "phase": state.phase.value,
+        }
+
+    return _guard("loop_stop", _run)
+
+
 # Registry of every standard orchestration tool -> its handler (used by
 # build_default_registry when a runtime is wired).
 TOOL_HANDLERS: dict[str, Callable[..., object]] = {
@@ -1185,6 +1434,10 @@ TOOL_HANDLERS: dict[str, Callable[..., object]] = {
     "assessment_status": handler_assessment_status,
     "loop_pause": handler_loop_pause,
     "loop_resume": handler_loop_resume,
+    "loop_status": handler_loop_status,
+    "loop_history": handler_loop_history,
+    "loop_create": handler_loop_create,
+    "loop_stop": handler_loop_stop,
     "asset_list": handler_asset_list,
     "finding_list": handler_finding_list,
     "finding_validate": handler_finding_validate,

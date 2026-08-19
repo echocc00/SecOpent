@@ -43,6 +43,12 @@ STANDARD_ORCHESTRATION_TOOLS: tuple[str, ...] = (
     # reasoning loop control (human-only at the service layer)
     "loop_pause",
     "loop_resume",
+    # reasoning loop (v0.7.8 Task 4): status/history read-only (both roles),
+    # create/stop human-only (grant-gated)
+    "loop_status",
+    "loop_history",
+    "loop_create",
+    "loop_stop",
     # asset
     "asset_list",
     # finding / evidence

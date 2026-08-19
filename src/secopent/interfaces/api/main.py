@@ -41,6 +41,7 @@ from ...application.oracle_service import OracleService
 from ...application.prompt_injection import PromptInjectionGuard
 from ...application.reasoning_loop.in_memory_state import (
     InMemoryLoopStateRepository,
+    InMemoryLoopStepRepository,
 )
 from ...application.reasoning_loop.pause_control import PauseControlService
 from ...application.remote_model import ModelBackend, RemoteModelGateway
@@ -531,8 +532,14 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # AuditChain (satisfies AuditRecorder); pause/resume state is in-memory for
     # now (DB persistence is v0.7.8). Read by the /loops router and the MCP
     # loop_pause/loop_resume tools via request.app.state / McpRuntime.
+    #
+    # v0.7.8 Task 4: the loop state/step in-memory stores are shared singletons
+    # on app.state so the MCP loop_status/history/create/stop handlers observe
+    # and write the SAME loops the /loops control plane (pause/resume) manages.
+    app.state.loop_state_repo = InMemoryLoopStateRepository()
+    app.state.loop_step_repo = InMemoryLoopStepRepository()
     app.state.loop_control = PauseControlService(
-        state_repo=InMemoryLoopStateRepository(),
+        state_repo=app.state.loop_state_repo,
         audit=audit_chain,
         approval=SignedLoopApproval(),
     )

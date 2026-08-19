@@ -25,7 +25,11 @@ def test_standard_tools_are_the_six_groups() -> None:
     assert "report_render" in STANDARD_ORCHESTRATION_TOOLS
     assert "loop_pause" in STANDARD_ORCHESTRATION_TOOLS  # v0.7.7 human pause
     assert "loop_resume" in STANDARD_ORCHESTRATION_TOOLS  # v0.7.7 human resume
-    assert len(STANDARD_ORCHESTRATION_TOOLS) == 21
+    assert "loop_status" in STANDARD_ORCHESTRATION_TOOLS  # v0.7.8 loop status
+    assert "loop_history" in STANDARD_ORCHESTRATION_TOOLS  # v0.7.8 loop history
+    assert "loop_create" in STANDARD_ORCHESTRATION_TOOLS  # v0.7.8 loop create
+    assert "loop_stop" in STANDARD_ORCHESTRATION_TOOLS  # v0.7.8 loop stop
+    assert len(STANDARD_ORCHESTRATION_TOOLS) == 25
 
 
 def test_register_self_written_and_invoke() -> None:
