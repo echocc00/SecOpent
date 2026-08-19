@@ -12,17 +12,30 @@ from collections.abc import Callable
 from ...domain.catalog.models import TestCatalog
 from ...domain.reasoning_loop.models import (
     AvailableCapability,
+    HandbookSummary,
     LoopContext,
     LoopId,
     ObservationSummary,
 )
 from ..ports.loop_context import LoopContextBuilder
 from ..ports.loop_state import LoopStateRepository
+from .handbook_selector import HandbookSelector
 from .summarizer import ObservationSummarizer
 
 AssetSubgraphProvider = Callable[[str], tuple[str, ...]]
 ObservationProvider = Callable[[LoopId], tuple[ObservationSummary, ...]]
 ToolCapabilityProvider = Callable[[str], tuple[AvailableCapability, ...]]
+
+# v0.7.4 Task 2: handbook injection knobs. ``_HANDBOOK_ASSET_CLASS`` is a single
+# constant so the asset-class mapping can be swapped for a real classifier in a
+# later milestone (see the milestone Open/Notes). ``_HANDBOOK_K`` and
+# ``_HANDBOOK_MAX_TOKENS`` bound the number of hints and their token weight.
+_HANDBOOK_ASSET_CLASS = "web"
+_HANDBOOK_K = 3
+_HANDBOOK_MAX_TOKENS = 400
+# Capped dictionary size for observation-derived keywords so the selector call
+# never explodes in cardinality.
+_HANDBOOK_KEYWORD_CAP = 8
 
 
 class DefaultLoopContextBuilder(LoopContextBuilder):
@@ -35,6 +48,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         observation_provider: ObservationProvider,
         tool_provider: ToolCapabilityProvider | None = None,
         summarizer: ObservationSummarizer | None = None,
+        handbook_selector: HandbookSelector | None = None,
     ) -> None:
         self._catalog = catalog
         self._state_repo = state_repo
@@ -54,6 +68,46 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         # and unit tests that don't inject it keep the uncompressed window and
         # the raw token sum.
         self._summarizer = summarizer
+        # ``handbook_selector`` (v0.7.4 Task 2) distills curated handbooks into
+        # LoopContext.handbook_hints after ranking them against observation
+        # keywords. Defaults to None = no handbook injection, keeping older
+        # callers/tests unchanged. The hint token weight is bounded by
+        # ``_HANDBOOK_MAX_TOKENS`` inside the selector, so BudgetGate sees a
+        # capped contribution from handbooks.
+        self._handbook_selector = handbook_selector
+
+    def _derive_keywords(
+        self, recent_observations: tuple[ObservationSummary, ...]
+    ) -> tuple[str, ...]:
+        """Flatten observation key_signals into a capped, deduped keyword tuple."""
+        seen: list[str] = []
+        for obs in recent_observations:
+            for signal in obs.key_signals:
+                lowered = str(signal).lower()
+                if lowered not in seen:
+                    seen.append(lowered)
+        return tuple(seen[:_HANDBOOK_KEYWORD_CAP])
+
+    def _select_handbook_hints(self, keywords: tuple[str, ...]) -> tuple[HandbookSummary, ...]:
+        if self._handbook_selector is None or not keywords:
+            return ()
+        selected = self._handbook_selector.select(
+            asset_class=_HANDBOOK_ASSET_CLASS,
+            keywords=keywords,
+            k=_HANDBOOK_K,
+            max_tokens=_HANDBOOK_MAX_TOKENS,
+        )
+        return tuple(
+            HandbookSummary(
+                id=h.id,
+                title=h.title,
+                attack_surface=tuple(sorted(h.attack_surface)),
+                recon_endpoints=tuple(sorted(h.recon_endpoints)),
+                payload_classes=tuple(sorted(h.payload_classes)),
+                verification_hint=h.verification_hint,
+            )
+            for h in selected
+        )
 
     def build(self, loop_id: LoopId) -> LoopContext:
         state = self._state_repo.get(loop_id)
@@ -85,6 +139,13 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         # floor has been marked done). Matches the TDD contract below.
         progress = (executed_count / catalog_total) if catalog_total else 0.0
 
+        # v0.7.4 Task 2: rank curated handbooks against observation keywords and
+        # surface the top ones as LoopContext.handbook_hints (token-bounded to
+        # _HANDBOOK_MAX_TOKENS inside the selector, so BudgetGate sees a capped
+        # contribution).
+        keywords = self._derive_keywords(recent_observations)
+        handbook_hints = self._select_handbook_hints(keywords)
+
         return LoopContext(
             asset_subgraph=self._asset_provider(assessment_id),
             recent_observations=recent_observations,
@@ -98,6 +159,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
             available_tools=available_tools,
             available_cases=(),
             available_peers=(),
+            handbook_hints=handbook_hints,
             budget_remaining=state.budget.snapshot(),
             loop_step=0,  # orchestrator updates this on each step
             max_steps=50,

@@ -217,6 +217,24 @@ class PendingHypothesis:
 
 
 @dataclass(frozen=True, slots=True)
+class HandbookSummary:
+    """Lightweight, token-bounded distillation of a Handbook for the proposer.
+
+    Carries only the curated, LLM-consumed hints (attack_surface /
+    recon_endpoints / payload_classes / verification_hint) — never provenance
+    or CWE/OWASP metadata. Frozen + slots for stable hashing; set-like fields
+    are stored sorted so ``context_hash()`` is deterministic.
+    """
+
+    id: str
+    title: str
+    attack_surface: tuple[str, ...]
+    recon_endpoints: tuple[str, ...]
+    payload_classes: tuple[str, ...]
+    verification_hint: str
+
+
+@dataclass(frozen=True, slots=True)
 class LoopContext:
     """Structured input the proposer consumes. Immutable; content-addressed."""
 
@@ -236,6 +254,11 @@ class LoopContext:
     loop_step: int
     max_steps: int
     elapsed_seconds: int
+    # v0.7.4 Task 2: curated per-vuln-class handbooks surfaced to the proposer
+    # as context hints. Empty by default (no handbook injection). Deliberately
+    # NOT fed into available_tools — that field feeds the SchemaGate's
+    # SCHEMA_UNKNOWN_TOOL check, so handbook entries must never pollute it.
+    handbook_hints: tuple[HandbookSummary, ...] = ()
 
     def context_hash(self) -> str:
         body = {
@@ -275,6 +298,17 @@ class LoopContext:
                 for c in self.available_cases
             ],
             "available_peers": list(self.available_peers),
+            "handbook_hints": [
+                {
+                    "id": h.id,
+                    "title": h.title,
+                    "attack_surface": list(h.attack_surface),
+                    "recon_endpoints": list(h.recon_endpoints),
+                    "payload_classes": list(h.payload_classes),
+                    "verification_hint": h.verification_hint,
+                }
+                for h in self.handbook_hints
+            ],
             "budget_remaining": {
                 "steps_remaining": self.budget_remaining.steps_remaining,
                 "tokens_remaining": self.budget_remaining.tokens_remaining,

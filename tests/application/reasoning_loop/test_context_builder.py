@@ -9,6 +9,7 @@ import pytest
 from secopent.application.reasoning_loop.context_builder import (
     DefaultLoopContextBuilder,
 )
+from secopent.application.reasoning_loop.handbook_selector import HandbookSelector
 from secopent.application.reasoning_loop.in_memory_state import (
     InMemoryLoopStateRepository,
 )
@@ -16,12 +17,14 @@ from secopent.application.reasoning_loop.summarizer import ObservationSummarizer
 from secopent.domain.catalog.models import AssetType, RequiredTestClass, TestCatalog
 from secopent.domain.policy.models import RiskClass
 from secopent.domain.reasoning_loop.models import (
+    HandbookSummary,
     LoopBudget,
     LoopId,
     LoopPhase,
     LoopState,
     ObservationSummary,
 )
+from secopent.infrastructure.catalog.handbook_registry import load_default_handbooks
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -174,3 +177,122 @@ def test_context_builder_without_summarizer_passthrough_uncompressed() -> None:
     assert ctx.recent_observations == observations
     assert ctx.recent_observations[5].has_full_text is True
     assert ctx.observation_token_count == 8 * 200
+
+
+def _default_ids() -> set[str]:
+    return {h.id for h in load_default_handbooks().all()}
+
+
+def _build_ctx_with_handbooks(
+    *,
+    key_signals: tuple[str, ...],
+    state_repo: InMemoryLoopStateRepository,
+    lid: LoopId,
+    selector: HandbookSelector | None = None,
+) -> DefaultLoopContextBuilder:
+    """V0.7.4 Task 2: a builder whose observation provider emits the given
+    key_signals and which carries an optional handbook_selector."""
+    observations = (
+        ObservationSummary(
+            observation_id="obs-1",
+            tool_or_case_id="tool-1",
+            target_digest="digest-1",
+            key_signals=key_signals,
+            confidence=0.7,
+            has_full_text=True,
+            full_text_ref="ref-1",
+            token_estimate=100,
+        ),
+    )
+    builder = DefaultLoopContextBuilder(
+        catalog=TestCatalog(version="t-1", mappings={}),
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: observations,
+        handbook_selector=selector,
+    )
+    state_repo.save(_state(lid, frozenset()))
+    return builder
+
+
+def test_context_builder_injects_handbook_hints_on_keyword_match() -> None:
+    """V0.7.4 Task 2.1: when observations carry a matching keyword (e.g. 'idor'),
+    LoopContext.handbook_hints is a non-empty tuple of HandbookSummary whose ids
+    are drawn from the default handbook set."""
+    selector = HandbookSelector(load_default_handbooks())
+    state_repo = InMemoryLoopStateRepository()
+    lid = LoopId(value="abcd1234")
+    builder = _build_ctx_with_handbooks(
+        key_signals=("idor",),
+        state_repo=state_repo,
+        lid=lid,
+        selector=selector,
+    )
+    ctx = builder.build(lid)
+
+    assert isinstance(ctx.handbook_hints, tuple)
+    assert len(ctx.handbook_hints) >= 1
+    assert all(isinstance(h, HandbookSummary) for h in ctx.handbook_hints)
+    ids = {h.id for h in ctx.handbook_hints}
+    assert ids <= _default_ids()
+    assert "idor" in ids
+
+
+def test_context_builder_no_keyword_match_yields_empty_hints() -> None:
+    """V0.7.4 Task 2.1: no matching keyword ⇒ handbook_hints == () without
+    crashing, even when the selector is present."""
+    selector = HandbookSelector(load_default_handbooks())
+    state_repo = InMemoryLoopStateRepository()
+    lid = LoopId(value="abcd1234")
+    builder = _build_ctx_with_handbooks(
+        key_signals=("no-such-keyword-x7",),
+        state_repo=state_repo,
+        lid=lid,
+        selector=selector,
+    )
+    ctx = builder.build(lid)
+
+    assert ctx.handbook_hints == ()
+
+
+def test_context_builder_without_selector_has_empty_hints() -> None:
+    """V0.7.4 Task 2.1: default (no selector) ⇒ no handbook injection and no
+    change to existing behavior."""
+    state_repo = InMemoryLoopStateRepository()
+    lid = LoopId(value="abcd1234")
+    builder = _build_ctx_with_handbooks(
+        key_signals=("idor",),
+        state_repo=state_repo,
+        lid=lid,
+    )
+    ctx = builder.build(lid)
+
+    assert ctx.handbook_hints == ()
+
+
+def test_context_hash_covers_handbook_hints() -> None:
+    """V0.7.4 Task 2.1: context_hash() differs when handbook_hints differ, so
+    the new field participates in content-addressing."""
+    state_repo_a = InMemoryLoopStateRepository()
+    state_repo_b = InMemoryLoopStateRepository()
+    lid_a = LoopId(value="aaaa1111")
+    lid_b = LoopId(value="bbbb2222")
+    selector = HandbookSelector(load_default_handbooks())
+    builder_a = _build_ctx_with_handbooks(
+        key_signals=("idor",),
+        state_repo=state_repo_a,
+        lid=lid_a,
+        selector=selector,
+    )
+    builder_b = _build_ctx_with_handbooks(
+        key_signals=("no-such-keyword-x7",),
+        state_repo=state_repo_b,
+        lid=lid_b,
+        selector=selector,
+    )
+    ctx_a = builder_a.build(lid_a)
+    ctx_b = builder_b.build(lid_b)
+
+    assert ctx_a.handbook_hints != ()
+    assert ctx_b.handbook_hints == ()
+    assert ctx_a.context_hash() != ctx_b.context_hash()
