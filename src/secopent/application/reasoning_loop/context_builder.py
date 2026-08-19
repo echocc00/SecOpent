@@ -18,6 +18,7 @@ from ...domain.reasoning_loop.models import (
 )
 from ..ports.loop_context import LoopContextBuilder
 from ..ports.loop_state import LoopStateRepository
+from .summarizer import ObservationSummarizer
 
 AssetSubgraphProvider = Callable[[str], tuple[str, ...]]
 ObservationProvider = Callable[[LoopId], tuple[ObservationSummary, ...]]
@@ -33,6 +34,7 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         asset_subgraph_provider: AssetSubgraphProvider,
         observation_provider: ObservationProvider,
         tool_provider: ToolCapabilityProvider | None = None,
+        summarizer: ObservationSummarizer | None = None,
     ) -> None:
         self._catalog = catalog
         self._state_repo = state_repo
@@ -46,6 +48,12 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
         # was "built but not wired"). Defaults to empty so callers that don't
         # surface tools (older unit tests) get no loadable tools.
         self._tool_provider = tool_provider
+        # ``summarizer`` (v0.7.3 Task 4) applies the 3-tier observation
+        # compression before the window is embedded in LoopContext. Defaults to
+        # None = raw passthrough (the pre-v0.7.3 behavior), so existing callers
+        # and unit tests that don't inject it keep the uncompressed window and
+        # the raw token sum.
+        self._summarizer = summarizer
 
     def build(self, loop_id: LoopId) -> LoopContext:
         state = self._state_repo.get(loop_id)
@@ -53,7 +61,15 @@ class DefaultLoopContextBuilder(LoopContextBuilder):
             raise ValueError(f"loop_id {loop_id.value!r} not found")
         assessment_id = state.assessment_id
         recent_observations = self._observation_provider(loop_id)
-        token_count = sum(o.token_estimate for o in recent_observations)
+        if self._summarizer is not None:
+            # v0.7.3 Task 4: compress the raw window; the summarized token count
+            # replaces the raw sum so the proposer's observation budget reflects
+            # what is actually surfaced.
+            window = self._summarizer.summarize(recent_observations)
+            recent_observations = window.observations
+            token_count = window.tokens
+        else:
+            token_count = sum(o.token_estimate for o in recent_observations)
         # Registered scan-tool capabilities for this assessment (knowledgeed
         # source for the SchemaGate SCHEMA_UNKNOWN_TOOL check).
         available_tools = (

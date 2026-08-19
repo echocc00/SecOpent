@@ -12,11 +12,13 @@ Reconciled to the real injected-gate interfaces:
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
 from secopent.application.audit import AuditService
+from secopent.application.reasoning_loop.audit import LOOP_GATE_REJECTED
+from secopent.application.reasoning_loop.budget_gate import BudgetGateImpl
 from secopent.application.reasoning_loop.context_builder import (
     DefaultLoopContextBuilder,
 )
@@ -49,6 +51,7 @@ from secopent.infrastructure.permits.permit_signer import (
 )
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
+_DEFAULT_TEST_BUDGET = LoopBudget.default()
 
 
 @dataclass
@@ -109,6 +112,8 @@ def _bootstrap(
     *,
     catalog_required_remaining: frozenset[str] = frozenset(),
     script: Iterable[ProposeAction] = (),
+    budget_gate: BudgetGateImpl | None = None,
+    budget: LoopBudget = _DEFAULT_TEST_BUDGET,
 ) -> tuple[ReasoningLoopOrchestrator, LoopId]:
     state_repo = InMemoryLoopStateRepository()
     step_repo = InMemoryLoopStepRepository()
@@ -143,6 +148,7 @@ def _bootstrap(
         feedback=feedback,
         audit=audit,
         clock=lambda: _T0,
+        budget_gate=budget_gate,
     )
     lid = LoopId(value="abcd1234")
     state_repo.save(
@@ -151,7 +157,7 @@ def _bootstrap(
             assessment_id="asmt-1",
             phase=LoopPhase.INITIALIZING,
             policy_snapshot="sha256:" + "0" * 64,
-            budget=LoopBudget.default(),
+            budget=budget,
             context_hash="0" * 64,
             catalog_required_remaining=catalog_required_remaining,
             catalog_required_executed=frozenset(),
@@ -237,3 +243,59 @@ def test_run_step_floor_green_stays_running_spec_61() -> None:
     result = orch.run_step(loop_id=lid)
     assert result.phase is LoopPhase.RUNNING
     assert result.step_recorded is not None
+
+
+def test_run_step_budget_gate_denies_before_propose() -> None:
+    """v0.7.3 Task 4: a budget gate wired into the orchestrator is checked
+    BEFORE the proposer runs. An already-exhausted budget denies the step, the
+    step is recorded as a budget rejection (not executed), and the loop reaches
+    BUDGET_EXHAUSTED without issuing new work."""
+    # The loop's budget is already spent (steps_used == max_steps == 50) but the
+    # phase is still RUNNING, so run_step proceeds into the budget pre-guard.
+    exhausted_budget = LoopBudget.default().consume(steps=50)
+    orch, lid = _bootstrap(
+        script=[_scripted_action()],
+        budget=exhausted_budget,
+        budget_gate=BudgetGateImpl(budget_now=lambda: exhausted_budget),
+    )
+    orch.create_loop(_plan(lid), catalog_required_remaining=frozenset())
+
+    # Re-save state with the exhausted budget and RUNNING phase (create_loop
+    # resets to INITIALIZING; we override budget directly on the repo).
+    state = orch.state_repo.get(lid)
+    assert state is not None
+    orch.state_repo.save(
+        replace(state, phase=LoopPhase.RUNNING, budget=exhausted_budget)
+    )
+
+    result = orch.run_step(loop_id=lid)
+    assert result.phase is LoopPhase.BUDGET_EXHAUSTED
+    assert result.step_recorded is None
+
+    # The proposer must never have been asked: budget is a pre-propose guard,
+    # and (consistent with the other gate-rejection paths) no LoopStep is
+    # persisted — a ``loop.gate_rejected`` audit event carries the semantics.
+    assert orch.step_repo.list_for_loop(lid) == []
+    # The loop state was advanced (budget step consumed) to the terminal phase.
+    assert orch.state_repo.get(lid).phase is LoopPhase.BUDGET_EXHAUSTED
+    # A gate rejection was audited with the budget deny code.
+    audit_actions = [e.action for e in orch._audit._repo.list_events()]
+    assert LOOP_GATE_REJECTED in audit_actions
+    gate_payloads = [
+        e.payload
+        for e in orch._audit._repo.list_events()
+        if e.action == LOOP_GATE_REJECTED
+    ]
+    assert any(p.get("gate") == "budget" for p in gate_payloads)
+    assert any(p.get("deny_code") == "BUDGET_EXHAUSTED" for p in gate_payloads)
+
+
+def test_run_step_without_budget_gate_proceeds_normally() -> None:
+    """v0.7.3 Task 4: no budget gate wired => the pre-propose guard is off and
+    the loop steps exactly as before (backward compatible)."""
+    orch, lid = _bootstrap(script=[_scripted_action()])
+    orch.create_loop(_plan(lid), catalog_required_remaining=frozenset())
+    result = orch.run_step(loop_id=lid)
+    assert result.phase is LoopPhase.RUNNING
+    assert result.step_recorded is not None
+    assert orch.step_repo.list_for_loop(lid)[0].propose_tokens_used == 100

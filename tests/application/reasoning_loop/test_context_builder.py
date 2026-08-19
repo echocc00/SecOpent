@@ -12,6 +12,7 @@ from secopent.application.reasoning_loop.context_builder import (
 from secopent.application.reasoning_loop.in_memory_state import (
     InMemoryLoopStateRepository,
 )
+from secopent.application.reasoning_loop.summarizer import ObservationSummarizer
 from secopent.domain.catalog.models import AssetType, RequiredTestClass, TestCatalog
 from secopent.domain.policy.models import RiskClass
 from secopent.domain.reasoning_loop.models import (
@@ -19,6 +20,7 @@ from secopent.domain.reasoning_loop.models import (
     LoopId,
     LoopPhase,
     LoopState,
+    ObservationSummary,
 )
 
 _T0 = datetime(2026, 1, 1, tzinfo=UTC)
@@ -97,3 +99,78 @@ def test_context_builder_reflects_catalog_remaining_classes() -> None:
     assert ctx.catalog_floor_progress == pytest.approx(0.5)
     # builder reads catalog_still_required from state only
     assert ctx.catalog_already_executed == frozenset()
+
+
+def test_context_builder_with_summarizer_compresses_observations() -> None:
+    """v0.7.3 Task 4: when a summarizer is injected, the raw observation window
+    is compressed via ObservationSummarizer.summarize() and the compressed
+    token count feeds LoopContext.observation_token_count."""
+    catalog = TestCatalog(version="t-1", mappings={})
+    state_repo = InMemoryLoopStateRepository()
+    observations = tuple(
+        ObservationSummary(
+            observation_id=f"obs-{i}",
+            tool_or_case_id=f"tool-{i}",
+            target_digest=f"digest-{i}",
+            key_signals=("s1", "s2", "s3"),
+            confidence=0.7,
+            has_full_text=True,
+            full_text_ref=f"ref-{i}",
+            token_estimate=200,
+        )
+        for i in range(8)
+    )
+    builder = DefaultLoopContextBuilder(
+        catalog=catalog,
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: observations,
+        summarizer=ObservationSummarizer(),
+    )
+    lid = LoopId(value="abcd1234")
+    state_repo.save(_state(lid, frozenset()))
+    ctx = builder.build(lid)
+
+    # Compression applied: exactly the summarized window is surfaced.
+    assert len(ctx.recent_observations) == len(observations)  # none dropped
+    # First five are full tier (token_estimate preserved), rest compressed down.
+    assert ctx.recent_observations[0].token_estimate == 200
+    assert ctx.recent_observations[5].has_full_text is False
+    # The token count reflects the compressed window, not the raw sum (8*200).
+    assert ctx.observation_token_count < sum(o.token_estimate for o in observations)
+    assert ctx.observation_token_count == sum(
+        o.token_estimate for o in ctx.recent_observations
+    )
+
+
+def test_context_builder_without_summarizer_passthrough_uncompressed() -> None:
+    """v0.7.3 Task 4: default (no summarizer) keeps the raw observations and the
+    raw sum token count — existing behavior untouched."""
+    catalog = TestCatalog(version="t-1", mappings={})
+    state_repo = InMemoryLoopStateRepository()
+    observations = tuple(
+        ObservationSummary(
+            observation_id=f"obs-{i}",
+            tool_or_case_id=f"tool-{i}",
+            target_digest=f"digest-{i}",
+            key_signals=("s1", "s2", "s3"),
+            confidence=0.7,
+            has_full_text=True,
+            full_text_ref=f"ref-{i}",
+            token_estimate=200,
+        )
+        for i in range(8)
+    )
+    builder = DefaultLoopContextBuilder(
+        catalog=catalog,
+        state_repo=state_repo,
+        asset_subgraph_provider=lambda aid: (),
+        observation_provider=lambda lid: observations,
+    )
+    lid = LoopId(value="abcd1234")
+    state_repo.save(_state(lid, frozenset()))
+    ctx = builder.build(lid)
+
+    assert ctx.recent_observations == observations
+    assert ctx.recent_observations[5].has_full_text is True
+    assert ctx.observation_token_count == 8 * 200

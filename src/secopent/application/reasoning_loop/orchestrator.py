@@ -6,7 +6,8 @@ tool/container call); v0.7.2 wires this to JobService + SubprocessExecutor.
 The orchestrator composes existing services via injected ports:
 - build a ``LoopContext`` for the loop (``LoopContextBuilder``)
 - ask the ``LoopActionProposer`` for the next action
-- run the three gates (Schema / Policy / Permit)
+- run the pre-propose Budget guard (optional, v0.7.3) plus the three gates
+  (Schema / Policy / Permit)
 - MOCK-execute the step (record only)
 - apply ``LoopFeedback`` to produce the next ``LoopState``
 - call ``evaluate_termination`` and persist the new state
@@ -53,6 +54,7 @@ from .audit import (
     LOOP_STEP_PROPOSED,
     LOOP_TERMINATED,
 )
+from .budget_gate import BudgetGateImpl
 from .feedback import LoopFeedback
 
 
@@ -85,6 +87,24 @@ _NON_AUTO_STEP_PHASES = frozenset({
 _MOCK_STEP_TOKENS = 100
 
 
+def _budget_rejected_action() -> ProposeAction:
+    """Synthetic proposal recorded when the budget pre-guard denies a step.
+
+    The budget gate runs BEFORE the proposer, so there is no real proposal to
+    record. To keep the step-rejection audit path uniform with the other gates
+    (a placeholder LoopStep + ``loop.gate_rejected`` event), we synthesize an
+    inert ABORT_STEP action as the rejected step's proposed_action. The budget
+    gate's deny_code/reason still carry the real reason (BUDGET_EXHAUSTED /
+    BUDGET_STEP_TOKEN_LIMIT).
+    """
+    return ProposeAction(
+        action_type=LoopActionType.ABORT_STEP,
+        payload={},
+        rationale="(budget gate rejected before proposal)" + " " * 50,
+        confidence=0.0,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StepResult:
     """Public result of one orchestrator step."""
@@ -112,6 +132,7 @@ class ReasoningLoopOrchestrator:
         feedback: LoopFeedback,
         audit: AuditRecorder,
         clock: Callable[[], datetime] | None = None,
+        budget_gate: BudgetGateImpl | None = None,
     ) -> None:
         self.state_repo = state_repo
         self.step_repo = step_repo
@@ -123,6 +144,13 @@ class ReasoningLoopOrchestrator:
         self.feedback = feedback
         self._audit = audit
         self._clock = clock or (lambda: datetime.now(UTC))
+        # ``budget_gate`` (v0.7.3 Task 4) is an optional HARD, pre-propose
+        # guard: when wired, run_step refuses to issue a propose round on a
+        # loop whose budget is already spent/exhausted. It defaults to None so
+        # loops that don't surface a budget gate (existing tests/callers) step
+        # exactly as before. The gate is checked with the per-step token
+        # projection so an over-limit step denies BEFORE the proposer runs.
+        self._budget_gate = budget_gate
 
     # ------------------------------------------------------------------ create
     def create_loop(
@@ -179,12 +207,30 @@ class ReasoningLoopOrchestrator:
         # 1. Build context.
         context = self.context_builder.build(loop_id)
 
-        # 2. Propose.
+        # 2. Budget gate — HARD pre-propose guard (v0.7.3 Task 4). Checked
+        #    BEFORE the proposer runs: if the loop's budget is already spent
+        #    (or this step would push it over), refuse to issue a propose round.
+        #    Denied => step is recorded as a budget rejection (not executed).
+        if self._budget_gate is not None:
+            step_gate = BudgetGateImpl(budget_now=lambda: state.budget)
+            bvd = step_gate.check(
+                action={"loop_id": loop_id.value},
+                proposed_tokens=_MOCK_STEP_TOKENS,
+            )
+            if not bvd.passed:
+                return self._record_gate_rejected(
+                    loop_id, state, context, proposed=_budget_rejected_action(),
+                    gate_name="budget",
+                    deny_code=bvd.deny_code or "BUDGET_DENIED",
+                    reason=bvd.reason,
+                )
+
+        # 3. Propose.
         proposed = self.proposer.propose(context)
         if proposed is None:
             return self._record_backend_unavailable(loop_id, state, context)
 
-        # 3. Schema gate.
+        # 4. Schema gate.
         sv = self.schema_gate.check(proposed, context)
         if not sv.passed:
             return self._record_gate_rejected(
@@ -193,7 +239,7 @@ class ReasoningLoopOrchestrator:
                 reason=sv.reason,
             )
 
-        # 4. Policy gate.
+        # 5. Policy gate.
         pv = self.policy_gate.check(proposed, context)
         if not pv.passed:
             return self._record_gate_rejected(
@@ -202,7 +248,7 @@ class ReasoningLoopOrchestrator:
                 reason=pv.reason,
             )
 
-        # 5. Permit gate.
+        # 6. Permit gate.
         permit_v = self.permit_gate.check(proposed, context)
         if not permit_v.passed:
             return self._record_gate_rejected(
@@ -211,7 +257,7 @@ class ReasoningLoopOrchestrator:
                 reason=permit_v.reason,
             )
 
-        # 6. MOCK execute (v0.7.0 — no real tool/container call).
+        # 7. MOCK execute (v0.7.0 — no real tool/container call).
         step = self._mock_execute(loop_id, context, proposed, permit_v.permit_id or "")
         self.step_repo.add(step)
         self._audit.record(
@@ -239,7 +285,7 @@ class ReasoningLoopOrchestrator:
             },
         )
 
-        # 7. Feedback -> next state.
+        # 8. Feedback -> next state.
         new_state = self.feedback.apply(
             current=state,
             step=step,
