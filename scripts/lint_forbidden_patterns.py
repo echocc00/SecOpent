@@ -64,6 +64,11 @@ LINE_RULES: tuple[LineRule, ...] = (
             "infrastructure/audit/database_recorder.py",  # session-per-call recorder
             "infrastructure/repositories/sqlalchemy_audit_chain.py",
             "interfaces/api/main.py",  # SSE snapshot polls (short-lived)
+            "infrastructure/reasoning_loop/repo_factory.py",  # composition-root
+                # factory: opens ONE session at startup wiring, NOT per hot-path
+                # op; the SQL loop repos are injected once at composition (same
+                # category as main.py's startup SSE setup), not spun up in a
+                # per-request/per-operation background hot path (v4 class).
         }),
         message=".open_session() outside sanctioned modules (v4 hot-path connection class)",
     ),
