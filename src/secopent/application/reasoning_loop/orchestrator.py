@@ -215,6 +215,8 @@ class ReasoningLoopOrchestrator:
             step_gate = BudgetGateImpl(budget_now=lambda: state.budget)
             bvd = step_gate.check(
                 action={"loop_id": loop_id.value},
+                # TODO(v0.7.x): replace fixed projection with real proposer
+                # token estimate when propose() reports actual tokens.
                 proposed_tokens=_MOCK_STEP_TOKENS,
             )
             if not bvd.passed:
