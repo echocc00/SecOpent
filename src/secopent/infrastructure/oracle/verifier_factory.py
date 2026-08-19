@@ -25,6 +25,7 @@ OracleVerifierFactory Protocol.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from ...application.canary import CANARY_PLACEHOLDER
@@ -32,6 +33,7 @@ from ...application.oracle import OracleVerifier
 from ...domain.verification.models import VulnType
 from ...domain.verification.registry import VerificationMethodRegistry
 from ..adapters.real_scan import RealScanRunner
+from .diff_semantic_runner import DiffSemanticRunner, HttpDiffSemanticRunner
 from .interactsh import InteractshClient
 from .rescan_verifier import OOB_PLACEHOLDER, RescanVerifier
 
@@ -47,17 +49,40 @@ class RescanVerifierFactory:
         *,
         interactsh: InteractshClient | None = None,
         method_registry: VerificationMethodRegistry | None = None,
+        diff_runner_factory: Callable[[], DiffSemanticRunner] | None = None,
     ) -> None:
         self._scan_runner = scan_runner
         self._template_host_dir = template_host_dir
         self._canary = canary
         self._interactsh = interactsh
         self._method_registry = method_registry
+        # v0.7.6 DIFF_SEMANTIC: produces the transport for logic-level methods.
+        self._diff_runner_factory = diff_runner_factory or (
+            lambda: HttpDiffSemanticRunner()
+        )
 
     def for_finding(self, finding: Any, vuln_type: VulnType | None = None) -> OracleVerifier:
         asset = finding.asset
         sep = "&" if "?" in asset else "?"
         url = f"{asset}{sep}cb={OOB_PLACEHOLDER}"
+        # v0.7.6 DIFF_SEMANTIC dispatch: logic-level methods (diff_semantic) are
+        # confirmed by differential semantics, never by OOB/echo. This branch
+        # fires ONLY for diff_semantic methods and returns early; SSRF/XXE (OOB,
+        # oob_window_seconds>0) and XSS (echo_enabled) have diff_semantic=False
+        # so they fall straight through to the byte-for-byte-unchanged OOB/echo
+        # RescanVerifier path below.
+        if self._method_registry is not None:
+            effective = vuln_type if vuln_type is not None else getattr(
+                finding, "vuln_type", None
+            )
+            if effective is not None:
+                method = self._method_registry.method_for(effective)
+                if method is not None and method.diff_semantic:
+                    from .diff_semantic_verifier import DiffSemanticVerifier
+
+                    return DiffSemanticVerifier(
+                        runner=self._diff_runner_factory()
+                    )
         # Echo gate (3.1/E1): the token must reach the target to be echoed,
         # so it rides in the probe URL itself. Echo-enabled methods have
         # oob_window_seconds == 0, so the OOB branch never fires for them and

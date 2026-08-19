@@ -74,12 +74,16 @@ def default_registry() -> VerificationMethodRegistry:
                 oob_window_seconds=oob_window,
             ),
             VerificationMethod(vuln_type=VulnType.FILE_READ, default_n=3),
-            VerificationMethod(vuln_type=VulnType.AUTH_BYPASS, default_n=3),
+            VerificationMethod(vuln_type=VulnType.AUTH_BYPASS, default_n=3, diff_semantic=True),
             VerificationMethod(vuln_type=VulnType.PATH_TRAVERSAL, default_n=3),
-            VerificationMethod(vuln_type=VulnType.IDOR, default_n=3),
+            VerificationMethod(vuln_type=VulnType.IDOR, default_n=3, diff_semantic=True),
             VerificationMethod(vuln_type=VulnType.PARAM_TAMPERING, default_n=3),
-            VerificationMethod(vuln_type=VulnType.MFA_BYPASS, default_n=3),
+            VerificationMethod(vuln_type=VulnType.MFA_BYPASS, default_n=3, diff_semantic=True),
             VerificationMethod(vuln_type=VulnType.WEAK_CREDENTIALS, default_n=3),
-            VerificationMethod(vuln_type=VulnType.PRIVILEGE_ESCALATION, default_n=3),
+            VerificationMethod(
+                vuln_type=VulnType.PRIVILEGE_ESCALATION,
+                default_n=3,
+                diff_semantic=True,
+            ),
         ]
     )

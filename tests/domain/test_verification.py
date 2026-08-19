@@ -205,3 +205,44 @@ def test_echo_enabled_methods_are_not_oob() -> None:
     for vuln_type in registry.vuln_types():
         method = registry.require_method(vuln_type)
         assert not (method.echo_enabled and method.oob_window_seconds > 0)
+
+
+# --- DIFF_SEMANTIC curated classes (v0.7.6, Task 5) ------------------------
+
+
+def test_default_registry_marks_logic_classes_diff_semantic() -> None:
+    """The four logic vuln classes are confirmed by differential semantics."""
+    registry = default_registry()
+    for vuln_type in (
+        VulnType.IDOR,
+        VulnType.AUTH_BYPASS,
+        VulnType.MFA_BYPASS,
+        VulnType.PRIVILEGE_ESCALATION,
+    ):
+        method = registry.require_method(vuln_type)
+        assert method.diff_semantic is True, vuln_type
+
+
+def test_sqli_is_not_diff_semantic() -> None:
+    assert default_registry().method_for(VulnType.SQLI).diff_semantic is False
+
+
+def test_xss_is_echo_not_diff_semantic() -> None:
+    """Echo (XSS) and diff_semantic are mutually exclusive (models rejects both)."""
+    xss = default_registry().method_for(VulnType.XSS)
+    assert xss.echo_enabled is True
+    assert xss.diff_semantic is False
+
+
+def test_diff_semantic_classes_are_not_echo_nor_oob() -> None:
+    """Diff-sematic methods must not also be echo or OOB-based."""
+    registry = default_registry()
+    for vuln_type in (
+        VulnType.IDOR,
+        VulnType.AUTH_BYPASS,
+        VulnType.MFA_BYPASS,
+        VulnType.PRIVILEGE_ESCALATION,
+    ):
+        method = registry.require_method(vuln_type)
+        assert method.echo_enabled is False, vuln_type
+        assert method.oob_window_seconds == 0, vuln_type
