@@ -94,6 +94,11 @@ class VerificationMethod:
     # echo canary is embedded, a finding confirms ONLY if the token echoes
     # back - there is no legacy fallback for echo-enabled methods.
     echo_enabled: bool = False
+    # v0.7.6 DIFF_SEMANTIC: logic-level vulns (IDOR / auth bypass / priv-esc)
+    # are confirmed by deterministic structure-diff + state readback between
+    # two requests, never by an echo. Mutually exclusive with echo_enabled: a
+    # method cannot confirm by both reflection-echo and differential semantics.
+    diff_semantic: bool = False
 
     def __post_init__(self) -> None:
         if self.default_n < 1:
@@ -106,6 +111,10 @@ class VerificationMethod:
             raise DomainValidationError(
                 "VerificationMethod.oob_window_seconds must be >= 0"
             )
+        if self.echo_enabled and self.diff_semantic:
+            raise DomainValidationError(
+                "VerificationMethod cannot be both echo_enabled and diff_semantic"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +126,11 @@ class CandidateFinding:
     vuln_type: VulnType
     target: str
     status: VerificationStatus = VerificationStatus.PENDING
+    # v0.7.6 DIFF_SEMANTIC: optional differential semantics spec carried by a
+    # logic-level candidate. Typed as object to avoid a hard coupling from the
+    # verification model onto the diff payload; the diff verifier performs the
+    # isinstance check when it reads the spec (Task 4). Kept opaque here.
+    diff: object | None = None
 
     def __post_init__(self) -> None:
         if not self.id:
