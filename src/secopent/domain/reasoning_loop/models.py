@@ -365,6 +365,11 @@ class LoopState:
     consecutive_policy_rejected: int
     started_at: datetime
     last_step_at: datetime | None
+    # v0.7.7: human pause/resume tracking (spec §6.3). All defaulted so existing
+    # constructions that stop at `last_step_at` keep compiling.
+    pause_attempts: int = 0
+    paused_at: datetime | None = None
+    resumed_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +412,8 @@ class LoopTerminationPolicy:
     # budget / no-signal / policy-rejection / emergency only. Floor progress is
     # surfaced to the LLM via LoopContext.catalog_* as informational input.
     require_min_confirmed: int
+    # v0.7.7: max human pause cycles before forced termination (spec §6.3).
+    max_pauses: int
 
     @classmethod
     def default(cls) -> LoopTerminationPolicy:
@@ -417,7 +424,11 @@ class LoopTerminationPolicy:
             no_signal_streak_to_converge=5,
             policy_rejected_streak_to_stop=3,
             require_min_confirmed=0,
+            max_pauses=3,
         )
+
+    def pause_budget_exceeded(self, attempts: int) -> bool:
+        return attempts >= self.max_pauses
 
 
 @dataclass(frozen=True, slots=True)

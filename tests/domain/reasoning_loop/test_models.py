@@ -380,3 +380,64 @@ def test_loop_plan_carries_termination_policy_snapshot() -> None:
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     assert plan.termination_policy.max_steps == 50
+
+
+class TestLoopStatePauseFields:
+    """v0.7.7: pause/resume tracking fields on LoopState."""
+
+    def test_defaults(self) -> None:
+        # Backward-compatible defaults: existing constructions (that stop at
+        # last_step_at) must still compile and get sensible pause defaults.
+        s = LoopState(
+            loop_id=LoopId(value="abcd1234"),
+            assessment_id="asmt-1",
+            phase=LoopPhase.RUNNING,
+            policy_snapshot="sha256:" + "0" * 64,
+            budget=LoopBudget.default(),
+            context_hash="0" * 64,
+            catalog_required_remaining=frozenset(),
+            catalog_required_executed=frozenset(),
+            consecutive_no_signal=0,
+            consecutive_policy_rejected=0,
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+            last_step_at=None,
+        )
+        assert s.pause_attempts == 0
+        assert s.paused_at is None
+        assert s.resumed_at is None
+
+    def test_with_pause(self) -> None:
+        paused = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
+        resumed = datetime(2026, 1, 1, 10, 30, tzinfo=UTC)
+        s = LoopState(
+            loop_id=LoopId(value="abcd1234"),
+            assessment_id="asmt-1",
+            phase=LoopPhase.PAUSED,
+            policy_snapshot="sha256:" + "0" * 64,
+            budget=LoopBudget.default(),
+            context_hash="0" * 64,
+            catalog_required_remaining=frozenset(),
+            catalog_required_executed=frozenset(),
+            consecutive_no_signal=0,
+            consecutive_policy_rejected=0,
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+            last_step_at=None,
+            pause_attempts=2,
+            paused_at=paused,
+            resumed_at=resumed,
+        )
+        assert s.pause_attempts == 2
+        assert s.paused_at == paused
+        assert s.resumed_at == resumed
+
+
+class TestLoopTerminationPolicyMaxPauses:
+    """v0.7.7: max-pauses termination policy."""
+
+    def test_default_three(self) -> None:
+        assert LoopTerminationPolicy.default().max_pauses == 3
+
+    def test_pause_budget_exceeded(self) -> None:
+        policy = LoopTerminationPolicy.default()
+        assert policy.pause_budget_exceeded(3) is True
+        assert policy.pause_budget_exceeded(2) is False
