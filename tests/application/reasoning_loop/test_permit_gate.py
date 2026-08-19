@@ -8,8 +8,17 @@ injected here). The application layer adds no crypto.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
+import pytest
+
 from secopent.application.reasoning_loop.permit_gate import PermitGateImpl
-from secopent.domain.permits.models import DEFAULT_PERMIT_TTL_SECONDS
+from secopent.domain.common.canonical import utc_now
+from secopent.domain.permits.models import (
+    DEFAULT_PERMIT_TTL_SECONDS,
+    ExecutionPermit,
+    PermitExpired,
+)
 from secopent.domain.reasoning_loop.models import (
     LoopActionType,
     LoopBudgetSnapshot,
@@ -74,3 +83,36 @@ def test_permit_gate_tampered_action_fails_verification() -> None:
     verdict = gate.check(_action(), _ctx())
     tampered = _action().model_copy(update={"confidence": 0.99})
     assert gate.verify(verdict.permit_id, tampered, _ctx()) is False
+
+
+def test_permit_gate_expired_permit_rejected() -> None:
+    """A permit past its expires_at is rejected (the TTL expiry branch that
+    ``PermitGateImpl.verify`` delegates to ``PermitVerifier.verify``).
+
+    ``expires_at`` is part of ``signing_payload()``, so a tampered expiry
+    would invalidate the signature; instead we sign a permit that had a
+    15-min TTL but lapsed before verification and assert the verifier raises
+    ``PermitExpired``.
+    """
+    signer = PermitSigner()
+    verifier = PermitVerifier(signer.public_key_bytes())
+    now = utc_now()
+    # Issue a permit that already lapsed: issued 20 min ago, 15-min TTL (expires
+    # 5 min ago). satisfies the domain invariant expires_at > issued_at, but
+    # is past its expiry by the time we verify.
+    issued_at = now - timedelta(minutes=20)
+    expired = ExecutionPermit(
+        job_id="loop-test-live",
+        worker_id="reasoning-loop",
+        scope_digest="sha256:" + "0" * 64,
+        plan_digest="sha256:" + "1" * 64,
+        capabilities=("nuclei",),
+        budget=0.0,
+        issued_at=issued_at,
+        expires_at=issued_at + timedelta(seconds=900),  # 5 min ago
+        nonce="nonce-expired-1",
+    )
+    expired = signer.issue(expired)
+    with pytest.raises(PermitExpired):
+        verifier.verify(expired, now=now, used_nonces=frozenset())
+    assert expired.is_expired(now) is True
