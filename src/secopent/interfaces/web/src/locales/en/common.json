@@ -5,6 +5,7 @@
     "approvals": "Approvals",
     "findings": "Findings",
     "caseStudio": "Case Studio",
+    "loops": "Loops",
     "updates": "Updates"
   },
   "header": {
@@ -88,6 +89,9 @@
     },
     "caseStudio": {
       "title": "Case Studio"
+    },
+    "loops": {
+      "title": "Reasoning Loop"
     },
     "updates": {
       "title": "Updates"

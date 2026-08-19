@@ -260,7 +260,7 @@ export const useValidateCase = () => {
   });
 };
 
-const caseActorAction = (action: "review" | "sign" | "publish") => {
+const useCaseActorAction = (action: "review" | "sign" | "publish") => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ case_id, body }: { case_id: string; body: Schemas["CaseAction"] }) =>
@@ -272,9 +272,9 @@ const caseActorAction = (action: "review" | "sign" | "publish") => {
   });
 };
 
-export const useReviewCase = () => caseActorAction("review");
-export const useSignCase = () => caseActorAction("sign");
-export const usePublishCase = () => caseActorAction("publish");
+export const useReviewCase = () => useCaseActorAction("review");
+export const useSignCase = () => useCaseActorAction("sign");
+export const usePublishCase = () => useCaseActorAction("publish");
 
 // --- AppModels (CaseStudio) ---
 export const useAppModels = () =>
@@ -377,5 +377,52 @@ export const useCreateSigningKey = () => {
   return useMutation({
     mutationFn: (body: Schemas["CreateSigningKey"]) => api.POST("/signing-keys", { body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["signing-keys"] }),
+  });
+};
+
+// --- Reasoning Loops (v0.7.8 Task 7) ---
+// GET /loops/{id} returns a read-only LoopOut status snapshot (phase, executed
+// step count, remaining budget, context hash). Per-step history is NOT exposed
+// over REST today (only step_count is), so the page renders the status fields
+// the API serves.
+export const useCreateLoop = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Schemas["LoopCreateBody"]) => api.POST("/loops", { body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["loops"] }),
+  });
+};
+
+export const useLoopStatus = (loopId: string) =>
+  useQuery({
+    queryKey: ["loops", loopId],
+    enabled: loopId.length > 0,
+    queryFn: () => api.GET("/loops/{loop_id}", { params: { path: { loop_id: loopId } } }),
+  });
+
+export const useStopLoop = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ loop_id, body }: { loop_id: string; body: Schemas["LoopStopBody"] }) =>
+      api.POST("/loops/{loop_id}/stop", { params: { path: { loop_id } }, body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["loops"] }),
+  });
+};
+
+export const usePauseLoop = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ loop_id, body }: { loop_id: string; body: Schemas["LoopPauseRequest"] }) =>
+      api.POST("/loops/{loop_id}/pause", { params: { path: { loop_id } }, body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["loops"] }),
+  });
+};
+
+export const useResumeLoop = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ loop_id, body }: { loop_id: string; body: Schemas["LoopResumeRequest"] }) =>
+      api.POST("/loops/{loop_id}/resume", { params: { path: { loop_id } }, body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["loops"] }),
   });
 };

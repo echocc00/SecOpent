@@ -30,6 +30,15 @@ const STYLES: Record<string, string> = {
   refuted: "bg-red-500 text-white hover:bg-red-500",
   policy_denied: "bg-red-700 text-white hover:bg-red-700",
   cancelled: "bg-red-400 text-white hover:bg-red-400",
+  // reasoning-loop phases
+  initializing: "bg-sky-400 text-white hover:bg-sky-400",
+  converged: "bg-green-600 text-white hover:bg-green-600",
+  catalog_floor_done: "bg-teal-600 text-white hover:bg-teal-600",
+  paused: "bg-amber-500 text-white hover:bg-amber-500",
+  resumed: "bg-blue-400 text-white hover:bg-blue-400",
+  budget_exhausted: "bg-orange-500 text-black hover:bg-orange-500",
+  policy_blocked: "bg-red-700 text-white hover:bg-red-700",
+  emergency_stopped: "bg-red-600 text-white hover:bg-red-600",
 };
 
 export function StatusBadge({ status }: { status: string }) {

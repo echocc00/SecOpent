@@ -14,6 +14,10 @@ const CaseStudio = lazy(() =>
   import("@/pages/CaseStudio").then((m) => ({ default: m.CaseStudio })),
 );
 
+const LoopView = lazy(() =>
+  import("@/pages/LoopView").then((m) => ({ default: m.LoopView })),
+);
+
 function CaseStudioRoute() {
   return (
     <Suspense
@@ -24,6 +28,20 @@ function CaseStudioRoute() {
       }
     >
       <CaseStudio />
+    </Suspense>
+  );
+}
+
+function LoopViewRoute() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          Loading Loop…
+        </div>
+      }
+    >
+      <LoopView />
     </Suspense>
   );
 }
@@ -39,6 +57,8 @@ export const router = createBrowserRouter([
       { path: "approvals", element: <ApprovalCenter /> },
       { path: "findings", element: <Findings /> },
       { path: "case-studio", element: <CaseStudioRoute /> },
+      { path: "loops", element: <LoopViewRoute /> },
+      { path: "loops/:id", element: <LoopViewRoute /> },
       { path: "updates", element: <Updates /> },
     ],
   },

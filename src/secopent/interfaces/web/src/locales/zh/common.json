@@ -5,6 +5,7 @@
     "approvals": "审批中心",
     "findings": "发现",
     "caseStudio": "案例工坊",
+    "loops": "推理循环",
     "updates": "更新"
   },
   "header": {
@@ -88,6 +89,9 @@
     },
     "caseStudio": {
       "title": "案例工坊"
+    },
+    "loops": {
+      "title": "推理循环"
     },
     "updates": {
       "title": "更新"

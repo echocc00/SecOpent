@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   PlusCircle,
   RefreshCw,
+  Repeat,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ const NAV_ITEMS = [
   { to: "/approvals", key: "approvals", icon: CheckCircle2, end: false },
   { to: "/findings", key: "findings", icon: Bug, end: false },
   { to: "/case-studio", key: "caseStudio", icon: FlaskConical, end: false },
+  { to: "/loops", key: "loops", icon: Repeat, end: false },
   { to: "/updates", key: "updates", icon: RefreshCw, end: false },
 ];
 
