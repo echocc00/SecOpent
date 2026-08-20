@@ -18,6 +18,8 @@ import pytest
 _TARGETS = {
     "juice_shop": "http://localhost:3000",
     "httpbin": "http://localhost:8080",
+    "cr_api": "http://localhost:8000",
+    "vulhub": "http://localhost:8081",
 }
 
 
