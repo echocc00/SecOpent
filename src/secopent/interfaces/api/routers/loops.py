@@ -16,11 +16,14 @@ the composed services through ``request.app.state`` (mirroring how
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session
 
 from ....application.audit_chain import AuditChain
 from ....application.ports.loop_approval import (
@@ -47,6 +50,11 @@ from ....domain.reasoning_loop.models import (
     LoopPlan,
     LoopState,
     LoopTerminationPolicy,
+)
+from ....infrastructure.db.session import Database
+from ....infrastructure.reasoning_loop.sqlalchemy_state import (
+    SqlAlchemyLoopStateRepository,
+    SqlAlchemyLoopStepRepository,
 )
 from ..schemas import (
     LoopCreateBody,
@@ -96,14 +104,29 @@ def _control(request: Request) -> PauseControlService:
 
 def _loops(
     request: Request,
+    *,
+    session: Session | None = None,
 ) -> tuple[LoopStateRepository, LoopStepRepository, AuditChain]:
     """The loop state/step repos + signed audit chain, or a loud 503.
 
-    v0.7.8 Task 4 wires shared in-memory singletons onto app.state
-    (``loop_state_repo`` / ``loop_step_repo`` / ``audit_chain``) so the REST
-    control plane and the MCP loop tools observe and write the SAME loops. An
+    Write handlers pass a UoW ``session`` so a fresh ``SqlAlchemyLoop*Repository``
+    is built on that session — the save then commits with the caller's
+    transaction (v0.7.2 hotfix for issue v10: the pre-bound singleton repo
+    only ``merge``-ed, never committed, so loop rows vanished on session close).
+
+    Read-only handlers omit ``session`` and use the repos wired onto
+    ``app.state`` (in-memory singletons or a pre-bound SQL repo). An
     unconfigured app fails loudly rather than reporting a false status/stop.
     """
+    if session is not None:
+        audit = getattr(request.app.state, "audit_chain", None)
+        if not isinstance(audit, AuditChain):
+            raise HTTPException(status_code=503, detail="audit chain not configured")
+        return (
+            SqlAlchemyLoopStateRepository(session),
+            SqlAlchemyLoopStepRepository(session),
+            audit,
+        )
     state_repo = getattr(request.app.state, "loop_state_repo", None)
     step_repo = getattr(request.app.state, "loop_step_repo", None)
     audit = getattr(request.app.state, "audit_chain", None)
@@ -131,6 +154,32 @@ def _loop_out(state: LoopState, step_count: int) -> dict[str, object]:
         "step_count": step_count,
         "context_hash": state.context_hash,
     }
+
+
+@contextmanager
+def _loop_write_ctx(request: Request) -> Iterator[Session | None]:
+    """Transaction context for a loop write (v0.7.2 hotfix for issue v10).
+
+    When the wired loop state repo is SQL-backed (production), yields a UoW
+    session so the save + signed audit record commit atomically (the
+    pre-bound SQL repo only merge-ed, never committed). When the wired repo
+    is InMemory (dev/test wiring), yields ``None`` so ``_loops`` falls back
+    to the pre-bound in-memory repos — in-memory saves need no commit.
+    """
+    from ....application.reasoning_loop.in_memory_state import (
+        InMemoryLoopStateRepository,
+    )
+
+    state_repo = getattr(request.app.state, "loop_state_repo", None)
+    db = getattr(request.app.state, "db", None)
+    if (
+        isinstance(db, Database)
+        and not isinstance(state_repo, InMemoryLoopStateRepository)
+    ):
+        with db.unit_of_work() as uow:
+            yield uow.session
+    else:
+        yield None
 
 
 @router.get("/{loop_id}", response_model=LoopOut)
@@ -162,32 +211,39 @@ def stop_loop(loop_id: str, payload: LoopStopBody, request: Request) -> dict[str
             status_code=403,
             detail="loop stop is human-only (agents cannot stop a loop)",
         )
-    state_repo, _step_repo, audit = _loops(request)
     try:
         lid = LoopId(loop_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    state = state_repo.get(lid)
-    if state is None:
-        raise HTTPException(status_code=404, detail=f"no loop state for {loop_id}")
-    if state.phase is not LoopPhase.EMERGENCY_STOPPED:
-        now = utc_now()
-        stopped = replace(state, phase=LoopPhase.EMERGENCY_STOPPED, last_step_at=now)
-        state_repo.save(stopped)
-        audit.record(
-            actor=payload.actor,
-            action=LOOP_TERMINATED,
-            resource_type=LOOP_RESOURCE_TYPE,
-            resource_id=loop_id,
-            payload={
-                "final_phase": LoopPhase.EMERGENCY_STOPPED.value,
-                "reason": "emergency_stop",
-                "human_reason": payload.reason or "stopped via REST /loops/{id}/stop",
-                "from_phase": state.phase.value,
-            },
-        )
-        state = stopped
-    return {"loop_id": state.loop_id.value, "phase": state.phase.value}
+    with _loop_write_ctx(request) as session:
+        state_repo, _step_repo, audit = _loops(request, session=session)
+        state = state_repo.get(lid)
+        if state is None:
+            raise HTTPException(
+                status_code=404, detail=f"no loop state for {loop_id}",
+            )
+        if state.phase is not LoopPhase.EMERGENCY_STOPPED:
+            now = utc_now()
+            stopped = replace(
+                state, phase=LoopPhase.EMERGENCY_STOPPED, last_step_at=now,
+            )
+            state_repo.save(stopped)
+            audit.record(
+                actor=payload.actor,
+                action=LOOP_TERMINATED,
+                resource_type=LOOP_RESOURCE_TYPE,
+                resource_id=loop_id,
+                payload={
+                    "final_phase": LoopPhase.EMERGENCY_STOPPED.value,
+                    "reason": "emergency_stop",
+                    "human_reason": payload.reason
+                    or "stopped via REST /loops/{id}/stop",
+                    "from_phase": state.phase.value,
+                },
+                session=session,
+            )
+            state = stopped
+        return {"loop_id": state.loop_id.value, "phase": state.phase.value}
 
 
 @router.post("", status_code=201)
@@ -203,61 +259,65 @@ def create_loop(payload: LoopCreateBody, request: Request) -> dict[str, str]:
             status_code=403,
             detail="loop creation is human-only (agents cannot create a loop)",
         )
-    state_repo, _step_repo, audit = _loops(request)
-    now = utc_now()
-    loop_id = LoopId.new()
-    base = LoopBudget.default()
-    budget = LoopBudget(
-        max_steps=payload.max_steps if payload.max_steps is not None else base.max_steps,
-        max_total_tokens=(
-            payload.max_total_tokens
-            if payload.max_total_tokens is not None
-            else base.max_total_tokens
-        ),
-        max_wall_seconds=(
-            payload.max_wall_seconds
-            if payload.max_wall_seconds is not None
-            else base.max_wall_seconds
-        ),
-    )
-    plan = LoopPlan(
-        plan_id=f"plan-{uuid.uuid4().hex[:12]}",
-        loop_id=loop_id,
-        assessment_id=payload.assessment_id,
-        termination_policy=LoopTerminationPolicy.default(),
-        policy_snapshot="rest:loop:default",
-        created_at=now,
-    )
-    state = LoopState(
-        loop_id=plan.loop_id,
-        assessment_id=plan.assessment_id,
-        phase=LoopPhase.INITIALIZING,
-        policy_snapshot=plan.policy_snapshot,
-        budget=budget,
-        context_hash="0" * 64,
-        catalog_required_remaining=frozenset(),
-        catalog_required_executed=frozenset(),
-        consecutive_no_signal=0,
-        consecutive_policy_rejected=0,
-        started_at=now,
-        last_step_at=None,
-    )
-    state_repo.save(state)
-    audit.record(
-        actor=payload.actor,
-        action=LOOP_CREATED,
-        resource_type=LOOP_RESOURCE_TYPE,
-        resource_id=loop_id.value,
-        payload={
-            "assessment_id": payload.assessment_id,
-            "budget": {
-                "max_steps": budget.max_steps,
-                "max_total_tokens": budget.max_total_tokens,
-                "max_wall_seconds": budget.max_wall_seconds,
+    with _loop_write_ctx(request) as session:
+        state_repo, _step_repo, audit = _loops(request, session=session)
+        now = utc_now()
+        loop_id = LoopId.new()
+        base = LoopBudget.default()
+        budget = LoopBudget(
+            max_steps=payload.max_steps
+            if payload.max_steps is not None
+            else base.max_steps,
+            max_total_tokens=(
+                payload.max_total_tokens
+                if payload.max_total_tokens is not None
+                else base.max_total_tokens
+            ),
+            max_wall_seconds=(
+                payload.max_wall_seconds
+                if payload.max_wall_seconds is not None
+                else base.max_wall_seconds
+            ),
+        )
+        plan = LoopPlan(
+            plan_id=f"plan-{uuid.uuid4().hex[:12]}",
+            loop_id=loop_id,
+            assessment_id=payload.assessment_id,
+            termination_policy=LoopTerminationPolicy.default(),
+            policy_snapshot="rest:loop:default",
+            created_at=now,
+        )
+        state = LoopState(
+            loop_id=plan.loop_id,
+            assessment_id=plan.assessment_id,
+            phase=LoopPhase.INITIALIZING,
+            policy_snapshot=plan.policy_snapshot,
+            budget=budget,
+            context_hash="0" * 64,
+            catalog_required_remaining=frozenset(),
+            catalog_required_executed=frozenset(),
+            consecutive_no_signal=0,
+            consecutive_policy_rejected=0,
+            started_at=now,
+            last_step_at=None,
+        )
+        state_repo.save(state)
+        audit.record(
+            actor=payload.actor,
+            action=LOOP_CREATED,
+            resource_type=LOOP_RESOURCE_TYPE,
+            resource_id=loop_id.value,
+            payload={
+                "assessment_id": payload.assessment_id,
+                "budget": {
+                    "max_steps": budget.max_steps,
+                    "max_total_tokens": budget.max_total_tokens,
+                    "max_wall_seconds": budget.max_wall_seconds,
+                },
             },
-        },
-    )
-    return {"loop_id": loop_id.value, "phase": state.phase.value}
+            session=session,
+        )
+        return {"loop_id": loop_id.value, "phase": state.phase.value}
 
 
 @router.post("/{loop_id}/pause")
@@ -268,19 +328,21 @@ def pause_loop(loop_id: str, payload: LoopPauseRequest, request: Request) -> dic
     """
     service = _control(request)
     try:
-        state = service.pause(
-            loop_id=LoopId(loop_id),
-            actor=payload.actor,
-            reason=payload.reason,
-            actor_role=payload.actor_role,
-        )
+        with _loop_write_ctx(request) as session:
+            state = service.pause(
+                loop_id=LoopId(loop_id),
+                actor=payload.actor,
+                reason=payload.reason,
+                actor_role=payload.actor_role,
+                session=session,
+            )
+        return {"loop_id": state.loop_id.value, "phase": state.phase.value}
     except ApprovalRejected as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except DomainError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"loop_id": state.loop_id.value, "phase": state.phase.value}
 
 
 @router.post("/{loop_id}/resume")
@@ -294,16 +356,18 @@ def resume_loop(
     """
     service = _control(request)
     try:
-        state = service.resume(
-            loop_id=LoopId(loop_id),
-            actor=payload.actor,
-            actor_role=payload.actor_role,
-            approved_by=payload.approved_by,
-            signature=payload.signature,
-            nonce=payload.nonce,
-            expires_at=payload.expires_at,
-            modified_context=payload.modified_context,
-        )
+        with _loop_write_ctx(request) as session:
+            state = service.resume(
+                loop_id=LoopId(loop_id),
+                actor=payload.actor,
+                actor_role=payload.actor_role,
+                approved_by=payload.approved_by,
+                signature=payload.signature,
+                nonce=payload.nonce,
+                expires_at=payload.expires_at,
+                modified_context=payload.modified_context,
+                session=session,
+            )
     except ApprovalRejected as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ApprovalRequired as exc:

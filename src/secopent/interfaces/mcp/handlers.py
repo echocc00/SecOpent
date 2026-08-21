@@ -27,7 +27,8 @@ Safety invariants (M4 §13 / ADR-007):
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TypeVar
 
@@ -65,6 +66,10 @@ from ...domain.scope.models import ScopeSnapshot
 from ...domain.verification.models import VerificationStatus
 from ...infrastructure.db.session import Database
 from ...infrastructure.evidence_store.redaction import RedactionEngine
+from ...infrastructure.reasoning_loop.sqlalchemy_state import (
+    SqlAlchemyLoopStateRepository,
+    SqlAlchemyLoopStepRepository,
+)
 from ...infrastructure.report_templates.renderer import Jinja2TemplateRenderer
 from ...infrastructure.repositories.sqlalchemy_assets import SqlAlchemyAssetRepository
 from ...infrastructure.repositories.sqlalchemy_catalog import SqlAlchemyCatalogRepository
@@ -792,7 +797,10 @@ def handler_mission_create(
         result = _assessment_out(started)
         # result["status"] is the assessment status; add mission context
         result["assessment_id"] = assessment.id
-        session.commit()
+        # The UoW's __exit__ commits on clean exit (v0.7.2: removed a manual
+        # session.commit() here that defeated the UoW's rollback safety net —
+        # a raise after this line would have rolled back an already-committed
+        # transaction, silently masking the error).
 
     scheduler = runtime.start_scheduler
     if scheduler is not None:
@@ -1129,17 +1137,19 @@ def handler_loop_pause(
         service = runtime.loop_control
         if service is None:
             raise LookupError("loop control not configured")
-        state = service.pause(
-            loop_id=LoopId(loop_id),
-            actor="agent",
-            reason=reason,
-            actor_role="agent",
-        )
-        return {
-            "status": "ok",
-            "loop_id": state.loop_id.value,
-            "phase": state.phase.value,
-        }
+        with _loop_write_ctx(runtime) as session:
+            state = service.pause(
+                loop_id=LoopId(loop_id),
+                actor="agent",
+                reason=reason,
+                actor_role="agent",
+                session=session,
+            )
+            return {
+                "status": "ok",
+                "loop_id": state.loop_id.value,
+                "phase": state.phase.value,
+            }
 
     return _guard("loop_pause", _run)
 
@@ -1162,36 +1172,77 @@ def handler_loop_resume(
         service = runtime.loop_control
         if service is None:
             raise LookupError("loop control not configured")
-        state = service.resume(
-            loop_id=LoopId(loop_id),
-            actor="agent",
-            actor_role="agent",
-            approved_by=approved_by,
-            signature=signature,
-        )
-        return {
-            "status": "ok",
-            "loop_id": state.loop_id.value,
-            "phase": state.phase.value,
-            "pause_attempts": state.pause_attempts,
-        }
+        with _loop_write_ctx(runtime) as session:
+            state = service.resume(
+                loop_id=LoopId(loop_id),
+                actor="agent",
+                actor_role="agent",
+                approved_by=approved_by,
+                signature=signature,
+                session=session,
+            )
+            return {
+                "status": "ok",
+                "loop_id": state.loop_id.value,
+                "phase": state.phase.value,
+                "pause_attempts": state.pause_attempts,
+            }
 
     return _guard("loop_resume", _run)
 
 
 def _loop_repos(
     runtime: McpRuntime,
+    *,
+    session: Session | None = None,
 ) -> tuple[LoopStateRepository, LoopStepRepository]:
     """The loop state/step repos, or a loud config error when not wired.
 
-    The MCP transport wires these onto the runtime (see server.py); an
-    unconfigured runtime fails loudly rather than reporting a false loop.
+    Write handlers pass a UoW ``session`` so a fresh ``SqlAlchemyLoop*Repository``
+    is built on that session — the save then commits with the caller's
+    transaction (v0.7.2 hotfix for issue v10: the pre-bound singleton repo
+    only ``merge``-ed, never committed, so loop rows vanished on session close).
+
+    Read-only handlers and InMemory tests omit ``session`` and use the repos
+    wired onto the runtime (the in-memory singletons or a pre-bound SQL repo).
     """
+    if session is not None:
+        return (
+            SqlAlchemyLoopStateRepository(session),
+            SqlAlchemyLoopStepRepository(session),
+        )
     state_repo = runtime.loop_state_repo
     step_repo = runtime.loop_step_repo
     if state_repo is None or step_repo is None:
         raise LookupError("loop repos not configured")
     return state_repo, step_repo
+
+
+@contextmanager
+def _loop_write_ctx(
+    runtime: McpRuntime,
+) -> Iterator[Session | None]:
+    """Transaction context for a loop write handler.
+
+    When ``runtime.db`` is a real Database AND the wired loop state repo is
+    SQL-backed (production), yields a UoW session so the save + signed audit
+    record commit atomically (v0.7.2 hotfix for issue v10). When the repo is
+    InMemory (dev/test wiring), yields ``None`` so ``_loop_repos`` falls back
+    to the pre-bound in-memory repos — in-memory saves need no commit.
+    """
+    from ...application.reasoning_loop.in_memory_state import (
+        InMemoryLoopStateRepository,
+    )
+
+    state_repo = runtime.loop_state_repo
+    if (
+        isinstance(runtime.db, Database)
+        and not isinstance(state_repo, InMemoryLoopStateRepository)
+    ):
+        with runtime.db.unit_of_work() as uow:
+            yield uow.session
+    else:
+        yield None
 
 
 def handler_loop_status(
@@ -1295,64 +1346,66 @@ def handler_loop_create(
     )
 
     def _run() -> dict[str, object]:
-        state_repo, _step_repo = _loop_repos(runtime)
-        now = utc_now()
-        loop_id = LoopId.new()
-        base = LoopBudget.default()
-        budget = LoopBudget(
-            max_steps=max_steps if max_steps is not None else base.max_steps,
-            max_total_tokens=(
-                max_total_tokens if max_total_tokens is not None
-                else base.max_total_tokens
-            ),
-            max_wall_seconds=(
-                max_wall_seconds if max_wall_seconds is not None
-                else base.max_wall_seconds
-            ),
-        )
-        plan = LoopPlan(
-            plan_id=f"plan-{uuid.uuid4().hex[:12]}",
-            loop_id=loop_id,
-            assessment_id=assessment_id,
-            termination_policy=LoopTerminationPolicy.default(),
-            policy_snapshot="mcp:loop:default",
-            created_at=now,
-        )
-        state = LoopState(
-            loop_id=plan.loop_id,
-            assessment_id=plan.assessment_id,
-            phase=LoopPhase.INITIALIZING,
-            policy_snapshot=plan.policy_snapshot,
-            budget=budget,
-            context_hash="0" * 64,
-            catalog_required_remaining=frozenset(),
-            catalog_required_executed=frozenset(),
-            consecutive_no_signal=0,
-            consecutive_policy_rejected=0,
-            started_at=now,
-            last_step_at=None,
-        )
-        state_repo.save(state)
-        runtime.audit_chain.record(
-            actor="human",
-            action=LOOP_CREATED,
-            resource_type=LOOP_RESOURCE_TYPE,
-            resource_id=loop_id.value,
-            payload={
-                "assessment_id": assessment_id,
-                "grant_id": grant_id,
-                "budget": {
-                    "max_steps": budget.max_steps,
-                    "max_total_tokens": budget.max_total_tokens,
-                    "max_wall_seconds": budget.max_wall_seconds,
+        with _loop_write_ctx(runtime) as session:
+            state_repo, _step_repo = _loop_repos(runtime, session=session)
+            now = utc_now()
+            loop_id = LoopId.new()
+            base = LoopBudget.default()
+            budget = LoopBudget(
+                max_steps=max_steps if max_steps is not None else base.max_steps,
+                max_total_tokens=(
+                    max_total_tokens if max_total_tokens is not None
+                    else base.max_total_tokens
+                ),
+                max_wall_seconds=(
+                    max_wall_seconds if max_wall_seconds is not None
+                    else base.max_wall_seconds
+                ),
+            )
+            plan = LoopPlan(
+                plan_id=f"plan-{uuid.uuid4().hex[:12]}",
+                loop_id=loop_id,
+                assessment_id=assessment_id,
+                termination_policy=LoopTerminationPolicy.default(),
+                policy_snapshot="mcp:loop:default",
+                created_at=now,
+            )
+            state = LoopState(
+                loop_id=plan.loop_id,
+                assessment_id=plan.assessment_id,
+                phase=LoopPhase.INITIALIZING,
+                policy_snapshot=plan.policy_snapshot,
+                budget=budget,
+                context_hash="0" * 64,
+                catalog_required_remaining=frozenset(),
+                catalog_required_executed=frozenset(),
+                consecutive_no_signal=0,
+                consecutive_policy_rejected=0,
+                started_at=now,
+                last_step_at=None,
+            )
+            state_repo.save(state)
+            runtime.audit_chain.record(
+                actor="human",
+                action=LOOP_CREATED,
+                resource_type=LOOP_RESOURCE_TYPE,
+                resource_id=loop_id.value,
+                payload={
+                    "assessment_id": assessment_id,
+                    "grant_id": grant_id,
+                    "budget": {
+                        "max_steps": budget.max_steps,
+                        "max_total_tokens": budget.max_total_tokens,
+                        "max_wall_seconds": budget.max_wall_seconds,
+                    },
                 },
-            },
-        )
-        return {
-            "status": "success",
-            "loop_id": loop_id.value,
-            "phase": state.phase.value,
-        }
+                session=session,
+            )
+            return {
+                "status": "success",
+                "loop_id": loop_id.value,
+                "phase": state.phase.value,
+            }
 
     return _guard("loop_create", _run)
 
@@ -1379,38 +1432,40 @@ def handler_loop_stop(
     from ...domain.reasoning_loop.models import LoopId, LoopPhase
 
     def _run() -> dict[str, object]:
-        state_repo, _step_repo = _loop_repos(runtime)
-        lid = LoopId(loop_id)
-        state = state_repo.get(lid)
-        if state is None:
-            raise LookupError(f"loop {loop_id!r} not found")
-        if state.phase is not LoopPhase.EMERGENCY_STOPPED:
-            now = utc_now()
-            stopped = replace(state, phase=LoopPhase.EMERGENCY_STOPPED,
-                              last_step_at=now)
-            state_repo.save(stopped)
-            runtime.audit_chain.record(
-                actor=actor or "human",
-                action=LOOP_TERMINATED,
-                resource_type=LOOP_RESOURCE_TYPE,
-                resource_id=loop_id,
-                payload={
-                    "final_phase": LoopPhase.EMERGENCY_STOPPED.value,
-                    "reason": "emergency_stop",
-                    "human_reason": "stopped via MCP loop_stop (grant)",
-                    "from_phase": state.phase.value,
-                },
-            )
+        with _loop_write_ctx(runtime) as session:
+            state_repo, _step_repo = _loop_repos(runtime, session=session)
+            lid = LoopId(loop_id)
+            state = state_repo.get(lid)
+            if state is None:
+                raise LookupError(f"loop {loop_id!r} not found")
+            if state.phase is not LoopPhase.EMERGENCY_STOPPED:
+                now = utc_now()
+                stopped = replace(state, phase=LoopPhase.EMERGENCY_STOPPED,
+                                  last_step_at=now)
+                state_repo.save(stopped)
+                runtime.audit_chain.record(
+                    actor=actor or "human",
+                    action=LOOP_TERMINATED,
+                    resource_type=LOOP_RESOURCE_TYPE,
+                    resource_id=loop_id,
+                    payload={
+                        "final_phase": LoopPhase.EMERGENCY_STOPPED.value,
+                        "reason": "emergency_stop",
+                        "human_reason": "stopped via MCP loop_stop (grant)",
+                        "from_phase": state.phase.value,
+                    },
+                    session=session,
+                )
+                return {
+                    "status": "success",
+                    "loop_id": loop_id,
+                    "phase": LoopPhase.EMERGENCY_STOPPED.value,
+                }
             return {
                 "status": "success",
                 "loop_id": loop_id,
-                "phase": LoopPhase.EMERGENCY_STOPPED.value,
+                "phase": state.phase.value,
             }
-        return {
-            "status": "success",
-            "loop_id": loop_id,
-            "phase": state.phase.value,
-        }
 
     return _guard("loop_stop", _run)
 

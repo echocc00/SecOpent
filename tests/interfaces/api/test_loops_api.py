@@ -33,7 +33,43 @@ from secopent.interfaces.api.main import create_app
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app())
+    app = create_app()
+    # These are handler SEMANTIC tests (budget override, actor_role gate,
+    # mounting). Persistence across sessions is covered by
+    # tests/infrastructure/test_realism_loop_persistence.py; here we wire
+    # in-memory loop repos so the SQL FK constraint on core_reasoning_loops
+    # (assessment_id) does not reject the synthetic assessment ids these
+    # tests use. ``_loop_write_ctx`` sees InMemory repos and yields None,
+    # so the handler writes through the pre-bound in-memory stores.
+    from secopent.application.reasoning_loop.in_memory_state import (
+        InMemoryLoopStateRepository,
+        InMemoryLoopStepRepository,
+    )
+    from secopent.application.reasoning_loop.pause_control import (
+        PauseControlService,
+    )
+    from secopent.infrastructure.reasoning_loop.loop_approval import (
+        SignedLoopApproval,
+    )
+    state_repo = InMemoryLoopStateRepository()
+    step_repo = InMemoryLoopStepRepository()
+    app.state.loop_state_repo = state_repo
+    app.state.loop_step_repo = step_repo
+    app.state.loop_control = PauseControlService(
+        state_repo=state_repo,
+        audit=app.state.audit_chain,
+        approval=SignedLoopApproval(),
+    )
+    # The /api sub-app copies app.state during create_app; mirror the swap
+    # onto the mounted sub-app so requests under /api/loops see the same
+    # in-memory stores.
+    for route in app.routes:
+        sub = getattr(route, "app", None)
+        if hasattr(sub, "state") and hasattr(sub.state, "db"):
+            sub.state.loop_state_repo = state_repo
+            sub.state.loop_step_repo = step_repo
+            sub.state.loop_control = app.state.loop_control
+    return TestClient(app)
 
 
 def _loop(loop_id: LoopId, *, phase: LoopPhase = LoopPhase.RUNNING) -> LoopState:

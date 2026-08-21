@@ -39,10 +39,6 @@ from ...application.emergency_stop import EmergencyStop
 from ...application.health import BundleSignatureState
 from ...application.oracle_service import OracleService
 from ...application.prompt_injection import PromptInjectionGuard
-from ...application.reasoning_loop.in_memory_state import (
-    InMemoryLoopStateRepository,
-    InMemoryLoopStepRepository,
-)
 from ...application.reasoning_loop.pause_control import PauseControlService
 from ...application.remote_model import ModelBackend, RemoteModelGateway
 from ...application.scope_enforcer import ScopeEnforcer
@@ -93,6 +89,10 @@ from ...infrastructure.peer_agents.in_memory_peer_runs import (
 from ...infrastructure.peer_agents.null_harness import NullPeerAgentHarness
 from ...infrastructure.permits.permit_signer import PermitSigner, PermitVerifier
 from ...infrastructure.reasoning_loop.loop_approval import SignedLoopApproval
+from ...infrastructure.reasoning_loop.repo_factory import (
+    create_loop_state_repo,
+    create_loop_step_repo,
+)
 from ...infrastructure.repositories.sqlalchemy_audit_chain import (
     SqlAlchemySignedAuditEventStore,
 )
@@ -533,11 +533,17 @@ def create_app(engine: Engine | None = None) -> FastAPI:
     # now (DB persistence is v0.7.8). Read by the /loops router and the MCP
     # loop_pause/loop_resume tools via request.app.state / McpRuntime.
     #
-    # v0.7.8 Task 4: the loop state/step in-memory stores are shared singletons
-    # on app.state so the MCP loop_status/history/create/stop handlers observe
-    # and write the SAME loops the /loops control plane (pause/resume) manages.
-    app.state.loop_state_repo = InMemoryLoopStateRepository()
-    app.state.loop_step_repo = InMemoryLoopStepRepository()
+    # v0.7.8 Task 4 + v0.7.2 hotfix (issue v10): the loop state/step repos are
+    # shared singletons on app.state so the MCP loop_status/history handlers
+    # and the /loops read paths observe the SAME loops the control plane
+    # manages. WRITE handlers (create/stop/pause/resume) do NOT use these
+    # singletons — they build a fresh SqlAlchemyLoop*Repository on the UoW
+    # session so the save commits with the caller's transaction (the pre-bound
+    # SQL repo only merge-ed, never committed, so loop rows vanished on session
+    # close). When ``app.state.db`` is a real Database the SQL-backed repos are
+    # selected; in-memory stores remain for the no-DB dev/test path.
+    app.state.loop_state_repo = create_loop_state_repo(app.state.db)
+    app.state.loop_step_repo = create_loop_step_repo(app.state.db)
     app.state.loop_control = PauseControlService(
         state_repo=app.state.loop_state_repo,
         audit=audit_chain,

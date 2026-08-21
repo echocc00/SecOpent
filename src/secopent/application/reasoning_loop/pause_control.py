@@ -26,6 +26,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from math import floor
+from typing import Any
 
 from ...domain.common.errors import DomainError
 from ...domain.reasoning_loop.models import (
@@ -119,6 +120,22 @@ class PauseControlService:
         self._policy = policy or LoopTerminationPolicy.default()
         self._now = now_fn or _now_utc
 
+    def _repo(self, session: Any) -> LoopStateRepository:
+        """The state repo for this call.
+
+        When a UoW ``session`` is passed (v0.7.2 hotfix for issue v10), build a
+        fresh ``SqlAlchemyLoopStateRepository`` on it so the save commits with
+        the caller's transaction; otherwise fall back to the injected repo
+        (InMemory tests / read paths that don't need a commit boundary).
+        """
+        if session is None:
+            return self._state_repo
+        from ...infrastructure.reasoning_loop.sqlalchemy_state import (
+            SqlAlchemyLoopStateRepository,
+        )
+
+        return SqlAlchemyLoopStateRepository(session)
+
     def pause(
         self,
         *,
@@ -126,10 +143,11 @@ class PauseControlService:
         actor: str,
         reason: str,
         actor_role: str = "human",
+        session: Any = None,
     ) -> LoopState:
         if actor_role == "agent":
             raise ApprovalRejected("pause is human-only (403): agents are rejected")
-        state = self._state_repo.get(loop_id)
+        state = self._repo(session).get(loop_id)
         if state is None:
             raise LookupError(f"no loop state for {loop_id.value}")
         if state.phase is LoopPhase.PAUSED:
@@ -142,7 +160,7 @@ class PauseControlService:
             )
         now = self._now()
         new_state = replace(state, phase=LoopPhase.PAUSED, paused_at=now)
-        self._state_repo.save(new_state)
+        self._repo(session).save(new_state)
         self._audit.record(
             actor=actor,
             action=LOOP_PAUSED,
@@ -153,6 +171,7 @@ class PauseControlService:
                 "phase": LoopPhase.PAUSED.name,
                 "context_hash": state.context_hash,
             },
+            session=session,
         )
         return new_state
 
@@ -167,10 +186,11 @@ class PauseControlService:
         nonce: str | None = None,
         expires_at: datetime | None = None,
         modified_context: object | None = None,
+        session: Any = None,
     ) -> LoopState:
         if actor_role == "agent":
             raise ApprovalRejected("resume is human-only (403): agents are rejected")
-        state = self._state_repo.get(loop_id)
+        state = self._repo(session).get(loop_id)
         if state is None:
             raise LookupError(f"no loop state for {loop_id.value}")
         if state.phase in _RESUME_BLOCKED_PHASES:
@@ -215,12 +235,13 @@ class PauseControlService:
             resumed_at=now,
             budget=credit_budget(state.budget, wall_credit),
         )
-        self._state_repo.save(new_state)
+        self._repo(session).save(new_state)
         self._audit.record(
             actor=actor,
             action=LOOP_RESUMED,
             resource_type=LOOP_RESOURCE_TYPE,
             resource_id=loop_id.value,
             payload=audit_payload,
+            session=session,
         )
         return new_state

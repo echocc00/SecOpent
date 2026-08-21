@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from typing import Any
 
 from ...domain.common.canonical import canonical_json
 from ...domain.common.errors import DomainError
@@ -170,9 +171,33 @@ class ReasoningLoopOrchestrator:
         # transition (PauseBudgetExceeded -> POLICY_BLOCKED + loop.terminated).
         self._pause_control = pause_control
 
+    def _repos(self, session: Any) -> tuple[LoopStateRepository, LoopStepRepository]:
+        """The state/step repos for this call.
+
+        When a UoW ``session`` is passed (v0.7.2 hotfix for issue v10), build
+        fresh ``SqlAlchemyLoop*Repository`` instances on it so the save commits
+        with the caller's transaction; otherwise fall back to the injected
+        repos (InMemory tests / read paths that don't need a commit boundary).
+        """
+        if session is None:
+            return self.state_repo, self.step_repo
+        from ...infrastructure.reasoning_loop.sqlalchemy_state import (
+            SqlAlchemyLoopStateRepository,
+            SqlAlchemyLoopStepRepository,
+        )
+
+        return (
+            SqlAlchemyLoopStateRepository(session),
+            SqlAlchemyLoopStepRepository(session),
+        )
+
     # ------------------------------------------------------------------ create
     def create_loop(
-        self, plan: LoopPlan, *, catalog_required_remaining: frozenset[str]
+        self,
+        plan: LoopPlan,
+        *,
+        catalog_required_remaining: frozenset[str],
+        session: Any = None,
     ) -> LoopState:
         """Instantiate a loop in INITIALIZING and audit the creation."""
         state = LoopState(
@@ -189,7 +214,8 @@ class ReasoningLoopOrchestrator:
             started_at=self._clock(),
             last_step_at=None,
         )
-        self.state_repo.save(state)
+        state_repo, _step_repo = self._repos(session)
+        state_repo.save(state)
         self._audit.record(
             actor="reasoning_loop",
             action=LOOP_CREATED,
@@ -200,13 +226,15 @@ class ReasoningLoopOrchestrator:
                 "policy_snapshot": plan.policy_snapshot,
                 "catalog_required_remaining": sorted(catalog_required_remaining),
             },
+            session=session,
         )
         return state
 
     # ----------------------------------------------------------------- run_step
-    def run_step(self, *, loop_id: LoopId) -> StepResult:
+    def run_step(self, *, loop_id: LoopId, session: Any = None) -> StepResult:
         """Advance the loop by one step and return the resulting phase."""
-        state = self.state_repo.get(loop_id)
+        state_repo, step_repo = self._repos(session)
+        state = state_repo.get(loop_id)
         if state is None:
             raise LoopNotFoundError(f"loop_id {loop_id.value!r} not found")
         if state.phase in _TERMINAL_PHASES:
@@ -243,12 +271,15 @@ class ReasoningLoopOrchestrator:
                     gate_name="budget",
                     deny_code=bvd.deny_code or "BUDGET_DENIED",
                     reason=bvd.reason,
+                    session=session,
                 )
 
         # 3. Propose.
         proposed = self.proposer.propose(context)
         if proposed is None:
-            return self._record_backend_unavailable(loop_id, state, context)
+            return self._record_backend_unavailable(
+                loop_id, state, context, session=session
+            )
 
         # 4. Schema gate.
         sv = self.schema_gate.check(proposed, context)
@@ -257,6 +288,7 @@ class ReasoningLoopOrchestrator:
                 loop_id, state, context, proposed,
                 gate_name="schema", deny_code=sv.deny_code or "SCHEMA_DENIED",
                 reason=sv.reason,
+                session=session,
             )
 
         # 5. Policy gate.
@@ -266,6 +298,7 @@ class ReasoningLoopOrchestrator:
                 loop_id, state, context, proposed,
                 gate_name="policy", deny_code=pv.deny_code or "POLICY_DENIED",
                 reason=pv.reason,
+                session=session,
             )
 
         # 6. Permit gate.
@@ -275,6 +308,7 @@ class ReasoningLoopOrchestrator:
                 loop_id, state, context, proposed,
                 gate_name="permit", deny_code=permit_v.deny_code or "PERMIT_DENIED",
                 reason=permit_v.reason,
+                session=session,
             )
 
         # 7. Execute (v0.7.0 mock; a request_oracle step with a wired loop oracle
@@ -286,7 +320,7 @@ class ReasoningLoopOrchestrator:
             )
         else:
             step = self._mock_execute(loop_id, context, proposed, permit_v.permit_id or "")
-        self.step_repo.add(step)
+        step_repo.add(step)
         self._audit.record(
             actor="reasoning_loop",
             action=LOOP_STEP_PROPOSED,
@@ -298,6 +332,7 @@ class ReasoningLoopOrchestrator:
                 "permit_id": step.permit_id,
                 "tokens_used": step.propose_tokens_used,
             },
+            session=session,
         )
         executed_payload: dict[str, object] = {
             "step_id": step.step_id,
@@ -313,6 +348,7 @@ class ReasoningLoopOrchestrator:
             resource_type="reasoning_loop",
             resource_id=loop_id.value,
             payload=executed_payload,
+            session=session,
         )
 
         # 8. Feedback -> next state.
@@ -325,7 +361,7 @@ class ReasoningLoopOrchestrator:
         )
         new_phase = evaluate_termination(new_state, LoopTerminationPolicy.default())
         new_state = replace(new_state, phase=new_phase)
-        self.state_repo.save(new_state)
+        state_repo.save(new_state)
 
         if new_phase in _TERMINAL_PHASES:
             self._audit.record(
@@ -334,6 +370,7 @@ class ReasoningLoopOrchestrator:
                 resource_type="reasoning_loop",
                 resource_id=loop_id.value,
                 payload={"final_phase": new_phase.value, "step_id": step.step_id},
+                session=session,
             )
 
         return StepResult(
@@ -343,7 +380,12 @@ class ReasoningLoopOrchestrator:
 
     # ------------------------------------------------- human control plane
     def emergency_stop(
-        self, loop_id: LoopId, *, actor: str, reason: str
+        self,
+        loop_id: LoopId,
+        *,
+        actor: str,
+        reason: str,
+        session: Any = None,
     ) -> LoopState:
         """Kill a loop into the terminal EMERGENCY_STOPPED phase.
 
@@ -359,14 +401,15 @@ class ReasoningLoopOrchestrator:
         loop returns the current state without a duplicate ``loop.terminated``
         event. Backward compatible: existing callers never call this.
         """
-        state = self.state_repo.get(loop_id)
+        state_repo, _step_repo = self._repos(session)
+        state = state_repo.get(loop_id)
         if state is None:
             raise LoopNotFoundError(f"loop_id {loop_id.value!r} not found")
         if state.phase is LoopPhase.EMERGENCY_STOPPED:
             return state
         now = self._clock()
         new_state = replace(state, phase=LoopPhase.EMERGENCY_STOPPED, last_step_at=now)
-        self.state_repo.save(new_state)
+        state_repo.save(new_state)
         self._audit.record(
             actor=actor,
             action=LOOP_TERMINATED,
@@ -378,6 +421,7 @@ class ReasoningLoopOrchestrator:
                 "human_reason": reason,
                 "from_phase": state.phase.value,
             },
+            session=session,
         )
         return new_state
 
@@ -392,6 +436,7 @@ class ReasoningLoopOrchestrator:
         nonce: str | None = None,
         expires_at: datetime | None = None,
         modified_context: object | None = None,
+        session: Any = None,
     ) -> LoopState:
         """Resume a paused loop through the composed PauseControlService.
 
@@ -429,13 +474,19 @@ class ReasoningLoopOrchestrator:
                 nonce=nonce,
                 expires_at=expires_at,
                 modified_context=modified_context,
+                session=session,
             )
         except PauseBudgetExceeded as exc:
             # Forced terminal: the loop may not pause past its human budget.
-            return self._force_pause_budget_termination(loop_id, exc, actor)
+            return self._force_pause_budget_termination(loop_id, exc, actor, session=session)
 
     def _force_pause_budget_termination(
-        self, loop_id: LoopId, exc: PauseBudgetExceeded, actor: str
+        self,
+        loop_id: LoopId,
+        exc: PauseBudgetExceeded,
+        actor: str,
+        *,
+        session: Any = None,
     ) -> LoopState:
         """Transition the loop to a terminal phase after an over-budget pause.
 
@@ -444,11 +495,12 @@ class ReasoningLoopOrchestrator:
         reason="pause_budget" so the forced termination is auditable and the
         loop is dead to future pause/resume/step calls.
         """
-        state = self.state_repo.get(loop_id)
+        state_repo, _step_repo = self._repos(session)
+        state = state_repo.get(loop_id)
         if state is None:
             raise LoopNotFoundError(f"loop_id {loop_id.value!r} not found")
         new_state = replace(state, phase=LoopPhase.POLICY_BLOCKED, last_step_at=self._clock())
-        self.state_repo.save(new_state)
+        state_repo.save(new_state)
         self._audit.record(
             actor=actor,
             action=LOOP_TERMINATED,
@@ -459,14 +511,21 @@ class ReasoningLoopOrchestrator:
                 "reason": "pause_budget",
                 "detail": str(exc),
             },
+            session=session,
         )
         return new_state
 
     # ------------------------------------------------------------- internal
     def _record_backend_unavailable(
-        self, loop_id: LoopId, state: LoopState, context: LoopContext
+        self,
+        loop_id: LoopId,
+        state: LoopState,
+        context: LoopContext,
+        *,
+        session: Any = None,
     ) -> StepResult:
         """Proposer returned None: one transient, budget-consuming no-op step."""
+        state_repo, _step_repo = self._repos(session)
         audit = self._audit
         audit.record(
             actor="reasoning_loop",
@@ -474,6 +533,7 @@ class ReasoningLoopOrchestrator:
             resource_type="reasoning_loop",
             resource_id=loop_id.value,
             payload={"context_hash": context.context_hash()},
+            session=session,
         )
         new_state = self.feedback.apply(
             current=state,
@@ -491,7 +551,7 @@ class ReasoningLoopOrchestrator:
         )
         new_phase = evaluate_termination(new_state, LoopTerminationPolicy.default())
         new_state = replace(new_state, phase=new_phase)
-        self.state_repo.save(new_state)
+        state_repo.save(new_state)
         if new_phase in _TERMINAL_PHASES:
             audit.record(
                 actor="reasoning_loop",
@@ -499,6 +559,7 @@ class ReasoningLoopOrchestrator:
                 resource_type="reasoning_loop",
                 resource_id=loop_id.value,
                 payload={"final_phase": new_phase.value, "via": "backend_unavailable"},
+                session=session,
             )
         return StepResult(loop_id, new_phase, step_recorded=None, signals_count=0)
 
@@ -512,7 +573,9 @@ class ReasoningLoopOrchestrator:
         gate_name: str,
         deny_code: str,
         reason: str,
+        session: Any = None,
     ) -> StepResult:
+        state_repo, _step_repo = self._repos(session)
         audit = self._audit
         audit.record(
             actor="reasoning_loop",
@@ -525,6 +588,7 @@ class ReasoningLoopOrchestrator:
                 "reason": reason,
                 "action_type": proposed.action_type.value,
             },
+            session=session,
         )
         placeholder = self._placeholder_step(
             loop_id, context, action=proposed,
@@ -540,7 +604,7 @@ class ReasoningLoopOrchestrator:
         )
         new_phase = evaluate_termination(new_state, LoopTerminationPolicy.default())
         new_state = replace(new_state, phase=new_phase)
-        self.state_repo.save(new_state)
+        state_repo.save(new_state)
         if new_phase in _TERMINAL_PHASES:
             audit.record(
                 actor="reasoning_loop",
@@ -548,6 +612,7 @@ class ReasoningLoopOrchestrator:
                 resource_type="reasoning_loop",
                 resource_id=loop_id.value,
                 payload={"final_phase": new_phase.value, "via": "gate_rejected"},
+                session=session,
             )
         return StepResult(loop_id, new_phase, step_recorded=None, signals_count=0)
 

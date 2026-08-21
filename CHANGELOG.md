@@ -9,6 +9,14 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### v0.7.2 (hotfix: loop write handlers MUST commit — issue v10)
+- **fix(reasoning-loop)**: 6 write entry points (MCP `loop_create`/`stop`/`pause`/`resume`, REST `create`/`stop`/`pause`/`resume`, `PauseControlService.pause`/`resume`) now wrap in `unit_of_work()` + pass `session=` to `audit_chain.record` — state save + signed audit record commit atomically. Pre-fix: `SqlAlchemyLoopStateRepository.save` only `merge`-ed (no commit), so loop rows vanished on session close; `loop_status` read from the same session's identity map (tests passed), but a fresh session / daemon restart saw NOT_FOUND (silent state loss + broken audit invariant).
+- **fix(reasoning-loop)**: `ReasoningLoopOrchestrator` (the loop stepper, 7 save+audit sites in `create_loop`/`run_step`/`emergency_stop`/`resume_loop`/`_record_backend_unavailable`/`_record_gate_rejected`/`_force_pause_budget_termination`) threaded with `session: Session | None = None`; caller owns the UoW transaction. Same v10 bug class — had no production caller yet (potential, not active data loss).
+- **fix(mcp)**: `handler_mission_create` removed redundant manual `session.commit()` inside a `unit_of_work()` block that defeated the UoW's rollback safety net (a raise after the manual commit would roll back an already-committed transaction, masking the error).
+- **fix(wiring)**: `create_app` loop repos now wired via `create_loop_state_repo(db)` / `create_loop_step_repo(db)` (was hardcoded `InMemoryLoopStateRepository` — SQL persistence layer v0.7.8 built but never connected to the API/MCP entry points).
+- **test(infrastructure)**: new `test_realism_loop_persistence.py` — after each write handler returns, the loop + signed audit event MUST be readable from a brand-new Database session (forces the regression class at the seam; the pre-fix merge-without-commit fails this). Covers MCP create/stop, pause, orchestrator create_loop.
+- **known limitation**: read paths (`loop_status`/`history`, `GET /loops/{id}`) still use the pre-bound singleton SQL session; identity-map caching can return stale rows on a long-lived daemon (eventual consistency, not data loss). Document for follow-up.
+
 ## [0.7.1] - 2026-08-21
 
 ### v0.7.9 (ReasoningLoop A/B acceptance — RELEASE, candidate caveat)
