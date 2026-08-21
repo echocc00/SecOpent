@@ -9,13 +9,50 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
-### v0.7.0 (in progress, ReasoningLoop skeleton)
+### v0.7.9 (ReasoningLoop A/B acceptance — RELEASE, candidate caveat)
+- **test(e2e)**: A/B target provisioning (juice/crAPI/vulhub) + mock flow + real-LLM A/B harnesses
+- **docs**: A/B result record + decision signoff; NAS real-run evidence (mock 2/2 Oracle confirms; real MiniMax run: 5/5 REQUEST_ORACLE, 5 Oracle confirms via live DIFF_SEMANTIC HTTP, FP=0)
+- **fix(reasoning-loop)**: tolerate markdown-fenced JSON from CN models (`_parse_action` strips ``` fences before strict parse; SchemaGate unaffected)
+- **feat(reasoning-loop)**: candidate-driven oracle prompt — [TOOLS] section + schema-conformant exemplar + unconfirmed-candidates-must-verify directive (few-shot); A/B harnesses wire `candidate_provider` into `DefaultLoopContextBuilder`
+- **known caveat**: A/B confirms all repeated candidate `cand-idor-1` (semantic delta = 1 unique candidate); crAPI/vulhub targets not provisioned on the A/B NAS host
+
+### v0.7.8 (DB persistence + MCP/CLI/Web entry points)
+- **feat(persistence)**: `core_reasoning_loops` + `core_loop_steps` migration; SQLAlchemy loop state/step repos; SQL loop repos wired into composition
+- **feat(mcp)**: loop status/history/create/stop tools
+- **feat(cli)**: `secopent loop create/status/stop/history`
+- **feat(api)**: reasoning loop REST endpoints + openapi regen
+- **feat(web)**: reasoning loop view + navigation
+
+### v0.7.7 (human-only pause/resume)
+- **feat(reasoning-loop)**: pause/resume domain fields + max-pauses=3; loop approval port (human-only resume); PauseControlService; wall-clock-free pause period
+- **feat**: human-only pause/resume HTTP + MCP gate; closed-loop with wall-clock-free + max-3 semantics
+
+### v0.7.6 (DIFF_SEMANTIC Oracle)
+- **feat(reasoning-loop)**: `VerificationMethod.diff_semantic` + `DiffSemanticPayload`; deterministic diff assertions; DiffSemanticRunner http executor; DiffSemanticVerifier (OracleVerifier impl); registry + verifier-factory dispatch
+- **feat(reasoning-loop)**: DIFF_SEMANTIC oracle closed-loop
+
+### v0.7.5 (AttackChain hypothesis closed-loop)
+- **feat(reasoning-loop)**: attack chain hypothesis sync; verification-progress tracking; re-verification closed-loop
+
+### v0.7.4 (Handbooks injection)
+- **feat(reasoning-loop)**: handbook selector (keyword-ranked, token-bounded); handbook injection into loop context
+
+### v0.7.3 (summarization + BudgetGate + degradation)
+- **feat(reasoning-loop)**: observation summarizer (3-tier); budget gate with step+total limits; degradation policy with audit; loop step to Job builder without subclass
+
+### v0.7.2 (real PermitGate + JobService)
+- **feat(reasoning-loop)**: real permit gate with signed nonce permits; loop step to Job builder; job scheduler with permit pre-check
+
+### v0.7.1 (real LLM proposer + SchemaGate)
+- **feat(reasoning-loop)**: loop LLM backend port + outcome types; loop context serializer (privacy projection); strict schema gate with deny codes; real LLM proposer
+- **fix(reasoning-loop)**: sanitize `full_text_ref` in context serializer
+
+### v0.7.0 (ReasoningLoop skeleton)
 - **feat(reasoning-loop)**: domain models (LoopId/Phase/State/Budget/Step/Plan + ProposeAction Pydantic)
 - **feat(reasoning-loop)**: deterministic termination evaluator (no LLM decides loop end)
 - **feat(reasoning-loop)**: three-gate composition (Schema/Policy/Permit) + MockLoopActionProposer
 - **feat(reasoning-loop)**: ReasoningLoopOrchestrator with MOCK execution (no real tool/container yet)
 - **test(reasoning-loop)**: 67 unit + integration + e2e tests, tracer-bullet vertical slice
-- **NOT YET**: real proposer, JobService wiring, Handbooks, AttackChain integration, MCP tools, DB persistence
 
 ## [0.6.5] - 2026-08-16
 

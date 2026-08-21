@@ -35,3 +35,11 @@ scripts/fix-nuclei-9x-templates-dir.patch
 
 # Strix peer-agent runtime artifacts
 strix_runs/
+
+# Local planning/research archives (not release artifacts)
+.hermes/
+docs/superpowers/specs/2026-08-16-post-v065-backlog-design.md
+docs/research/pentagi-vs-pentestgpt-vs-secopent-2026-08.md
+docs/求职-PR机会清单.md
+docs/求职-blog-LLM-不主导.md
+docs/求职-demo-手册.md

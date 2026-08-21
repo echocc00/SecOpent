@@ -105,9 +105,9 @@ run4 `delta=0` → FREEZE；**run7 `delta=5` 且成本 << 1.5x → RELEASE（附
   - caveat：5 次确认全部为 cand-idor-1（单一候选重复验证，cand-idor-2 未覆盖，语义增量=1 唯一候选）
   - cost：500 tokens / ~30s；control 为秒级 nuclei floor，cost-ratio 远 < 1.5x；FP-rate = 0
   - three rounds of real LLM runs（run5-7）iterated: candidate injection → few-shot exemplar → oracle-verification directive
-- **AUTHORIZER**: ______
-- **SIGNATURE**: ______
-- **DATE**: ______
+- **AUTHORIZER**: SecOpent（owner; 本会话确认发布执行流程 = 判定确认）
+- **SIGNATURE**: authorized-in-session 2026-08-21（A/B RELEASE + cand-idor-1 caveat 已知悉）
+- **DATE**: 2026-08-21
 
 ---
 
