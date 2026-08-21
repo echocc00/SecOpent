@@ -186,6 +186,56 @@ class TestRealProposer:
         assert res.action is None
         assert len(backend.calls) == 2
 
+    def test_markdown_fence_wrapped_json_yields_ProposeAction(self) -> None:
+        # CN models (e.g. MiniMax abab6.5s) wrap JSON replies in ```json fences;
+        # the strict parser must tolerate that wrapper (NAS A/B integration fix).
+        fence = f"```json\n{_VALID_PROMPT}\n```"
+        backend = FakeLLMBackend([fence])
+        proposer = RealLoopActionProposer(backend=backend)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.OK
+        assert isinstance(res.action, ProposeAction)
+        assert res.action.action_type is LoopActionType.RUN_TOOL
+
+    def test_fenced_bad_json_still_retryable(self) -> None:
+        # The fence tolerance must not mask genuinely malformed payloads.
+        backend = FakeLLMBackend(["```json\n{not json\n```", "```json\nagain\n```"])
+        proposer = RealLoopActionProposer(backend=backend, max_retries=1)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.RETRYABLE
+        assert res.action is None
+
+    @pytest.mark.parametrize(
+        "wrapped",
+        [
+            f"```\n{_VALID_PROMPT}\n```",  # no language tag
+            f"``` json\n{_VALID_PROMPT}\n```",  # space before tag
+            f"```JSON\r\n{_VALID_PROMPT}\r\n```",  # CRLF variant
+            f"\n```json\n{_VALID_PROMPT}\n```\n",  # surrounding blank lines
+            _VALID_PROMPT.replace("nuclei", "nocode"),  # sanity: bare JSON
+        ],
+    )
+    def test_fence_variants_parse_ok(self, wrapped: str) -> None:
+        backend = FakeLLMBackend([wrapped])
+        proposer = RealLoopActionProposer(backend=backend)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.OK
+        assert isinstance(res.action, ProposeAction)
+
+    def test_bare_json_with_fence_text_inside_string(self) -> None:
+        # "```" inside a JSON string value must not be confused with a fence.
+        prompt = (
+            '{"action_type":"run_tool",'
+            '"payload":{"tool_id":"nuclei","parameters":{"template":"x"}},'
+            '"rationale":"probe the ``` endpoint for a local file disclosure to '
+            'confirm scope inclusion and validate the perimeter","confidence":0.7}'
+        )
+        backend = FakeLLMBackend([prompt])
+        proposer = RealLoopActionProposer(backend=backend)
+        res = proposer.propose(_ctx())
+        assert res.outcome is ProposalOutcome.OK
+        assert isinstance(res.action, ProposeAction)
+
     def test_backend_unavailable_is_hard_error(self) -> None:
         backend = FakeLLMBackend([LLMBackendUnavailable("down")])
         proposer = RealLoopActionProposer(backend=backend)

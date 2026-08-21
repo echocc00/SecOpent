@@ -18,6 +18,7 @@ boundary intact.
 from __future__ import annotations
 
 import json
+import re
 
 from ...domain.reasoning_loop.models import LoopContext, ProposeAction
 from .context_serializer import build_prompt
@@ -74,6 +75,21 @@ class RealLoopActionProposer:
         )
 
 
+_FENCE_OPEN = re.compile(r"^```[ \t]*[a-zA-Z0-9_-]*[ \t]*\r?\n?")
+_FENCE_CLOSE = re.compile(r"\r?\n?[ \t]*```$")
+
+
+def _strip_markdown_fence(raw: str) -> str:
+    """Strip a ```json … ``` stub wrapper some models (e.g. MiniMax abab6.5s)
+    put around JSON replies. Only a leading/trailing fence is removed; the
+    payload itself is still strictly parsed by the caller."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = _FENCE_OPEN.sub("", cleaned)
+        cleaned = _FENCE_CLOSE.sub("", cleaned).strip()
+    return cleaned
+
+
 def _parse_action(raw: str) -> tuple[ProposeAction | None, str]:
     """Strictly parse the backend's JSON into a ProposeAction.
 
@@ -81,8 +97,9 @@ def _parse_action(raw: str) -> tuple[ProposeAction | None, str]:
     the strict schema (extra fields, invalid enum, missing payload keys), so
     the proposer can retry instead of fabricating a shape-valid action.
     """
+    data: object
     try:
-        data = json.loads(raw)
+        data = json.loads(_strip_markdown_fence(raw))
     except json.JSONDecodeError as exc:
         return None, f"invalid JSON: {exc}"
     if not isinstance(data, dict):
