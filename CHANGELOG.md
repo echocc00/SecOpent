@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-22
+
 ### v0.7.2 (hotfix: loop write handlers MUST commit — issue v10)
 - **fix(reasoning-loop)**: 6 write entry points (MCP `loop_create`/`stop`/`pause`/`resume`, REST `create`/`stop`/`pause`/`resume`, `PauseControlService.pause`/`resume`) now wrap in `unit_of_work()` + pass `session=` to `audit_chain.record` — state save + signed audit record commit atomically. Pre-fix: `SqlAlchemyLoopStateRepository.save` only `merge`-ed (no commit), so loop rows vanished on session close; `loop_status` read from the same session's identity map (tests passed), but a fresh session / daemon restart saw NOT_FOUND (silent state loss + broken audit invariant).
 - **fix(reasoning-loop)**: `ReasoningLoopOrchestrator` (the loop stepper, 7 save+audit sites in `create_loop`/`run_step`/`emergency_stop`/`resume_loop`/`_record_backend_unavailable`/`_record_gate_rejected`/`_force_pause_budget_termination`) threaded with `session: Session | None = None`; caller owns the UoW transaction. Same v10 bug class — had no production caller yet (potential, not active data loss).
