@@ -9,6 +9,8 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-21
+
 ### v0.7.9 (ReasoningLoop A/B acceptance — RELEASE, candidate caveat)
 - **test(e2e)**: A/B target provisioning (juice/crAPI/vulhub) + mock flow + real-LLM A/B harnesses
 - **docs**: A/B result record + decision signoff; NAS real-run evidence (mock 2/2 Oracle confirms; real MiniMax run: 5/5 REQUEST_ORACLE, 5 Oracle confirms via live DIFF_SEMANTIC HTTP, FP=0)
