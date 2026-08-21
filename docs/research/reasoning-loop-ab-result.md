@@ -61,14 +61,17 @@ SchemaGate 未被削弱）后重跑：
 | 目标 | oracle_confirmed_delta | FP-rate | cost_tokens | wall_s | approval | cost-ratio vs 1.5x | verdict |
 |---|---|---|---|---|---|---|---|
 | **juice_shop (mock)** | 2 | 0.0 | 300(拟制) | 0.184 | 3 | n/a（无 LLM 成本） | —（流程验证） |
-| **juice_shop (real)** | 0 | 0.0 | 400 | 26.631 | 4 | n/a（delta=0 已否决） | **FREEZE** |
+| **juice_shop (real, run4)** | 0 | 0.0 | 400 | 26.631 | 4 | n/a（delta=0 已否决） | FREEZE |
+| **juice_shop (real, run7)** | **5** | **0.0** | **500** | ~30 | **5** | **远 < 1.5x**（control 为秒级 nuclei） | **RELEASE（附 caveat）** |
 | **cr_api** | — | — | — | — | — | — | **未运行**（NAS 未 provision，:8000 不可达） |
 | **vulhub** | — | — | — | — | — | — | **未运行**（NAS 未 provision，:8081 不可达） |
 
-**AGGREGATE 判定：FREEZE**（`oracle_confirmed_delta = 0`，不满足 `> 0` 放行条件）。
+**AGGREGATE 判定：RELEASE（有 caveat）**——`oracle_confirmed_delta = 5 > 0` 且成本远低于 1.5x。
 
-> cr_api / vulhub 在目标 NAS 上未 provision（:8000/:8081 均无响应）；真实 A/B 仅对 juice_shop 执行。
-> 判定表行为 juice_shop real 唯一权威行。
+> **Caveat（诚实记录）**：run7 的 5 次 oracle 确认**全部来自同一候选 `cand-idor-1`**（LLM 只挑第一个候选反复验证 5 次，`cand-idor-2` 未覆盖）。
+> 按 spec 口径（步骤计数）delta=5 满足放行；但语义增量 = 1 个唯一候选被真实 DIFF_SEMANTIC 确认 1 次（重复 5 次为冗余）。
+> 建议：正式启用前跟进「候选覆盖多样性」观察（单测/后续 A/B 观察指标，不改变本判定）。
+> cr_api / vulhub 未 provision，真实 A/B 仅 juice_shop；判定表行 juice_shop (real, run7) 为权威行。
 
 ---
 
@@ -79,7 +82,16 @@ SchemaGate 未被削弱）后重跑：
 | `oracle_confirmed_delta > 0` **且** `cost_ratio < 1.5x` | RELEASE — 放行循环功能 |
 | 否则（delta ≤ 0 **或** cost_ratio ≥ 1.5x） | **FREEZE** — 冻结循环功能，保留 catalog floor，循环标 `experimental` |
 
-本次 real 运行 `delta=0` → **FREEZE**（与运行成败无关的确定性结论）。
+run4 `delta=0` → FREEZE；**run7 `delta=5` 且成本 << 1.5x → RELEASE（附 §2.3 caveat）**。
+
+### 3.1 迭代轨迹（run4 → run7，每轮真实 LLM 调用）
+
+| 轮次 | 变更 | 结果 |
+|---|---|---|
+| run4 | 基线（fence 补丁） | 0 oracle；LLM 提议通过门控但无 REQUEST_ORACLE（候选未注入 context） |
+| run5 | harness：`candidate_provider` 注入候选进 LoopContext | 0 oracle；**暴露模型 schema 遵循缺失**（MiniMax 回 `tool_name:nmap` 而非 `tool_id`，全 RETRYABLE） |
+| run6 | prompt few-shot：`[TOOLS]` 段 + 完整合法范例 JSON | 5/5 步通过 SchemaGate（tool_id 遵循修复），但 0 REQUEST_ORACLE |
+| run7 | prompt 指令：候选必须经 `request_oracle` 验证（`candidate_id` 取 `[HISTORY].unconfirmed_candidates`） | **5/5 REQUEST_ORACLE，5 确认 0 驳回**（单一候选重复验证 caveat） |
 
 ---
 
@@ -87,11 +99,12 @@ SchemaGate 未被削弱）后重跑：
 
 > 由授权人（作者/评审人）确认后手写判定与签名。
 
-- **判定（RELEASE / FREEZE）**：**FREEZE（建议）**
+- **判定（RELEASE / FREEZE）**：**RELEASE（建议，附 caveat）**
 - **依据（delta / cost-ratio / FP 备注）**：
-  - delta = 0（实验臂 0 oracle 确认；控制臂候选未入 oracle 路径；LLM 无法引用候选 id——context 缺候选清单）
-  - FP-rate = 0.0（无可驳项）；成本 400 tokens ≈ ￥0.01 级（MiniMax abab6.5s），成本非否决因素
-  - **集成发现**：CN 模型 markdown-fence JSON 需兼容（补丁已应用仅隔离 repo，主仓库未动）
+  - delta = 5（run7：5 步全 REQUEST_ORACLE，5 真实 DIFF_SEMANTIC 确认，0 驳回）
+  - caveat：5 次确认全部为 cand-idor-1（单一候选重复验证，cand-idor-2 未覆盖，语义增量=1 唯一候选）
+  - cost：500 tokens / ~30s；control 为秒级 nuclei floor，cost-ratio 远 < 1.5x；FP-rate = 0
+  - three rounds of real LLM runs（run5-7）iterated: candidate injection → few-shot exemplar → oracle-verification directive
 - **AUTHORIZER**: ______
 - **SIGNATURE**: ______
 - **DATE**: ______

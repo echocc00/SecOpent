@@ -29,6 +29,7 @@ from secopent.domain.reasoning_loop.models import (
 _SECTION_HEADERS = (
     "[ASSETS]",
     "[OBSERVATIONS]",
+    "[TOOLS]",
     "[CATALOG]",
     "[HYPOTHESES]",
     "[BUDGET]",
@@ -193,3 +194,29 @@ class TestBuildPrompt:
         _, user = build_prompt(_ctx())
         serialized = serialize_context(_ctx())
         assert serialized in user
+
+    def test_system_contains_schema_conformant_exemplar(self) -> None:
+        # Few-shot guidance: a valid run_tool example with the EXACT field
+        # names the schema expects (payload.tool_id, not tool_name) — evidence
+        # from the NAS A/B run: MiniMax replied tool_name:nmap and every
+        # proposal was rejected by the SchemaGate.
+        system, _ = build_prompt(_ctx())
+        assert '"tool_id"' in system
+        assert '"nuclei"' in system
+        assert '"tool_name"' not in system
+
+    def test_user_lists_available_tools_with_ids(self) -> None:
+        # The proposer must know the exact tool ids the SchemaGate accepts
+        # (SCHEMA_UNKNOWN_TOOL), otherwise it invents tools (MiniMax: nmap).
+        _, user = build_prompt(_ctx())
+        assert "[TOOLS]" in user
+        assert '"tool_id": "nuclei"' in user
+
+    def test_system_requires_oracle_verification_of_candidates(self) -> None:
+        # Behavioural directive: the proposer must verify the pre-seeded
+        # candidate ids via request_oracle rather than only proposing run_tool
+        # (observed in the NAS A/B: 5/5 run_tool proposals, zero oracle checks).
+        system, _ = build_prompt(_ctx())
+        assert "request_oracle" in system
+        assert "unconfirmed_candidates" in system
+        assert "candidate_id" in system

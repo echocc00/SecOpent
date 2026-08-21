@@ -216,6 +216,7 @@ def _build_loop(
         asset_subgraph_provider=lambda aid: (),  # type: ignore[arg-type, return-value]
         observation_provider=lambda lid: (),  # type: ignore[arg-type, return-value]
         tool_provider=_tool_capabilities,
+        candidate_provider=lambda: tuple(candidates.values()),
     )
     proposer = MockLoopActionProposer(script=script)
     signer = PermitSigner()

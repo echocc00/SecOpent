@@ -82,6 +82,14 @@ def _document(ctx: LoopContext) -> dict[str, object]:
     """Build the fixed-structure JSON document (no raw URLs / PII)."""
     return {
         "assets": list(ctx.asset_subgraph),
+        "tools": [
+            {
+                "tool_id": c.capability_id,
+                "kind": c.kind,
+                "summary": c.summary,
+            }
+            for c in ctx.available_tools
+        ],
         "observations": [
             _project_observation(obs)
             for obs in ctx.recent_observations
@@ -128,6 +136,7 @@ def serialize_context(ctx: LoopContext) -> str:
     sections: list[str] = []
     ordered = (
         ("[ASSETS]", {"assets": doc["assets"]}),
+        ("[TOOLS]", {"tools": doc["tools"]}),
         ("[OBSERVATIONS]", {"observations": doc["observations"]}),
         ("[CATALOG]", {"catalog": doc["catalog"]}),
         ("[HYPOTHESES]", {"hypotheses": doc["hypotheses"]}),
@@ -158,6 +167,26 @@ _SYSTEM_TEMPLATE = (
     "Emit ONLY valid JSON — never markdown fences, no commentary outside JSON,\n"
     "and never fabricate data not present in the context. Use the values as-is;\n"
     "do not invent tools, hypotheses, or peers that are not listed.\n"
+    "tool_id values MUST be taken from the [TOOLS] section; never invent ids.\n"
+    "Every candidate id listed in [HISTORY].unconfirmed_candidates MUST be\n"
+    "verified through a request_oracle action (payload.candidate_id matching\n"
+    "that id) before proposing any other action.\n"
+    "Here is a valid example that uses the exact field names the schema\n"
+    "expects (note payload.tool_id, payload.parameters, a rationale of at\n"
+    "least 50 characters, and a confidence number):\n"
+    "{exemplar}\n"
+)
+
+# Few-shot exemplar returned in ``system``: schema-conformant run_tool action.
+# The rationale is >=50 chars (the strict schema min_length); the payload uses
+# tool_id, never tool_name — evidence from the NAS A/B: CN models invent
+# tool_name:nmap and every proposal dies at the SchemaGate.
+_FORMAT_EXEMPLAR = (
+    '{ "action_type": "run_tool",'
+    ' "payload": { "tool_id": "nuclei", "parameters": {} },'
+    ' "rationale": "probe the adjacent endpoint for a local file disclosure '
+    "to confirm scope inclusion and validate the perimeter\","
+    ' "confidence": 0.7 }'
 )
 
 
@@ -169,6 +198,9 @@ def build_prompt(ctx: LoopContext) -> tuple[str, str]:
     (pruned) context.
     """
     schema = ProposeAction.model_json_schema()
-    system = _SYSTEM_TEMPLATE.format(schema=json.dumps(schema, indent=2))
+    system = _SYSTEM_TEMPLATE.format(
+        schema=json.dumps(schema, indent=2),
+        exemplar=_FORMAT_EXEMPLAR,
+    )
     user = serialize_context(ctx)
     return system, user
