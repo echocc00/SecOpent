@@ -4,6 +4,8 @@ Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend +
 
 
 [![Latest Release](https://img.shields.io/github/v/release/echocc00/SecOpent?display_name=tag&style=flat-square)](https://github.com/echocc00/SecOpent/releases/latest)
+[![License](https://img.shields.io/github/license/echocc00/SecOpent?style=flat-square)](./LICENSE)
+[![License Check](https://img.shields.io/github/actions/workflow/status/echocc00/SecOpent/license-check.yml?branch=master&style=flat-square&label=license)](https://github.com/echocc00/SecOpent/actions/workflows/license-check.yml)
 
 > 💼 **商业授权 / Commercial licensing**
 >
