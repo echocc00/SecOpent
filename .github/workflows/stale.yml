@@ -1,0 +1,40 @@
+name: Auto-close stale issues and PRs
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Close stale issues
+        uses: actions/stale@v8
+        with:
+          days-before-stale: 90
+          days-before-close: 30
+          stale-issue-message: |
+            👋 This issue has had no activity for 90 days.
+            If still relevant, please comment and remove the stale label.
+            Will auto-close in 30 days.
+          close-issue-message: |
+            🗑️ Auto-closed after 120 days of inactivity. Reopen if still relevant.
+          stale-issue-label: "stale"
+          exempt-issue-labels: "pinned,security,enhancement"
+
+      - name: Close stale PRs
+        uses: actions/stale@v8
+        with:
+          days-before-stale: 60
+          days-before-close: 14
+          only-prs: true
+          stale-pr-message: |
+            👋 This PR has had no activity for 60 days.
+            If still in progress, please comment and remove the stale label.
+            Will auto-close in 14 days.
+          close-pr-message: |
+            🗑️ Auto-closed after 74 days of inactivity.
+          stale-pr-label: "stale"
