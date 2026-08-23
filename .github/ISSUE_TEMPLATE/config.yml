@@ -1,0 +1,11 @@
+# GitHub Issue Form choices for echocc00 projects
+# https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+
+blank_issues_enabled: false  # 关闭 "Open a blank issue" 选项,强制走模板
+contact_links:
+  - name: 💼 商业合作 / Commercial Licensing
+    url: https://github.com/echocc00/SecSight/blob/main/README.md
+    about: 如需商用授权、定制开发、技术支持,请通过 README 顶部"商业授权"段联系作者。
+  - name: 🔒 安全漏洞 / Security Issue
+    url: https://github.com/echocc00/SecSight/blob/main/SECURITY.md
+    about: 请勿在公开 Issue 中报告安全漏洞,按 SECURITY.md 走私下披露流程。
