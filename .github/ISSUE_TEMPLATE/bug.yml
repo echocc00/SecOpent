@@ -1,0 +1,118 @@
+name: 🐛 Bug Report
+description: 报告一个 bug 或异常行为
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees:
+  - echocc00
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告 bug!请提供以下信息,帮助我们快速复现和修复。
+        **提示**: 如果涉及安全漏洞,请勿在此公开报告,改走 [SECURITY.md](../../SECURITY.md) 流程。
+
+  - type: input
+    id: version
+    attributes:
+      label: 受影响版本
+      description: 哪个版本出现此 bug?(查看 release tag 或 `git describe`)
+      placeholder: "v0.x.y"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      description: 你运行在哪个操作系统上?
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Docker
+        - Kubernetes
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: 严重程度
+      options:
+        - Critical (系统无法运行)
+        - High (核心功能损坏)
+        - Medium (功能降级但有 workaround)
+        - Low (小问题 / UI 瑕疵)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 清晰描述发生了什么,以及你期望发生什么
+      placeholder: |
+        实际发生: ...
+        期望发生: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 一步步描述如何复现这个 bug
+      placeholder: |
+        1. 启动 ...
+        2. 访问 ...
+        3. 执行 ...
+        4. 看到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_vs_actual
+    attributes:
+      label: 期望 vs 实际
+      description: 对比期望输出和实际输出(可附 log)
+      placeholder: |
+        期望: ...
+        实际: ...
+        ```
+        [粘贴相关 log / stack trace]
+        ```
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境信息
+      description: 运行环境详情(Python 版本、Docker 版本、依赖版本)
+      placeholder: |
+        - Python: 3.12.3
+        - Docker: 27.0.3
+        - OS: Ubuntu 22.04
+        - 相关依赖版本: ...
+    validations:
+      required: false
+
+  - type: input
+    id: logs
+    attributes:
+      label: 相关链接
+      description: 截图 / 文档 / 相关文章(可选)
+      placeholder: "https://..."
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 自检清单
+      options:
+        - label: 我已搜索过 [现有 issue](../../issues) 确认这不是重复报告
+          required: true
+        - label: 我使用最新 release(不是过时的 main 分支)
+          required: true
+        - label: 我能提供最小复现 demo
+          required: false
