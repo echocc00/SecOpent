@@ -1,0 +1,44 @@
+name: ❓ Question / Help
+description: 使用上的问题或一般讨论
+title: "[Question]: "
+labels: ["question"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        使用上有问题?先看 [README](../../) 和 [docs/getting-started.md](../../docs/getting-started.md)。
+        如果还没解决,在此提问。
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 你的问题
+      description: 尽量具体,包含相关代码 / 命令 / 输出
+      placeholder: |
+        我在尝试 [目标],遇到 [问题]。
+        命令: ...
+        输出: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 你已经尝试过什么?
+      description: 你搜过文档 / Google / 现有 issue 吗?结果如何?
+      placeholder: |
+        - 搜索 README: ...
+        - 看了 docs/xxx: ...
+        - 试过 xxx, 但 ...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: 紧急程度
+      options:
+        - 🚨 阻塞 (项目跑不起来 / 阻塞我工作)
+        - ⏰ 重要 (今天想搞清楚)
+        - 💭 一般 (有空再说)
