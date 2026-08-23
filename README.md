@@ -3,6 +3,8 @@
 Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend + React Case Studio. The LLM only ever *proposes*; the deterministic layer + humans decide (scope, approval, signing, findings, publish).
 
 
+[![Latest Release](https://img.shields.io/github/v/release/echocc00/SecOpent?display_name=tag&style=flat-square)](https://github.com/echocc00/SecOpent/releases/latest)
+
 > 💼 **商业授权 / Commercial licensing**
 >
 > 本项目以开源协议发布(详见 [LICENSE](./LICENSE)),你可自由用于个人/企业内部项目。
@@ -22,7 +24,7 @@ Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend +
 
 ---
 
-> Status: **v1.1-stable** track (P3). Design: `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
+> Status: **v1.1.1-stable** track (P3). Design: `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
 
 ## Quick start
 
