@@ -1,0 +1,42 @@
+# Funding configuration
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+#
+# Customize this file to enable Sponsor buttons on your repository pages.
+# Each entry corresponds to a different funding platform.
+
+# GitHub Sponsors
+# Replace `YOUR_USERNAME` with your GitHub username (echocc00 in this case)
+# github: [echocc00]
+
+# Patreon
+# patreon: USER
+
+# Open Source Collective / Open Collective
+# open_collective: ORGANIZATION_NAME
+
+# Ko-fi
+# ko_fi: USER
+
+# Tidelift (for projects with commercial support)
+# tidelift: PYTHON-PACKAGE-NAME
+
+# Community Bridge
+# community_bridge: PROJECT_ID
+
+# Liberapay
+# liberapay: USER
+
+# IssueHunt
+# issuehunt: USER
+
+# Polar
+# polar: USER
+
+# Buy Me a Coffee
+# buy_me_a_coffee: USER
+
+# Thanks.dev (formerly thanks.md)
+# thanks_dev: USER
+
+# Custom URL (your personal sponsorship page)
+# custom: ["https://your-sponsor-page.example.com"]
