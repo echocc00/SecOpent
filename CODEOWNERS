@@ -1,0 +1,66 @@
+# CODEOWNERS
+# This file defines who is automatically requested for review when someone
+# opens a pull request that modifies files in the corresponding paths.
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Order matters: later patterns override earlier ones.
+# Lines starting with `#` are comments.
+# Use GitHub usernames or team names (e.g. @org/team-name).
+
+# Default owners for everything in the repo
+* @echocc00
+
+# Security & authentication code — strictest review
+/security/          @echocc00
+/auth/              @echocc00
+/secrets/           @echocc00
+SECURITY.md         @echocc00
+*.pem               @echocc00
+*.key               @echocc00
+*.env               @echocc00
+
+# CI/CD & deployment — review for workflow changes
+/.github/           @echocc00
+/.github/workflows/ @echocc00
+/deploy/            @echocc00
+/scripts/provision/ @echocc00
+Dockerfile          @echocc00
+docker-compose*.yml @echocc00
+
+# Core source code
+/src/               @echocc00
+/backend/           @echocc00
+/app/               @echocc00
+
+# Frontend code
+/frontend/          @echocc00
+/web/               @echocc00
+/src/pages/         @echocc00
+/src/components/    @echocc00
+
+# Database migrations
+/migrations/        @echocc00
+/alembic/           @echocc00
+
+# Legal / licensing
+/LICENSE            @echocc00
+/SECURITY.md        @echocc00
+/NOTICE             @echocc00
+
+# Documentation — lighter review
+/docs/              @echocc00
+*.md                @echocc00
+README.md           @echocc00
+
+# Test files
+/tests/             @echocc00
+/test/              @echocc00
+*.test.*            @echocc00
+*.spec.*            @echocc00
+
+# Build / config files
+/pyproject.toml     @echocc00
+/package.json       @echocc00
+/requirements*.txt  @echocc00
+/poetry.lock        @echocc00
+/yarn.lock          @echocc00
