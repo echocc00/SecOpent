@@ -83,3 +83,8 @@ Environment prep (Docker, tool images, target ranges, Interactsh OOB, LLM key): 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+
+---
+
+<sub>📋 本 README 遵循 [echocc00/README-TEMPLATE.md](https://github.com/echocc00/.github/blob/main/README-TEMPLATE.md) 写作规范</sub>
