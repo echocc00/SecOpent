@@ -1,0 +1,21 @@
+name: Release Drafter
+
+on:
+  push:
+    branches: [main, master, config-splice]
+  workflow_dispatch:
+
+jobs:
+  update-release-draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Draft next release
+        uses: release-drafter/release-drafter@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config-name: release-drafter.yml
+          tag: ${{ github.ref_name }}
