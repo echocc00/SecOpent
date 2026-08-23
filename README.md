@@ -2,6 +2,26 @@
 
 Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend + React Case Studio. The LLM only ever *proposes*; the deterministic layer + humans decide (scope, approval, signing, findings, publish).
 
+
+> 💼 **商业授权 / Commercial licensing**
+>
+> 本项目以开源协议发布(详见 [LICENSE](./LICENSE)),你可自由用于个人/企业内部项目。
+> 若你希望用于**对外商业产品 / SaaS / 销售**并需要:
+> - 作者署名可移除 / 不想被认出来源
+> - 闭源分发 / 不公开修改
+> - 长期维护支持 / 私有定制
+> - 法律意见 / 合规背书
+>
+> 请通过以下方式联系作者协商**独立商业授权**:
+> - GitHub: [@echocc00](https://github.com/echocc00)
+> - 项目主页 Issues / Discussions(按项目)
+>
+> 大部分项目 24 小时内响应,首次咨询免费。
+>
+> *(本说明不构成法律意见,具体权利义务以 [LICENSE](./LICENSE) 文本为准。)*
+
+---
+
 > Status: **v1.1-stable** track (P3). Design: `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
 
 ## Quick start
