@@ -1,0 +1,38 @@
+name: License Compliance Check
+
+on:
+  push:
+    branches: [main, master, config-splice]
+  pull_request:
+
+jobs:
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify LICENSE file exists
+        run: |
+          if [ ! -f LICENSE ]; then
+            echo "::error::LICENSE file missing in repository root"
+            exit 1
+          fi
+          echo "LICENSE file found"
+
+      - name: Verify LICENSE is Apache-2.0
+        run: |
+          if ! grep -q "Apache License" LICENSE; then
+            echo "::error::LICENSE does not appear to be Apache-2.0"
+            exit 1
+          fi
+          if ! grep -q "Version 2.0" LICENSE; then
+            echo "::error::LICENSE does not appear to be Apache-2.0"
+            exit 1
+          fi
+          for section in "Redistribution" "Submission of Contributions" "Trademarks" "Disclaimer of Warranty" "Limitation of Liability"; do
+            if ! grep -q "$section" LICENSE; then
+              echo "::warning::LICENSE may be short-form (missing: $section). Full Apache-2.0 text recommended."
+            fi
+          done
+          echo "Apache-2.0 LICENSE verified"
