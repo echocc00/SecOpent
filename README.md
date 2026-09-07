@@ -28,6 +28,18 @@ Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend +
 
 > Status: **v1.1.1-stable** track (P3). Design: `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
 
+## Architecture
+
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture diagram" width="900">
+</p>
+
+## Sequence
+
+<p align="center">
+  <img src="docs/architecture-sequence.svg" alt="Architecture sequence diagram" width="900">
+</p>
+
 ## Quick start
 > 📘 **5-minute getting-started**: see [`docs/getting-started.md`](docs/getting-started.md).
 
