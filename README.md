@@ -31,13 +31,13 @@ Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend +
 ## Architecture
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Architecture diagram" width="900">
+  <img src="docs/architecture.png" alt="Architecture diagram" width="900">
 </p>
 
 ## Sequence
 
 <p align="center">
-  <img src="docs/architecture-sequence.svg" alt="Architecture sequence diagram" width="900">
+  <img src="docs/architecture-sequence.png" alt="Architecture sequence diagram" width="900">
 </p>
 
 ## Quick start
