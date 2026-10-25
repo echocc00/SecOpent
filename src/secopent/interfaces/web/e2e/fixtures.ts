@@ -5,7 +5,21 @@ type Fixtures = {
   seededSigningKeyId: string;
 };
 
-export const test = base.extend<Fixtures>({
+// The app's DEFAULT language is zh (a product decision, see src/lib/i18n.ts);
+// these specs assert English UI strings. Pin the language to en in
+// localStorage before any app code runs, on every page/navigation.
+type LangFix = { fixLang: void };
+
+export const test = base.extend<Fixtures & LangFix>({
+  fixLang: [
+    async ({ page }, use) => {
+      await page.addInitScript(() => {
+        localStorage.setItem("secopent.lang", "en");
+      });
+      await use();
+    },
+    { auto: true },
+  ],
   seededProjectId: async ({ request }, use) => {
     const res = await request.post("/api/projects", {
       data: { name: `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` },
