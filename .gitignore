@@ -43,3 +43,9 @@ docs/research/pentagi-vs-pentestgpt-vs-secopent-2026-08.md
 docs/求职-PR机会清单.md
 docs/求职-blog-LLM-不主导.md
 docs/求职-demo-手册.md
+
+# Dev-server SecretStore escrow (create_app persistent backend, CWD default)
+secret.key
+secrets.json
+signing_keys.json
+audit_signing.key
