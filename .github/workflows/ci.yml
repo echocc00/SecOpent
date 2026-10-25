@@ -227,8 +227,14 @@ jobs:
       # T13: runtime self-pentest - nuclei scans our own API; the gate is zero
       # critical/high findings. The nuclei container reaches the host-side
       # uvicorn via host.docker.internal:host-gateway (added by the executor).
-      - name: Pull nuclei (runtime self-pentest)
-        run: docker pull projectdiscovery/nuclei:latest
+      # Pull by the EXACT digest the executor pins (read from image_catalog) -
+      # pulling :latest drifted from the pin once upstream pushed a new build
+      # and the supply-chain guard (correctly) refused to run it.
+      - name: Pull nuclei (runtime self-pentest, digest from catalog)
+        run: |
+          ref="$(python -c "from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG as c; e = c['nuclei']; print(f'{e.name}@{e.digest}')")"
+          echo "pulling ${ref}"
+          docker pull "${ref}"
       - name: Runtime self-pentest (0 critical/high)
         env:
           SECOPTENT_SELF_PENTEST: "1"
