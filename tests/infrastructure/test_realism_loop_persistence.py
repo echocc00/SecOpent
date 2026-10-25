@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 
 from secopent.application.audit_chain import AuditChain
 from secopent.application.reasoning_loop.pause_control import (
@@ -64,15 +65,17 @@ def _database() -> Database:
     # A shared in-memory SQLite DB: the default ``:memory:`` gives each
     # connection its OWN database, so a row committed on one session is
     # invisible to another (which is exactly the regression we're testing).
-    # ``cache=shared`` + StaticPool pins every session to one connection so
-    # committed rows are visible across fresh sessions.
+    # StaticPool pins every session to ONE connection, so committed rows are
+    # visible across fresh sessions. (A previous version used the URI
+    # ``sqlite:///file:realism_loop?mode=memory&cache=shared`` without
+    # ``uri=true`` - sqlite treated it as a plain FILENAME and created a stray
+    # file in the CWD on every run; the URI flags never actually applied and
+    # StaticPool alone was doing the sharing.)
     engine = create_engine(
-        "sqlite:///file:realism_loop?mode=memory&cache=shared",
+        "sqlite://",
         future=True,
         connect_args={"check_same_thread": False},
-        poolclass=__import__(
-            "sqlalchemy.pool", fromlist=["StaticPool"]
-        ).StaticPool,
+        poolclass=StaticPool,
     )
     core_models.CoreBase.metadata.create_all(engine)
     return Database(engine)

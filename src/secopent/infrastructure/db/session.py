@@ -17,6 +17,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 # Import every ORM model module so all tables register on CoreBase.metadata.
+# Keep in sync with the model modules in this package - a missing entry means
+# create_all silently omits that table until some other import registers it
+# (caught by test_alembic_schema_equivalence when run in isolation).
 from . import (  # noqa: F401
     appmodel_models,
     asset_models,
@@ -26,6 +29,7 @@ from . import (  # noqa: F401
     core_models,
     evidence_models,
     finding_models,
+    grants_models,
     intel_models,
     job_models,
     loop_models,

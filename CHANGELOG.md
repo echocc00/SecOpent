@@ -9,6 +9,10 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+### Post-1.2.0 fixes (found by isolated-run bisection after the release)
+- **fix(db)**: `db/session.py` model registry was missing `grants_models` — any `create_all` path that relied on session.py for model registration (fresh deployments, isolated tooling) silently omitted the `core_grants` table. Masked in the full suite by test-import ordering; `test_alembic_schema_equivalence` catches it when run in isolation (and now passes both ways).
+- **test(infra)**: `test_realism_loop_persistence` used `sqlite:///file:realism_loop?mode=memory&cache=shared` without `uri=true` — sqlite treated the URI as a plain filename and leaked a stray file into the CWD on every run (on Windows a 0-byte `file`, on CI a long garbage name). The URI flags never actually applied; the cross-session sharing was done by `StaticPool` alone. Now a plain in-memory URL + `StaticPool`.
+
 ## [1.2.0] - 2026-10-25
 
 ### Version line convergence (v11 review)
