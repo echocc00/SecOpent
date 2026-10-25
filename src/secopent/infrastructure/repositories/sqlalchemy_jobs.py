@@ -18,8 +18,9 @@ comparisons (``leaseable``) see aware datetimes.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
-from sqlalchemy import and_, or_, update
+from sqlalchemy import CursorResult, and_, or_, update
 from sqlalchemy.orm import Session
 
 from ...application.jobs import JobLeaseError, JobNotFoundError
@@ -32,6 +33,16 @@ from ...domain.jobs.models import (
 from ..db.job_models import CoreJob
 
 _DEFAULT_LEASE_TTL_SECONDS = 300
+
+
+def _dml_rowcount(result: object) -> int:
+    """``rowcount`` of a DML execute (UPDATE statements always carry it).
+
+    SQLAlchemy 2.0.x typing moved ``rowcount`` off the base ``Result`` onto
+    ``CursorResult``; ``Session.execute(update(...))`` still returns it at
+    runtime, so this cast keeps the conditional-update CAS checks typed.
+    """
+    return int(cast("CursorResult[Any]", result).rowcount)
 
 
 def _naive_utc(now: datetime) -> datetime:
@@ -169,7 +180,7 @@ class SqlAlchemyJobRepository:
                 attempt=CoreJob.attempt + 1,
             )
         )
-        if result.rowcount == 1:
+        if _dml_rowcount(result) == 1:
             return self._require(job_id)
         current = self.get(job_id)
         if current is None:
@@ -184,7 +195,7 @@ class SqlAlchemyJobRepository:
             .where(CoreJob.id == job_id, CoreJob.lease_owner == owner)
             .values(lease_expires_at=naive_now + timedelta(seconds=self._ttl))
         )
-        if result.rowcount != 1:
+        if _dml_rowcount(result) != 1:
             raise JobLeaseError("only the lease owner may renew")
         return self._require(job_id)
 
@@ -235,5 +246,5 @@ class SqlAlchemyJobRepository:
         result = self._session.execute(
             update(CoreJob).where(CoreJob.id == job_id).values(**values)
         )
-        if result.rowcount != 1:
+        if _dml_rowcount(result) != 1:
             raise JobNotFoundError(f"job not found: {job_id}")

@@ -106,9 +106,10 @@ def _stamp(engine: Engine, revision: str) -> None:
     try:
         from pathlib import Path
 
+        from alembic.config import Config
+
         import secopent
         from alembic import command
-        from alembic.config import Config
 
         ini = Path(secopent.__file__).resolve().parents[2] / "alembic.ini"
         if not ini.exists():

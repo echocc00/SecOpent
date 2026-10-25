@@ -60,7 +60,9 @@ def test_loop_id_rejects_invalid_value() -> None:
 
 def test_loop_phase_is_string_enum() -> None:
     assert LoopPhase.RUNNING.value == "running"
-    assert str(LoopPhase.RUNNING) == "LoopPhase.RUNNING"
+    # StrEnum: str() is the value itself (JSON/audit friendly, matches the
+    # codebase's other enums e.g. FindingStatus) - not "LoopPhase.RUNNING".
+    assert str(LoopPhase.RUNNING) == "running"
     # JSON-serializable (used in audit)
     import json
 

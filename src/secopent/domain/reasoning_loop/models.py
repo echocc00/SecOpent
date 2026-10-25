@@ -6,7 +6,7 @@ import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -33,7 +33,7 @@ class LoopId:
         return cls(value=secrets.token_hex(4))
 
 
-class LoopPhase(str, Enum):
+class LoopPhase(StrEnum):
     """Deterministic loop lifecycle states. LLM MUST NOT write this value."""
 
     INITIALIZING = "initializing"
@@ -106,7 +106,7 @@ class LoopBudgetSnapshot:
     wall_seconds_remaining: int
 
 
-class LoopActionType(str, Enum):
+class LoopActionType(StrEnum):
     """Closed set of action kinds the LLM/Mock proposer may emit."""
 
     RUN_TOOL = "run_tool"

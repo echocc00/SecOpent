@@ -418,8 +418,9 @@ def _cmd_db(action: str, db_url: str) -> int:
     saved_url = os.environ.get("SECOPTENT_DB_URL")
     os.environ["SECOPTENT_DB_URL"] = url
 
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config(str(ini))
     try:

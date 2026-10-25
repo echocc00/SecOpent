@@ -168,7 +168,7 @@ class LLMPlanner:
         ]
         lines = "\n".join(candidates)
         cap = risk_cap.value if risk_cap else "no cap"
-        return (
+        return (  # nosec B608 - LLM prompt text, not SQL ("select" is English)
             "You select security test classes for an authorized pentest mission.\n"
             f"Mission intent: {intent}\n"
             f"Risk cap: {cap}. A class AT or BELOW the cap may be selected; "

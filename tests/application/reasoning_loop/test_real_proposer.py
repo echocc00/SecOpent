@@ -92,8 +92,9 @@ class TestLoopLLMBackendPort:
         assert isinstance(FakeLLMBackend([]), LoopLLMBackend)
 
     def test_protocol_declares_single_complete_call(self) -> None:
-        sig = LoopLLMBackend.__protocol_attrs__
-        assert "complete" in sig
+        # Introspect the class body (works on 3.11 and 3.12 alike;
+        # __protocol_attrs__ is CPython 3.12+ only).
+        assert "complete" in vars(LoopLLMBackend)
 
     def test_fake_backend_records_prompts(self) -> None:
         backend = FakeLLMBackend([_prompt_ok()])

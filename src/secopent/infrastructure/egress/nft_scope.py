@@ -85,7 +85,8 @@ class SocketDnsResolver:
             infos = socket.getaddrinfo(host, None)
         except OSError:
             return ()
-        return tuple(sorted({info[4][0] for info in infos}))
+        # info[4][0] types as str|int (getaddrinfo slot); addresses are str.
+        return tuple(sorted({str(info[4][0]) for info in infos}))
 
 
 def _host_or_network(entry: str) -> str:
