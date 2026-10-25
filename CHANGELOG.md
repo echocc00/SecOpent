@@ -26,6 +26,13 @@ stamps it and tags the matching `v<version>`.
 - **chore(test)**: `peer_real` marker registered in `pyproject.toml` (was an unknown-mark warning).
 - **chore(repo)**: plaintext credential files (`minimax-key.txt`, `云主机.txt`) moved out of the repository tree to `F:\claudepc\secrets-local\` — both were already gitignored and never committed, but must not live in the project directory; rotate both credentials. Regenerable artifacts (`.coverage`, `tmp_smoke.db`, stray broken path dir) removed.
 
+### CI: repair Aug→Oct drift (master CI had not run since August)
+Master CI had silently rotted: recent docs pushes skipped it and floating dev-dependency versions moved underneath. All layers found by the v1.2.0 release run are fixed; all 9 CI jobs green again.
+- **lint/type**: ruff UP042 (`(str, Enum)` → `StrEnum` in reasoning-loop models; test updated to the new `str(member)` semantics); import sorting; mypy 2.4 (getaddrinfo slot typing in `nft_scope`; SQLAlchemy 2.0.x moved `rowcount` onto `CursorResult` — cast helper in `sqlalchemy_jobs`, CAS semantics unchanged).
+- **sast**: bandit B608 false positive on the LLM prompt's English "select" — `# nosec` on bandit's flagged line; the runtime self-pentest now pulls nuclei by the **catalog-pinned digest** (was `:latest`, which drifted from the pin on the next upstream push and was refused by the supply-chain guard).
+- **deps**: `cryptography` 43.0.3 → 50.x (the `<44` pin blocked all 24 pip-audit fixes) and `starlette` 0.46 → 1.10 via `fastapi>=0.160` (7 findings); full suite 2090 passed / 0 failed on the upgraded stack. Frontend `npm audit` 21 → **0** (transitive bumps + `dompurify` 3.4.17 override over monaco-editor's 3.4.8 pin — the 2026 XSS advisory chain).
+- **browser-e2e**: the job had never actually run its specs (its install step inherited the web-dir `working-directory` and found no `pyproject.toml`); once fixed, the specs failed because the app's default language is **zh** while assertions are English — specs now pin `secopent.lang=en` via an auto fixture, and the SSE spec was rewritten to the real flow (initial status frame + any post-approval transition) instead of unreachable `queued`/`completed` frames. 11/11 pass locally and in CI.
+
 ## [0.7.2] - 2026-08-22
 
 > Historical note: the `0.7.x` tags below were numbered below the already-released `v1.1.0-stable` (2026-07-31) — a versioning mistake corrected in 1.2.0. The `### v0.7.x` sub-headings originally used here were internal task numbers (v0.7.0–v0.7.9), renamed 2026-10-25 to avoid colliding with release tags.
