@@ -12,10 +12,16 @@ authors = [{ name = "SecOpent" }]
 dependencies = [
     "sqlalchemy>=2.0,<2.1",
     "httpx>=0.27,<1.0",
-    "cryptography>=42.0,<44",
-    "pyyaml>=6.0,<7",
+    # 2026-10 bump: 43.x accumulated 24 pip-audit findings (fixes in
+    # 44.0.1/46.0.5/46.0.6/48.0.1/49.0.0). Ed25519 + serialization APIs
+    # used here are stable across the jump; full suite verified.
+    "cryptography>=49,<51",
+    "pyyaml>=6,<7",
     "jinja2>=3.1,<4",
-    "fastapi>=0.115,<0.116",
+    # 2026-10 bump: starlette 0.46.x had 7 findings (fixes 0.47.2..1.3.1);
+    # reaching starlette 1.x needs fastapi >= ~0.15x. Router/TestClient/SSE
+    # surface used here is unchanged; full suite + Playwright e2e verified.
+    "fastapi>=0.160,<1",
     "pydantic>=2.0,<3",
     "defusedxml>=0.7,<1",
     "structlog>=24,<26",
