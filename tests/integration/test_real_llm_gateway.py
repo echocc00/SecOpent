@@ -4,11 +4,15 @@ Exercise the RemoteModelGateway against the REAL configured model (MiniMax via
 config/llm.yaml). Verify a real call works, SENSITIVE data is redacted BEFORE it
 is sent to the model, and RESTRICTED data is default-denied.
 
-Marked ``integration``; skipped automatically when the LLM key/config is absent
-or the API is unreachable.
+Opt-in only: these make REAL billable network calls, so they run exclusively
+when ``SECOPTENT_REAL_LLM=1`` is set (same opt-in pattern as
+``SECOPTENT_SELF_PENTEST``). A key present in the environment (e.g. set in the
+developer's shell profile) must not silently turn unit runs into live API
+calls; the default suite stays hermetic and green.
 """
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,6 +42,8 @@ class _StubBackend:
 
 @pytest.fixture
 def real_backend() -> RemoteOpenAICompatibleBackend:  # type: ignore[no-untyped-def]
+    if os.environ.get("SECOPTENT_REAL_LLM", "").strip() != "1":
+        pytest.skip("real-LLM tests are opt-in: set SECOPTENT_REAL_LLM=1")
     if not _CONFIG.is_file():
         pytest.skip("config/llm.yaml missing")
     try:

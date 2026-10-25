@@ -64,9 +64,13 @@ def _build_client(
     transport: httpx.BaseTransport | None,
     proxy_url: str | None,
 ) -> httpx.Client:
-    kwargs: dict[str, object] = {"timeout": 30.0}
+    # An explicitly injected transport ALWAYS wins over the ambient proxy:
+    # tests inject MockTransport to stay hermetic, and a stray HTTP_PROXY env
+    # var must never override explicit injection (v11 review finding - it made
+    # "mocked" tests hit the real network through the local proxy).
     if transport is not None:
-        kwargs["transport"] = transport
+        return httpx.Client(transport=transport, timeout=30.0)
+    kwargs: dict[str, object] = {"timeout": 30.0}
     if proxy_url:
         kwargs["proxy"] = proxy_url
     return httpx.Client(**kwargs)  # type: ignore[arg-type]

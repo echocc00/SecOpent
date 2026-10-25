@@ -58,6 +58,15 @@ from .scope_enforcer import EnforcementContext, ScopeEnforcer
 _logger = structlog.get_logger(__name__)
 
 
+class ExecutionStateError(DomainError):
+    """Assessment/plan/scope vanished or was never wired for execution.
+
+    Explicit (not ``assert``) so the guard survives ``python -O``: an
+    execution whose plan or scope snapshot is missing must FAIL loudly,
+    never silently proceed with ``None``.
+    """
+
+
 class _FindingRepository(Protocol):
     """Minimal write-port for persisting findings during execution."""
     def add(self, finding: Finding) -> None: ...
@@ -571,11 +580,20 @@ def execute_assessment(
             return
 
         assessment = assessment_repo.get(assessment_id)
-        assert assessment is not None and assessment.active_plan_id is not None
+        if assessment is None or assessment.active_plan_id is None:
+            raise ExecutionStateError(
+                f"assessment missing or has no active plan: {assessment_id}"
+            )
         plan = assessment_repo.get_plan(assessment.active_plan_id)
-        assert plan is not None
+        if plan is None:
+            raise ExecutionStateError(
+                f"plan not found: {assessment.active_plan_id}"
+            )
         scope = scope_repo.get_snapshot(assessment.scope_snapshot_id)
-        assert scope is not None
+        if scope is None:
+            raise ExecutionStateError(
+                f"scope snapshot not found: {assessment.scope_snapshot_id}"
+            )
 
         permit = _issue_permit(
             permit_signer, permit_registry,
@@ -727,11 +745,18 @@ def resume_assessment(
     """
     service = AssessmentService(assessment_repo)
     assessment = assessment_repo.get(assessment_id)
-    assert assessment is not None and assessment.active_plan_id is not None
+    if assessment is None or assessment.active_plan_id is None:
+        raise ExecutionStateError(
+            f"assessment missing or has no active plan: {assessment_id}"
+        )
     plan = assessment_repo.get_plan(assessment.active_plan_id)
-    assert plan is not None
+    if plan is None:
+        raise ExecutionStateError(f"plan not found: {assessment.active_plan_id}")
     scope = scope_repo.get_snapshot(assessment.scope_snapshot_id)
-    assert scope is not None
+    if scope is None:
+        raise ExecutionStateError(
+            f"scope snapshot not found: {assessment.scope_snapshot_id}"
+        )
 
     step_runner = step_runner_factory(scope)
     jobs = JobService(jobs_store) if jobs_store is not None else JobService()

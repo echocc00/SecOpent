@@ -17,6 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from _docker_gates import skip_if_digest_drifted, skip_if_target_down
 
 from secopent.infrastructure.adapters.image_catalog import IMAGE_CATALOG
 from secopent.infrastructure.adapters.subprocess_executor import (
@@ -54,6 +55,8 @@ def _mounts(tmp_path: Path) -> dict[str, str]:
 
 @pytest.mark.integration
 def test_runs_nuclei_against_httpbin(docker_mount_dir: Path) -> None:
+    skip_if_digest_drifted("nuclei")
+    skip_if_target_down("127.0.0.1", 8080)  # CI service container / provision script
     templates = docker_mount_dir / "templates"
     templates.mkdir(exist_ok=True)
     (templates / "httpbin-status.yaml").write_text(_NUCLEI_TEMPLATE, encoding="utf-8")
@@ -84,6 +87,7 @@ def test_runs_nuclei_against_httpbin(docker_mount_dir: Path) -> None:
 
 @pytest.mark.integration
 def test_enforces_security_flags_nonroot(docker_mount_dir: Path) -> None:
+    skip_if_digest_drifted("alpine")
     alpine = IMAGE_CATALOG["alpine"]
     executor = SubprocessContainerExecutor()
     result = executor.run(
@@ -119,6 +123,7 @@ def test_scoped_egress_blocks_metadata(docker_mount_dir: Path) -> None:
     fails and the container reports BLOCKED. M5 strengthens this to explicit
     nftables/netns blocking regardless of routing.
     """
+    skip_if_digest_drifted("alpine")
     alpine = IMAGE_CATALOG["alpine"]
     executor = SubprocessContainerExecutor(default_timeout=60)
     result = executor.run(

@@ -9,9 +9,28 @@ stamps it and tags the matching `v<version>`.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-25
+
+### Version line convergence (v11 review)
+- **build**: version single source bumped `0.7.2` → `1.2.0`. The `v1.1.0-stable` tag (2026-07-31) was followed by an August `0.7.0`–`0.7.2` tag line that restarted numbering *below* the already-released 1.x — a semver violation that made the README status ("v1.1-stable track") and the HEAD tag contradictory. **The 0.7.x tags are superseded**: numbering continues on the v1.x line; the reasoning-loop work shipped in those tags is part of 1.2.0.
+- **docs(changelog)**: the `### v0.7.x` sub-headings inside `[0.7.1]` were an *internal task numbering* (v0.7.0–v0.7.9) that collided with release tags (release `[0.7.1]` containing "v0.7.9" read as a versioning error). Sub-headings renamed to task names; `docs/research/reasoning-loop-ab-result.md` keeps the historical internal numbers as written at the time.
+
+### Test-suite reproducibility on developer hosts (v11 review)
+- **fix(intel)**: `_build_client` — an explicitly injected httpx transport now ALWAYS wins over the ambient `HTTP_PROXY`/`HTTPS_PROXY` env vars. Previously a developer shell with a proxy set made the "mocked" NVD tests (`test_nvd_proxy_503_returns_empty_no_crash`, `test_source_sync_sync_one_returns_entities`) hit the **real** NVD API through the local proxy and fail with 2000 live CVEs. Explicit injection beating environment is the DI contract; CI (no proxy) was green, dev hosts were red.
+- **test(llm)**: real-LLM tests (`test_real_llm_gateway.py`, `test_minimax_smoke_call`) are now opt-in via `SECOPTENT_REAL_LLM=1` (same pattern as `SECOPTENT_SELF_PENTEST`). A `MINIMAX_API_KEY` set in the shell profile no longer silently turns unit runs into live billable calls. Note: the configured MiniMax endpoint (`api.minimax.chat/v1`, model `abab6.5s-chat`) currently returns 404 — the endpoint/model combo is retired upstream; update `config/llm.yaml` before re-enabling.
+- **test(docker)**: integration tests that run catalog-pinned images now skip (with an actionable `docker pull <name>@<digest>` reason) when the local image cache drifted from the pin, instead of failing on the supply-chain guard doing its job; the httpbin-target test also skips when no target range serves :8080. The guard tests themselves (digest-mismatch rejection) still run unconditionally.
+
+### Disclosure & hardening
+- **docs(readme)**: new "Platform differences & security enforcement" section — non-Linux hosts lose kernel-level nftables egress (app-layer pre-check only, DNS checked at check-time not connect-time), seccomp is Docker's *default* profile (no custom whitelist shipped), pinned-digest image requirements, real-LLM test opt-in.
+- **fix(execution)**: control-flow `assert`s in `execute_assessment`/`resume_assessment` replaced with explicit exceptions — `python -O` no longer silently disables the missing-assessment/plan/scope guards.
+- **chore(test)**: `peer_real` marker registered in `pyproject.toml` (was an unknown-mark warning).
+- **chore(repo)**: plaintext credential files (`minimax-key.txt`, `云主机.txt`) moved out of the repository tree to `F:\claudepc\secrets-local\` — both were already gitignored and never committed, but must not live in the project directory; rotate both credentials. Regenerable artifacts (`.coverage`, `tmp_smoke.db`, stray broken path dir) removed.
+
 ## [0.7.2] - 2026-08-22
 
-### v0.7.2 (hotfix: loop write handlers MUST commit — issue v10)
+> Historical note: the `0.7.x` tags below were numbered below the already-released `v1.1.0-stable` (2026-07-31) — a versioning mistake corrected in 1.2.0. The `### v0.7.x` sub-headings originally used here were internal task numbers (v0.7.0–v0.7.9), renamed 2026-10-25 to avoid colliding with release tags.
+
+### hotfix: loop write handlers MUST commit — issue v10
 - **fix(reasoning-loop)**: 6 write entry points (MCP `loop_create`/`stop`/`pause`/`resume`, REST `create`/`stop`/`pause`/`resume`, `PauseControlService.pause`/`resume`) now wrap in `unit_of_work()` + pass `session=` to `audit_chain.record` — state save + signed audit record commit atomically. Pre-fix: `SqlAlchemyLoopStateRepository.save` only `merge`-ed (no commit), so loop rows vanished on session close; `loop_status` read from the same session's identity map (tests passed), but a fresh session / daemon restart saw NOT_FOUND (silent state loss + broken audit invariant).
 - **fix(reasoning-loop)**: `ReasoningLoopOrchestrator` (the loop stepper, 7 save+audit sites in `create_loop`/`run_step`/`emergency_stop`/`resume_loop`/`_record_backend_unavailable`/`_record_gate_rejected`/`_force_pause_budget_termination`) threaded with `session: Session | None = None`; caller owns the UoW transaction. Same v10 bug class — had no production caller yet (potential, not active data loss).
 - **fix(mcp)**: `handler_mission_create` removed redundant manual `session.commit()` inside a `unit_of_work()` block that defeated the UoW's rollback safety net (a raise after the manual commit would roll back an already-committed transaction, masking the error).
@@ -21,45 +40,45 @@ stamps it and tags the matching `v<version>`.
 
 ## [0.7.1] - 2026-08-21
 
-### v0.7.9 (ReasoningLoop A/B acceptance — RELEASE, candidate caveat)
+### ReasoningLoop A/B acceptance — RELEASE, candidate caveat
 - **test(e2e)**: A/B target provisioning (juice/crAPI/vulhub) + mock flow + real-LLM A/B harnesses
 - **docs**: A/B result record + decision signoff; NAS real-run evidence (mock 2/2 Oracle confirms; real MiniMax run: 5/5 REQUEST_ORACLE, 5 Oracle confirms via live DIFF_SEMANTIC HTTP, FP=0)
 - **fix(reasoning-loop)**: tolerate markdown-fenced JSON from CN models (`_parse_action` strips ``` fences before strict parse; SchemaGate unaffected)
 - **feat(reasoning-loop)**: candidate-driven oracle prompt — [TOOLS] section + schema-conformant exemplar + unconfirmed-candidates-must-verify directive (few-shot); A/B harnesses wire `candidate_provider` into `DefaultLoopContextBuilder`
 - **known caveat**: A/B confirms all repeated candidate `cand-idor-1` (semantic delta = 1 unique candidate); crAPI/vulhub targets not provisioned on the A/B NAS host
 
-### v0.7.8 (DB persistence + MCP/CLI/Web entry points)
+### DB persistence + MCP/CLI/Web entry points
 - **feat(persistence)**: `core_reasoning_loops` + `core_loop_steps` migration; SQLAlchemy loop state/step repos; SQL loop repos wired into composition
 - **feat(mcp)**: loop status/history/create/stop tools
 - **feat(cli)**: `secopent loop create/status/stop/history`
 - **feat(api)**: reasoning loop REST endpoints + openapi regen
 - **feat(web)**: reasoning loop view + navigation
 
-### v0.7.7 (human-only pause/resume)
+### human-only pause/resume
 - **feat(reasoning-loop)**: pause/resume domain fields + max-pauses=3; loop approval port (human-only resume); PauseControlService; wall-clock-free pause period
 - **feat**: human-only pause/resume HTTP + MCP gate; closed-loop with wall-clock-free + max-3 semantics
 
-### v0.7.6 (DIFF_SEMANTIC Oracle)
+### DIFF_SEMANTIC Oracle
 - **feat(reasoning-loop)**: `VerificationMethod.diff_semantic` + `DiffSemanticPayload`; deterministic diff assertions; DiffSemanticRunner http executor; DiffSemanticVerifier (OracleVerifier impl); registry + verifier-factory dispatch
 - **feat(reasoning-loop)**: DIFF_SEMANTIC oracle closed-loop
 
-### v0.7.5 (AttackChain hypothesis closed-loop)
+### AttackChain hypothesis closed-loop
 - **feat(reasoning-loop)**: attack chain hypothesis sync; verification-progress tracking; re-verification closed-loop
 
-### v0.7.4 (Handbooks injection)
+### Handbooks injection
 - **feat(reasoning-loop)**: handbook selector (keyword-ranked, token-bounded); handbook injection into loop context
 
-### v0.7.3 (summarization + BudgetGate + degradation)
+### summarization + BudgetGate + degradation
 - **feat(reasoning-loop)**: observation summarizer (3-tier); budget gate with step+total limits; degradation policy with audit; loop step to Job builder without subclass
 
-### v0.7.2 (real PermitGate + JobService)
+### real PermitGate + JobService
 - **feat(reasoning-loop)**: real permit gate with signed nonce permits; loop step to Job builder; job scheduler with permit pre-check
 
-### v0.7.1 (real LLM proposer + SchemaGate)
+### real LLM proposer + SchemaGate
 - **feat(reasoning-loop)**: loop LLM backend port + outcome types; loop context serializer (privacy projection); strict schema gate with deny codes; real LLM proposer
 - **fix(reasoning-loop)**: sanitize `full_text_ref` in context serializer
 
-### v0.7.0 (ReasoningLoop skeleton)
+### ReasoningLoop skeleton
 - **feat(reasoning-loop)**: domain models (LoopId/Phase/State/Budget/Step/Plan + ProposeAction Pydantic)
 - **feat(reasoning-loop)**: deterministic termination evaluator (no LLM decides loop end)
 - **feat(reasoning-loop)**: three-gate composition (Schema/Policy/Permit) + MockLoopActionProposer

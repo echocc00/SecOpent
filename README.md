@@ -26,7 +26,7 @@ Catalog-driven, agent-native **authorized** pentest workbench. FastAPI backend +
 
 ---
 
-> Status: **v1.1.1-stable** track (P3). Design: `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
+> Status: **v1.2.0** — continues the v1.x line from `v1.1.0-stable` (the interim `0.7.x` tags of Aug 2026 restarted numbering by mistake and are superseded; see `CHANGELOG.md` [1.2.0]). Design: `sepcs/2026-07-25-catalog-driven-agent-workbench-design.md`.
 
 ## Architecture
 
@@ -61,6 +61,23 @@ bash scripts/build_web.sh
 A default TestCatalog (OWASP WSTG + CIS baseline) is seeded at startup, so plan generation works out of the box.
 
 > **Windows**: replace `python3` with `py -3.12` in the commands above.
+
+## Platform differences & security enforcement (read before relying on scope enforcement)
+
+Honest matrix of what is actually enforced where — the marketing-level claims
+("scoped egress", "seccomp sandbox") resolve to different mechanisms per platform:
+
+| Capability | Linux (production) | Windows / macOS (dev) |
+|---|---|---|
+| Egress enforcement | App-layer `EgressGuard` **+ kernel nftables** (`NftScopeEnforcer`, default-DROP) | App-layer pre-check only. nft apply fails → audited as `egress.hardening_unavailable`, run continues |
+| DNS rebinding defense | Resolved-IP recheck at check time **and** nft IP-level pinning | Check-time only (TOCTOU): the target's DNS is validated before dispatch; the tool container's own later connections are not re-validated per connection |
+| Container sandbox | Docker **default** seccomp profile (~60 dangerous syscalls blocked) + read-only rootfs + non-root + cap-drop ALL + no docker socket. No custom seccomp whitelist is shipped (M2 design downgraded honestly — see `python_sandbox.py` docstring) | Same container flags; seccomp is whatever Docker Desktop's default profile provides |
+
+Practical consequences:
+
+- **Authorized production scans should run the execution tier on Linux.** On a non-Linux host, a compromised or malicious tool container is constrained by Docker's bridge networking, not by kernel policy.
+- Integration tests that run tool containers require the images **at the exact digests pinned in `image_catalog.py`**. A drifted/pruned local cache makes them *skip* with the `docker pull <name>@<digest>` command to restore; the digest-mismatch rejection test always runs.
+- Real-LLM tests are **opt-in** (`SECOPTENT_REAL_LLM=1`); a `MINIMAX_API_KEY` in your shell profile alone never triggers live calls from the default suite.
 
 ## Guides (start here)
 

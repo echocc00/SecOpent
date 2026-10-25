@@ -88,4 +88,5 @@ markers = [
     "browser: requires Playwright browser",
     "perf: performance regression benchmarks (opt-in)",
     "realism: production-realism tests (file DB + NullPool + concurrent/long); gated to release CI",
+    "peer_real: requires the real peer-agent target (e.g. Strix on the NAS); subset of e2e_real",
 ]

@@ -1,6 +1,9 @@
 """Quick LLM connectivity test (Phase A Task A1, Step 5 verification).
 
-Reads MiniMax key from minimax-key.txt, sets env, calls RemoteOpenAICompatibleBackend.
+Key resolution order: ``MINIMAX_API_KEY`` env var, then the key file kept
+OUTSIDE the repository at ``F:/claudepc/secrets-local/minimax-key.txt``
+(moved out of the repo tree in the 2026-10-25 security review; a credential
+file must never live inside the project directory).
 DO NOT commit this script's output (contains no key, but verify before sharing).
 """
 from __future__ import annotations
@@ -10,14 +13,21 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+KEY_FILE = Path("F:/claudepc/secrets-local/minimax-key.txt")
 
 
 def load_key() -> str:
-    key_file = REPO / "minimax-key.txt"
-    if not key_file.is_file():
-        print("ERROR: minimax-key.txt not found", file=sys.stderr)
-        return ""
-    return key_file.read_text(encoding="utf-8").strip()
+    env_key = os.environ.get("MINIMAX_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    if KEY_FILE.is_file():
+        return KEY_FILE.read_text(encoding="utf-8").strip()
+    print(
+        "ERROR: no key - set MINIMAX_API_KEY or place the key file at "
+        f"{KEY_FILE}",
+        file=sys.stderr,
+    )
+    return ""
 
 
 def main() -> int:
@@ -27,14 +37,9 @@ def main() -> int:
     os.environ["MINIMAX_API_KEY"] = key
     print(f"key loaded: {key[:8]}...{key[-4:]} (len={len(key)})")
 
-    from secopent.infrastructure.llm.remote_openai_backend import RemoteOpenAICompatibleBackend
+    from secopent.infrastructure.llm.config import load_backend_from_config
 
-    backend = RemoteOpenAICompatibleBackend(
-        endpoint="https://api.minimax.chat/v1",
-        api_key_env="MINIMAX_API_KEY",
-        model="abab6.5s-chat",
-        timeout=30.0,
-    )
+    backend = load_backend_from_config(REPO / "config" / "llm.yaml")
 
     print("\n=== is_available ===")
     print(f"available: {backend.is_available()}")

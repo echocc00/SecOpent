@@ -7,8 +7,9 @@ These verify, through the REST API with a mock LLM backend, that:
    (finding_count) are untouched.
 
 A mock backend records every prompt so we also prove the LLM was actually
-called. A MiniMax smoke test (skipped without MINIMAX_API_KEY) exercises the
-real remote path once.
+called. A MiniMax smoke test exercises the real remote path once - opt-in
+only (``SECOPTENT_REAL_LLM=1`` + ``MINIMAX_API_KEY``), so a key set in the
+developer's shell profile never silently turns unit runs into live API calls.
 """
 from __future__ import annotations
 
@@ -140,7 +141,9 @@ def _seed_assessment(client: TestClient) -> dict:  # type: ignore[no-untyped-def
 
 
 @pytest.mark.skipif(
-    not os.environ.get("MINIMAX_API_KEY"), reason="MINIMAX_API_KEY not set"
+    os.environ.get("SECOPTENT_REAL_LLM", "").strip() != "1"
+    or not os.environ.get("MINIMAX_API_KEY"),
+    reason="opt-in real call: set SECOPTENT_REAL_LLM=1 and MINIMAX_API_KEY",
 )
 def test_minimax_smoke_call(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """One real MiniMax call through the governed gateway (smoke only)."""
